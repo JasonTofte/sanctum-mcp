@@ -1,0 +1,59 @@
+# --- Public-repo safety: never commit framework IP, secrets, or evidence ---
+
+# Claude Code project config — contains local dev-tooling that MUST NOT ship
+# to a public repo. settings.local.json, skills, hooks, agents all stay local.
+.claude/
+
+# Evidence / case data — never ships with source
+cases/
+evidence/
+/*.raw
+/*.e01
+/*.dd
+/*.img
+/*.mem
+/*.vmem
+/*.vmsn
+ledger/
+audit/
+*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+logs/
+
+# Hackathon-specific: draft submission materials that are iterated locally
+demo_takes/
+.scratch/
