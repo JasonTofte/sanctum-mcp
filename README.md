@@ -142,6 +142,25 @@ pytest
 
 Full reproduction instructions — including the SIFT VM setup — are in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
+### Worktree-isolated Claude Code sessions
+
+`scripts/claude-session.sh` spawns Claude Code inside a disposable git
+worktree so each session lives on its own branch.
+
+```bash
+# one-time: add a global shortcut
+ln -s "$PWD/scripts/claude-session.sh" ~/.local/bin/claude-sanctum
+
+# from then on, from anywhere:
+claude-sanctum                    # auto-named disposable session
+claude-sanctum feat/triangulation # named, preserved on exit
+claude-sanctum --help
+```
+
+Disposable sessions (auto-named) are removed on exit. Named sessions are
+preserved so you can resume them later. Clean-room shell — no dependencies
+beyond `git`, `bash`, and the `claude` CLI.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).

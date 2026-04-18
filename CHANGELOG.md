@@ -4,6 +4,14 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/claude-session.sh`: clean-room bash helper that spawns Claude Code
+  inside a disposable git worktree on a fresh branch. Disposable by default;
+  explicit branch names are preserved on exit. No framework dependencies —
+  safe for a public repo. Install as `claude-sanctum` via a symlink into
+  `~/.local/bin` (see README "Local development" section).
+
 ### Changed
 
 - `scripts/bootstrap_vm.sh`: pinned `teamdfir/sift-saltstack` to commit
