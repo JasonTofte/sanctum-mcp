@@ -12,6 +12,13 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   safe for a public repo. Install as `claude-sanctum` via a symlink into
   `~/.local/bin` (see README "Local development" section).
 
+### Fixed
+
+- `docs/REPRODUCTION.md`: replaced `REPLACE_WITH_REPO` placeholder in the Step 1
+  clone command with the real `JasonTofte/sanctum-mcp` URL; added a note on
+  private→public flip timing and `gh auth login` for contributors cloning
+  before submission.
+
 ### Changed
 
 - `scripts/bootstrap_vm.sh`: pinned `teamdfir/sift-saltstack` to commit
