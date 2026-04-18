@@ -16,7 +16,15 @@ set -euo pipefail
 # --- PINNED VERSIONS ------------------------------------------------------
 # Update this block whenever you intentionally upgrade. Commit SHAs resolve
 # what "now" meant for the CI run that validated the build.
-SIFT_SALTSTACK_SHA="REPLACE_WITH_COMMIT_SHA"   # from github.com/teamdfir/sift-saltstack
+#
+# To update, rerun:
+#   gh api repos/teamdfir/sift-saltstack/commits/master \
+#     --jq '{sha: .sha, date: .commit.committer.date, message: .commit.message | split("\n")[0]}'
+# then paste the new sha + date below, and note the last commit message so
+# the pin carries provenance.
+SIFT_SALTSTACK_SHA="96b7d9898bc55264679b9ea50949ddc919f76f59"
+SIFT_SALTSTACK_PINNED_AT="2026-04-14T03:53:03Z"   # commit date of pinned SHA
+SIFT_SALTSTACK_PIN_NOTE="Merge pull request #219 from digitalsleuth/vol3"
 CFREDS_HACKING_CASE_URL="https://cfreds-archive.nist.gov/FileSystems/hacking-case.html"
 # --------------------------------------------------------------------------
 
