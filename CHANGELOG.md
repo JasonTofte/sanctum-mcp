@@ -4,6 +4,14 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/bootstrap_vm.sh`: pinned `teamdfir/sift-saltstack` to commit
+  `96b7d989` (2026-04-14, *"Merge pull request #219 from digitalsleuth/vol3"*)
+  so judge reruns match the commit validated during development. The upstream
+  repo ships a stale `VERSION` file (`v2020.01.01-rc1`) despite active commits,
+  so drift is otherwise silent.
+
 ## [0.1.0] — 2026-04-17
 
 ### Added
