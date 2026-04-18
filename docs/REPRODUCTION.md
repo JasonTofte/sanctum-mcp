@@ -20,10 +20,15 @@ Sanctum end-to-end against a real CFReDS case on a clean machine.
 2. Inside the VM:
 
    ```bash
-   git clone https://github.com/REPLACE_WITH_REPO/find-evil.git
+   git clone https://github.com/JasonTofte/sanctum-mcp.git find-evil
    cd find-evil
    bash scripts/bootstrap_vm.sh
    ```
+
+   > The repo is private during development and flips to public ahead of the
+   > 2026-06-15 submission deadline. Judges reproducing after that date will
+   > clone anonymously; contributors before that date need `gh auth login` or
+   > an HTTPS token with repo-scope access.
 
    `bootstrap_vm.sh` pins `teamdfir/sift-saltstack` to a specific commit SHA so
    your build matches the one validated in CI. Expected runtime: 30–45 minutes
