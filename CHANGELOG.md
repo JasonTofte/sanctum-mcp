@@ -12,6 +12,14 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   safe for a public repo. Install as `claude-sanctum` via a symlink into
   `~/.local/bin` (see README "Local development" section).
 
+- `docs/DEV_PLATFORM.md`: maintainer-facing developer-platform guide. Documents
+  the physical x86_64 Ubuntu 22.04 native setup used to build Sanctum,
+  hardware equivalence class and don't-buy list, bring-up sequence, how this
+  path differs from the judge-facing `docs/REPRODUCTION.md`, local demo-
+  recording setup for the 5-min FIND EVIL! screencast, and the EC2 +
+  SANS SIFT AMI cloud fallback. Feeds the hackathon's Try-It-Out Instructions
+  deliverable.
+
 ### Fixed
 
 - `docs/REPRODUCTION.md`: replaced `REPLACE_WITH_REPO` placeholder in the Step 1
