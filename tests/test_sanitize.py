@@ -6,7 +6,15 @@ Every known injection pattern has a regression test — additions to
 
 from __future__ import annotations
 
-from sanctum.sanitize import EVIDENCE_CLOSE, EVIDENCE_OPEN, sanitize, wrap_evidence
+import pytest
+
+from sanctum.sanitize import (
+    EVIDENCE_CLOSE,
+    EVIDENCE_OPEN,
+    InputTooLargeError,
+    sanitize,
+    wrap_evidence,
+)
 
 
 def test_sygnia_red_team_reality_check_is_stripped() -> None:
@@ -73,3 +81,20 @@ def test_wrap_evidence_uses_canonical_delimiters() -> None:
     wrapped = wrap_evidence("content")
     assert wrapped.startswith(EVIDENCE_OPEN)
     assert wrapped.endswith(EVIDENCE_CLOSE)
+
+
+def test_input_over_max_input_bytes_is_rejected() -> None:
+    """DoS defence: raw input above ``max_input_bytes`` must raise before any
+    regex scan runs. Pins the L_max cap from
+    docs/THREAT_MODEL_SANITIZATION.md §7.
+    """
+    too_big = "a" * (101)
+    with pytest.raises(InputTooLargeError):
+        sanitize(too_big, max_input_bytes=100)
+
+
+def test_input_exactly_at_max_input_bytes_is_accepted() -> None:
+    """Boundary: input == max_input_bytes must pass (only strictly greater rejects)."""
+    at_cap = "a" * 100
+    r = sanitize(at_cap, max_input_bytes=100, max_bytes=200)
+    assert r.payload == at_cap

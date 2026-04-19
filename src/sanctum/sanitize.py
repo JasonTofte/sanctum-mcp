@@ -42,6 +42,17 @@ _INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
 # raw tool dumps (e.g., a full `volatility3 pslist` on a 16 GB memory image).
 MAX_PAYLOAD_BYTES = 64 * 1024  # 64 KiB
 
+# Cap on raw input accepted by :func:`sanitize`. Without this, a caller can
+# force unbounded regex scanning by submitting an arbitrarily large blob —
+# the DoS surface flagged in docs/THREAT_MODEL_SANITIZATION.md §7. 16 MiB
+# clears the largest forensic-tool outputs we expect (volatility3 pslist on
+# a 16 GB memory image is ~5 MB) while rejecting pathological inputs.
+MAX_INPUT_BYTES = 16 * 1024 * 1024  # 16 MiB
+
+
+class InputTooLargeError(ValueError):
+    """Raised by :func:`sanitize` when the raw input exceeds ``max_input_bytes``."""
+
 
 @dataclass(frozen=True)
 class SanitizationResult:
@@ -58,10 +69,19 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def sanitize(raw: str, *, max_bytes: int = MAX_PAYLOAD_BYTES) -> SanitizationResult:
+def sanitize(
+    raw: str,
+    *,
+    max_bytes: int = MAX_PAYLOAD_BYTES,
+    max_input_bytes: int = MAX_INPUT_BYTES,
+) -> SanitizationResult:
     """Strip known injection patterns, truncate to ``max_bytes``, return hashed bookends.
 
     Guarantees:
+      - Raw input above ``max_input_bytes`` (default 16 MiB) is **rejected**
+        with :class:`InputTooLargeError` before any regex work runs. This
+        closes the DoS surface that strip-then-truncate would otherwise leave
+        open — see docs/THREAT_MODEL_SANITIZATION.md §7.
       - The returned ``payload`` is never longer than ``max_bytes`` (UTF-8 bytes).
       - Every pattern match in :data:`_INJECTION_PATTERNS` is replaced with a
         visible ``[REDACTED:injection-candidate]`` marker so reviewers can see
@@ -71,6 +91,12 @@ def sanitize(raw: str, *, max_bytes: int = MAX_PAYLOAD_BYTES) -> SanitizationRes
         audit ledger, so any drift between raw tool output and LLM-visible
         content is detectable after the fact.
     """
+
+    raw_bytes_len = len(raw.encode("utf-8"))
+    if raw_bytes_len > max_input_bytes:
+        raise InputTooLargeError(
+            f"input {raw_bytes_len} bytes exceeds max_input_bytes={max_input_bytes}"
+        )
 
     pre_hash = _sha256(raw)
     cleaned = raw
