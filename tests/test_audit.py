@@ -70,6 +70,55 @@ def test_each_audit_id_is_unique(ledger: Path) -> None:
     assert len(ids) == 50
 
 
+def test_payload_ref_is_recorded_and_covered_by_chain(ledger: Path) -> None:
+    """Ledger entries persist ``payload_ref`` and a tamper breaks the chain."""
+    ref = {
+        "path": "/var/lib/sanctum/output/case-1/some-uuid/get_amcache.json",
+        "sha256": "d" * 64,
+        "bytes": 512,
+        "format": "application/json",
+    }
+    audit.append_entry(
+        case_id="case-1",
+        tool="get_amcache",
+        args={"case_id": "case-1"},
+        input_ref={"path": "/cases/x/Amcache.hve", "sha256": "a" * 64},
+        pre_sanitization_sha256="b" * 64,
+        post_sanitization_sha256="c" * 64,
+        rowcount=10,
+        payload_ref=ref,
+    )
+
+    raw = ledger.read_text(encoding="utf-8").splitlines()
+    entry = json.loads(raw[0])
+    assert entry["payload_ref"] == ref
+
+    # Mutate payload_ref.sha256 → chain must reject.
+    entry["payload_ref"]["sha256"] = "0" * 64
+    raw[0] = json.dumps(entry, ensure_ascii=False, sort_keys=True)
+    ledger.write_text("\n".join(raw) + "\n", encoding="utf-8")
+
+    ok, _, bad = audit.verify_chain(ledger)
+    assert ok is False
+    assert bad == entry["audit_id"]
+
+
+def test_caller_supplied_audit_id_is_honoured(ledger: Path) -> None:
+    """A pre-generated ``audit_id`` allows the ledger and an on-disk artifact
+    (e.g. a payload file) to share the same key."""
+    supplied = "550e8400-e29b-41d4-a716-446655440000"
+    e = audit.append_entry(
+        case_id="c",
+        tool="t",
+        args={"a": 1},
+        input_ref=None,
+        pre_sanitization_sha256="x" * 64,
+        post_sanitization_sha256="y" * 64,
+        audit_id=supplied,
+    )
+    assert e.audit_id == supplied
+
+
 def test_args_hash_is_canonical(ledger: Path) -> None:
     e1 = audit.append_entry(
         case_id="c",

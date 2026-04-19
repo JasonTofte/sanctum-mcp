@@ -6,6 +6,21 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- `src/sanctum/payload.py`: write-once on-disk payload offload for tool returns.
+  Claude Code's MCP stdio transport silently drops JSON-RPC responses larger than
+  ~800–1100 bytes (anthropics/claude-code#36319); an inline evidence dump on a
+  realistic Amcache hive would exceed that cliff, leaving the ledger with a
+  successful `audit_id` for output the LLM never saw. Every typed tool now writes
+  its full sanitized payload under `$SANCTUM_OUTPUT_ROOT/<case_id>/<audit_id>/<tool>.json`
+  and returns only a short summary carrying a `payload_ref`. The caller reads the
+  referenced file via the generic `Read` tool.
+- `LedgerEntry.payload_ref` field: every audit entry now carries the on-disk
+  reference (path + sha256 + bytes + format), tamper-evident via the existing
+  chain. Older ledgers without the field verify cleanly because `verify_chain`
+  hashes whichever keys are present in each entry.
+- `append_entry(audit_id=...)` optional kwarg: lets callers pre-generate the UUID
+  so the ledger key and an on-disk artifact path are guaranteed to match.
+
 - `scripts/claude-session.sh`: clean-room bash helper that spawns Claude Code
   inside a disposable git worktree on a fresh branch. Disposable by default;
   explicit branch names are preserved on exit. No framework dependencies —
@@ -20,6 +35,13 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   before submission.
 
 ### Changed
+
+- `get_amcache` return shape: was an inline `<evidence-untrusted>`-wrapped JSON
+  dump of parsed Amcache rows; now returns a short summary (JSON wrapped in the
+  same delimiter) with `audit_id`, `rowcount`, `input_ref`, `payload_ref`,
+  pre/post-sanitization hashes. The full payload lives on disk. Breaking change
+  for anything parsing the previous return shape; only the pre-merge smoke
+  tests did.
 
 - `scripts/bootstrap_vm.sh`: pinned `teamdfir/sift-saltstack` to commit
   `96b7d989` (2026-04-14, *"Merge pull request #219 from digitalsleuth/vol3"*)

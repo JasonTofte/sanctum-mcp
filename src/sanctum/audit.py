@@ -18,9 +18,16 @@ Canonical format (one line of JSONL, ``ensure_ascii=False``, ``sort_keys=True``)
       "pre_sanitization_sha256": "...",
       "post_sanitization_sha256": "...",
       "rowcount": 1247,
+      "payload_ref": {"path": "/var/lib/sanctum/output/.../get_amcache.json",
+                      "sha256": "...", "bytes": 245678,
+                      "format": "application/json"},
       "prev_hash": "<sha256 of previous line>",
       "line_hash": "<sha256 of this line excluding the line_hash field>"
     }
+
+Ledgers written before the ``payload_ref`` field landed are backward-compatible:
+:func:`verify_chain` recomputes the line hash from whichever keys are present in
+the entry dict, so historical entries verify cleanly without the new field.
 
 References:
 - NIST SP 800-86 §4 — chain of custody.
@@ -55,6 +62,7 @@ class LedgerEntry:
     pre_sanitization_sha256: str
     post_sanitization_sha256: str
     rowcount: int | None
+    payload_ref: dict[str, Any] | None
     prev_hash: str
     line_hash: str
 
@@ -71,6 +79,7 @@ class LedgerEntry:
                     "pre_sanitization_sha256": self.pre_sanitization_sha256,
                     "post_sanitization_sha256": self.post_sanitization_sha256,
                     "rowcount": self.rowcount,
+                    "payload_ref": self.payload_ref,
                     "prev_hash": self.prev_hash,
                     "line_hash": self.line_hash,
                 },
@@ -126,17 +135,25 @@ def append_entry(
     pre_sanitization_sha256: str,
     post_sanitization_sha256: str,
     rowcount: int | None = None,
+    payload_ref: dict[str, Any] | None = None,
+    audit_id: str | None = None,
 ) -> LedgerEntry:
     """Append one entry and return its populated :class:`LedgerEntry`.
 
     Writes atomically via rename to avoid partial-line corruption on crash.
+
+    ``audit_id`` is generated internally when omitted. Callers that need to share
+    the id with an on-disk artifact (e.g. a payload file) MAY pre-generate a UUID4
+    and pass it in so the ledger entry and the artifact key are guaranteed to
+    match.
     """
 
     path = _ledger_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     prev_hash = _last_line_hash(path)
-    audit_id = str(uuid.uuid4())
+    if audit_id is None:
+        audit_id = str(uuid.uuid4())
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     raw: dict[str, Any] = {
@@ -149,6 +166,7 @@ def append_entry(
         "pre_sanitization_sha256": pre_sanitization_sha256,
         "post_sanitization_sha256": post_sanitization_sha256,
         "rowcount": rowcount,
+        "payload_ref": payload_ref,
         "prev_hash": prev_hash,
     }
     raw["line_hash"] = _line_hash_for(raw)
