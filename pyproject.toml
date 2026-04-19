@@ -52,7 +52,10 @@ select = ["E", "F", "W", "I", "B", "UP", "N", "S"]
 ignore = ["S101"]  # allow assert in tests
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S"]
+# Allow assert in tests (S) and let descriptive test-function signatures exceed
+# the 100-char line length (E501) — test names are self-documenting and wrapping
+# them at column limits hurts readability without protecting anything.
+"tests/*" = ["S", "E501"]
 
 [tool.black]
 line-length = 100

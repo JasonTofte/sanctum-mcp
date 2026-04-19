@@ -12,6 +12,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   safe for a public repo. Install as `claude-sanctum` via a symlink into
   `~/.local/bin` (see README "Local development" section).
 
+- `tests/test_bypass.py`: consolidated bypass-attempt test suite (16 tests)
+  mapping 1:1 to `docs/FAILURE_MODES.md` states 1–6 plus five gap classes —
+  symlink escape via case-dir internals; Unicode/bidi/zero-width/newline/
+  shell-metacharacter in `case_id`; truncation-boundary injection; ledger-
+  file-missing design-pin. Directly responsive to FIND EVIL! Constraint
+  Implementation rubric's "tested for bypass" criterion.
+- README "Bypass coverage" section with a scannable matrix mapping attack
+  classes to specific test names; `docs/FAILURE_MODES.md` gains "Tested in"
+  cross-references to the same suite.
+
 - `docs/DEV_PLATFORM.md`: maintainer-facing developer-platform guide. Documents
   the physical x86_64 Ubuntu 22.04 native setup used to build Sanctum,
   hardware equivalence class and don't-buy list, bring-up sequence, how this
@@ -20,7 +30,26 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   SANS SIFT AMI cloud fallback. Feeds the hackathon's Try-It-Out Instructions
   deliverable.
 
+### Changed
+
+- `src/sanctum/server.py` `_resolve_case`: tightened case-ID validation before
+  filesystem resolution. New `_SAFE_CASE_ID` allowlist rejects Unicode control
+  characters (bidi override `\u202e`, zero-width `\u200b`, etc.), shell
+  metacharacters, whitespace, and path separators. Adds an explicit `..`
+  substring check as belt-and-suspenders, and independently resolves the
+  Amcache hive path to catch symlinks *inside* the case directory pointing
+  outside — the case-dir containment check alone did not catch this class.
+- `pyproject.toml`: allow `E501` in `tests/*` — descriptive test-function
+  signatures are self-documenting and wrapping them at 100 chars hurts
+  readability without protecting anything.
+
 ### Fixed
+
+- `tests/test_sanitize.py::test_pre_and_post_hashes_equal_when_clean`:
+  assertion was inverted (`!=` where `==` was intended per the test name and
+  the second assertion in the same test). Pinned the property: when no
+  injection patterns are stripped and no truncation fires,
+  `pre_hash == post_hash` exactly.
 
 - `docs/REPRODUCTION.md`: replaced `REPLACE_WITH_REPO` placeholder in the Step 1
   clone command with the real `JasonTofte/sanctum-mcp` URL; added a note on
