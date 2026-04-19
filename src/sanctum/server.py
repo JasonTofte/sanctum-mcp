@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,13 @@ log = logging.getLogger("sanctum.server")
 
 CASES_ROOT_ENV = "SANCTUM_CASES_ROOT"
 DEFAULT_CASES_ROOT = "/cases"
+
+# Conservative allowlist for ``case_id``. Rejects Unicode control characters
+# (bidi override \u202e, zero-width \u200b, etc.), shell metacharacters,
+# whitespace, and path separators — defense in depth before the resolve-based
+# containment check. Real case IDs in this project look like
+# ``cfreds-hacking-case``; anything outside the allowlist is a bypass attempt.
+_SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 mcp = FastMCP("sanctum")
 
@@ -38,10 +46,26 @@ class CasePaths:
 def _resolve_case(case_id: str) -> CasePaths:
     """Resolve and validate a case directory. Refuses paths outside the cases root.
 
-    A judge-scripted bypass — passing ``../..`` or an absolute path — MUST be
-    blocked at this boundary. The MCP server never opens any file not rooted
-    under :data:`CASES_ROOT_ENV`.
+    Three layers of defense, in order:
+
+    1. ``_SAFE_CASE_ID`` allowlist rejects Unicode control characters, shell
+       metacharacters, whitespace, and anything not ``[A-Za-z0-9._-]``. Catches
+       bidi-override (``\\u202e``) and zero-width attacks before any filesystem
+       operation runs.
+    2. Explicit ``..`` string check — ``..`` is in the allowlist regex (``.``
+       and ``.`` adjacent) but must never appear in a case_id.
+    3. Canonical-path containment: ``case_dir`` resolved via ``.resolve()``
+       must be rooted under ``CASES_ROOT_ENV``. Catches symlinked case
+       directories that point outside the cases root.
+
+    After the case directory is validated, the Amcache hive path is
+    independently resolved and checked — this catches symlinks *inside* the
+    case directory (e.g., ``<case>/registry/Amcache.hve -> /etc/shadow``) that
+    the case-dir check alone would miss.
     """
+
+    if not case_id or not _SAFE_CASE_ID.match(case_id) or ".." in case_id:
+        raise ValueError(f"unsafe case_id: {case_id!r}")
 
     root = Path(os.environ.get(CASES_ROOT_ENV, DEFAULT_CASES_ROOT)).resolve()
     case_dir = (root / case_id).resolve()
@@ -50,7 +74,12 @@ def _resolve_case(case_id: str) -> CasePaths:
     if not case_dir.is_dir():
         raise FileNotFoundError(f"case directory not found: {case_dir}")
 
-    amcache = case_dir / "registry" / "Amcache.hve"
+    amcache = (case_dir / "registry" / "Amcache.hve").resolve()
+    if case_dir not in amcache.parents:
+        raise ValueError(
+            f"Amcache path escapes case directory (symlink?): {amcache}"
+        )
+
     return CasePaths(case_id=case_id, root=case_dir, amcache_hve=amcache)
 
 
@@ -130,7 +159,10 @@ def main() -> None:
         level=os.environ.get("SANCTUM_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    log.info("Sanctum MCP server starting; cases_root=%s", os.environ.get(CASES_ROOT_ENV, DEFAULT_CASES_ROOT))
+    log.info(
+        "Sanctum MCP server starting; cases_root=%s",
+        os.environ.get(CASES_ROOT_ENV, DEFAULT_CASES_ROOT),
+    )
     mcp.run()
 
 

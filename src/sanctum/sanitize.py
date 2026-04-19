@@ -27,11 +27,11 @@ _INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Sygnia 2025-08 pattern (RED TEAM REALITY CHECK).
     re.compile(r"#\s*=+\s*RED\s*TEAM\s*REALITY\s*CHECK\s*=+\s*#?", re.IGNORECASE),
     # Classic "ignore previous / new instructions" frames.
-    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)", re.IGNORECASE),
+    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)", re.IGNORECASE),  # noqa: E501
     re.compile(r"###?\s*(new|updated|corrected)\s+instructions?\s*###?", re.IGNORECASE),
     re.compile(r"system\s*:\s*(you\s+are|override|disregard)", re.IGNORECASE),
     # Role-play frames used in GTG-1002.
-    re.compile(r"(you\s+are\s+now|act\s+as|pretend\s+to\s+be)\s+a\s+(red\s*team|pentest|security)\s*(engineer|researcher|tester)", re.IGNORECASE),
+    re.compile(r"(you\s+are\s+now|act\s+as|pretend\s+to\s+be)\s+a\s+(red\s*team|pentest|security)\s*(engineer|researcher|tester)", re.IGNORECASE),  # noqa: E501
     # Markdown-style authoritative tags injected into unstructured logs.
     re.compile(r"\[\[(SYSTEM|ADMIN|ROOT|OVERRIDE)\]\]", re.IGNORECASE),
     # Prompt-smuggling via zero-width / invisible characters (strip them outright).

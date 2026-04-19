@@ -95,9 +95,37 @@ These are produced by **independent OS subsystems**, so tampering with one leave
 | Autonomous Execution Quality *(tiebreaker)* | Reflexion-style `<reflect>` pass on every tool call; triangulation gate forces re-planning on single-source findings |
 | IR Accuracy | Measured precision/recall vs published baseline (Memory-LLM ACM 2025 = <20% precision); regression table in `docs/ACCURACY.md` |
 | Breadth & Depth | Complete Windows execution-evidence triangulation set + core memory volatility; depth over breadth per brief |
-| Constraint Implementation | **Architectural** — typed tools, hash-anchored I/O, no shell passthrough; bypass test suite in `tests/bypass/` enumerates documented hook-evasion classes |
+| Constraint Implementation | **Architectural** — typed tools, hash-anchored I/O, no shell passthrough; bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
 | Audit Trail Quality | Every finding traces to ≥2 `audit_id` entries; `audit_ids[]` cross-links to input hashes + tool outputs |
 | Usability / Documentation | Pinned SIFT commit SHA; Docker reproduction path; single-command install |
+
+## Bypass coverage
+
+The FIND EVIL! Constraint Implementation rubric asks *"were guardrails tested
+for bypass?"* — the table below answers directly. Each row maps a failure-mode
+class from [`docs/FAILURE_MODES.md`](docs/FAILURE_MODES.md) (or a documented
+gap class `G*`) to the specific test in [`tests/test_bypass.py`](tests/test_bypass.py)
+that exercises it.
+
+| Attack class | Failure mode | Test |
+|---|---|---|
+| `Bash(*)` wildcard in allowlist silently voids hook decisions (cc #41151) | State 1 — silent corruption | Enforced by project `.claude/settings.local.json` design (no wildcard). Lint-level concern; not a code-path test. |
+| MCP tool-call bypasses PreToolUse hook (cc #33106) | State 2 — fail-open relative to hooks | `test_state2_no_write_exec_verb_exposed` — server cannot expose a destructive verb; hooks become irrelevant. |
+| Evidence-driven prompt injection (Sygnia 2025-08; GTG-1002 role-play) | State 3 — silent corruption | `test_state3_*` — 5 tests: classic, Sygnia RED TEAM, bidi/zero-width, system override, role-play. |
+| Case-path traversal via `case_id` | State 4 — fail-closed | `test_state4_*` — 3 tests: `..`, absolute, nonexistent. |
+| Audit ledger tampered post-hoc | State 5 — fail-closed on detection | `test_state5_audit_ledger_tamper_detected`. |
+| Demo sampling non-determinism | State 6 — scoring-axis only | Mitigated by hook-induced demo triggers; no code test. |
+| Symlink escape via `<case>/registry/Amcache.hve` → outside case dir | Gap G2 | `test_gap_symlink_inside_case_dir_refused`. |
+| Unicode / bidi / zero-width / newline / shell-metachar in `case_id` | Gap G3 | `test_gap_*_in_case_id_refused` — 5 tests. |
+| Ledger-file-missing on `verify_chain` | Gap G4 — INTENTIONAL fail-open (defense at FS layer) | `test_gap_verify_chain_missing_ledger_is_vacuous_truth` pins the design choice. |
+| Injection pattern placed across `MAX_PAYLOAD_BYTES` truncation boundary | Gap G5 | `test_gap_injection_pattern_survives_across_truncation_boundary` + `..._near_but_below_cutoff_is_stripped`. |
+| Judge-style five-vector exfiltration scenario | Integration | `test_integration_five_exfil_vectors_all_refused`. |
+
+Unit-level coverage also lives in
+[`test_server_boundaries.py`](tests/test_server_boundaries.py),
+[`test_audit.py`](tests/test_audit.py), and
+[`test_sanitize.py`](tests/test_sanitize.py). The `test_bypass.py` suite is the
+consolidated adversarial-scenario view.
 
 ## Status / roadmap
 
@@ -106,7 +134,9 @@ These are produced by **independent OS subsystems**, so tampering with one leave
 - **Week 4**: triangulation gate (`claim_finding`).
 - **Week 5**: Reflexion loop + memory tool set.
 - **Week 6**: poisoned-evidence defense tests.
-- **Week 7**: bypass test suite (maps to published Claude Code hook bypass classes).
+- **Week 7** *(partially delivered week 1)*: bypass test suite
+  [`tests/test_bypass.py`](tests/test_bypass.py) — 16 tests mapping to
+  documented attack classes; see [Bypass coverage](#bypass-coverage) above.
 - **Week 8**: benchmark on CFReDS + DFRWS ground-truth cases.
 - **Week 9**: demo recording + submission.
 

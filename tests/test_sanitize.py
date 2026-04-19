@@ -6,7 +6,7 @@ Every known injection pattern has a regression test — additions to
 
 from __future__ import annotations
 
-from sanctum.sanitize import sanitize, wrap_evidence, EVIDENCE_OPEN, EVIDENCE_CLOSE
+from sanctum.sanitize import EVIDENCE_CLOSE, EVIDENCE_OPEN, sanitize, wrap_evidence
 
 
 def test_sygnia_red_team_reality_check_is_stripped() -> None:
@@ -62,8 +62,10 @@ def test_pre_and_post_hashes_change_when_pattern_stripped() -> None:
 def test_pre_and_post_hashes_equal_when_clean() -> None:
     raw = "benign log entry with no injection markers"
     r = sanitize(raw)
-    assert r.pre_hash != r.post_hash  # post is wrapped; still equal input != output
-    # The wrap happens outside sanitize; internally payload == input when nothing stripped.
+    # wrap_evidence() runs outside sanitize(); when nothing is stripped and
+    # nothing is truncated, the sanitised payload equals the input byte-for-byte
+    # and the two hashes match exactly. That's the property this test pins.
+    assert r.pre_hash == r.post_hash
     assert r.payload == raw
 
 
