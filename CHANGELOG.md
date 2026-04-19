@@ -6,6 +6,26 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- `docs/THREAT_MODEL_SANITIZATION.md`: formal justification for the
+  `strip → truncate` ordering in `sanctum.sanitize`. Proves correctness
+  via prefix-closure of pattern-freeness; derives the random-placement
+  straddle probability `(k−1)/L` and the adversarial upper bound of 1.
+  Flags the unbounded-`L` DoS surface as the remaining obligation.
+- `docs/THREAT_MODEL_TRIANGULATION.md`: quantitative analysis of the
+  `claim_finding` ≥2-of-5 gate. Uniform Binomial(5,p) and Poisson-
+  binomial tables under realistic per-subsystem compromise priors
+  (ShimCache 0.05 … Sysmon 0.30). Argues for a stratified
+  `CORROBORATED (k=2)` vs `FINAL (k=3)` tier split and shows that
+  adding a 6th subsystem at fixed `k` is a regression, not an
+  improvement.
+- `scripts/validate_threat_model_math.py`: stdlib-only regression
+  checker for every numeric claim in the two threat-model docs; exits
+  non-zero on drift so the docs can't silently become wrong.
+- `scripts/validate_with_sympy.py`: independent exact-rational
+  verification using SymPy. Renders each probability as a reduced
+  fraction so it can be pasted straight into Wolfram Alpha or any
+  CAS for third-party confirmation.
+
 - `scripts/claude-session.sh`: clean-room bash helper that spawns Claude Code
   inside a disposable git worktree on a fresh branch. Disposable by default;
   explicit branch names are preserved on exit. No framework dependencies —

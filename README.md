@@ -29,6 +29,15 @@ Findings cannot be reported from a single artifact source. A "program X was exec
 
 These are produced by **independent OS subsystems**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function forces the agent to behave like a senior analyst: single-source finding = hypothesis; multi-source = evidence.
 
+Quantitative justification for the `≥2` threshold — and the stratified
+`CORROBORATED | FINAL` case — lives in
+[`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md).
+The related strip-then-truncate correctness proof for
+`sanctum.sanitize` lives in
+[`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md).
+Every numeric claim in both docs is regression-tested by
+[`scripts/validate_threat_model_math.py`](scripts/validate_threat_model_math.py).
+
 ## Architecture
 
 ```
