@@ -62,6 +62,15 @@ for the full mapping table.
   materially harder.
 - **Classification**: **silent corruption** without mitigation; **fail-closed**
   with sanitization + triangulation in place.
+- **Formal analysis**:
+  [`docs/THREAT_MODEL_SANITIZATION.md`](THREAT_MODEL_SANITIZATION.md)
+  proves the strip-then-truncate ordering is correct under the
+  adversarial model (straddle-position probability = 1 for any attacker
+  with L > 64 KiB).
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](THREAT_MODEL_TRIANGULATION.md)
+  quantifies forgery probability for the `claim_finding ≥2-of-5`
+  gate and makes the case for a stratified `CORROBORATED | FINAL`
+  tier split.
 
 ## State 4: Case-path traversal via `case_id`
 
