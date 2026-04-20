@@ -6,6 +6,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- `scripts/threat_model_priors.py`: single source of truth for the
+  per-subsystem compromise probabilities feeding
+  `docs/THREAT_MODEL_TRIANGULATION.md`. Self-contained dataclass +
+  helper functions, no third-party deps. Both
+  `validate_threat_model_math.py` and `validate_with_sympy.py` now
+  import from here, so a change to a prior cannot drift between code
+  and docs without the validators failing. Pinned by
+  `tests/test_threat_model_priors.py` (canonical vector, hardest-first
+  ordering, mean, and per-row rationale invariants).
+
 - `sanctum.sanitize.MAX_INPUT_BYTES` (16 MiB) + `InputTooLargeError`:
   closes the unbounded-`L` DoS surface flagged in
   `docs/THREAT_MODEL_SANITIZATION.md` §7. Inputs above the cap raise

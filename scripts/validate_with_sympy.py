@@ -20,6 +20,19 @@ except ImportError:
     print("To enable: pip install sympy")
     sys.exit(0)
 
+from threat_model_priors import SUBSYSTEM_PRIORS
+
+
+def _rational_from_p(p: float) -> Rational:
+    """Convert a doc-stated decimal prior into an exact rational.
+
+    The priors module uses 2-decimal-place floats (0.05, 0.10, ...).
+    Rational(p) on an IEEE-754 float would pick up the binary
+    representation noise (e.g. 0.10 -> 3602879701896397/36028797018963968).
+    Rounding to hundredths gives the intended exact rational.
+    """
+    return Rational(round(p * 100), 100)
+
 
 def bin_ge_exact(n: int, p: Rational, k: int) -> Rational:
     total = Rational(0)
@@ -51,9 +64,9 @@ def main() -> int:
         print(f"  p={float(p_dec):.2f}  P>=2 = {g2} ≈ {float(g2):.6f}   "
               f"P>=3 = {g3} ≈ {float(g3):.6f}")
 
-    print("\nPoisson-Binomial with realistic p_i:")
-    ps = [Rational(5, 100), Rational(10, 100), Rational(15, 100),
-          Rational(20, 100), Rational(30, 100)]
+    print("\nPoisson-Binomial with realistic p_i (from threat_model_priors):")
+    ps = [_rational_from_p(s.p) for s in SUBSYSTEM_PRIORS]
+    print(f"  priors: {[(s.name, str(_rational_from_p(s.p))) for s in SUBSYSTEM_PRIORS]}")
     for k in (2, 3, 4):
         v = pb_ge_exact(ps, k)
         print(f"  P(X >= {k}) = {v} ≈ {float(v):.6f}")

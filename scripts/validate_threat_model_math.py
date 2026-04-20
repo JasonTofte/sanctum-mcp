@@ -14,6 +14,8 @@ import sys
 from itertools import combinations
 from math import comb, isclose
 
+from threat_model_priors import SUBSYSTEM_PRIORS, p_vector
+
 
 def binom_ge(n: int, p: float, k: int) -> float:
     """P(X >= k) for X ~ Binomial(n, p)."""
@@ -63,7 +65,17 @@ def main() -> int:
         all_ok &= check(f"Bin(5,{p}) P>=4", binom_ge(5, p, 4), ge4)
 
     print("\n§3 Poisson-Binomial with realistic p_i")
-    ps = (0.05, 0.10, 0.15, 0.20, 0.30)
+    ps = p_vector()
+    expected_canonical = (0.05, 0.10, 0.15, 0.20, 0.30)
+    if ps != expected_canonical:
+        print(
+            f"  [FAIL] priors module drifted from doc canonical vector "
+            f"{expected_canonical}: got {ps}. "
+            f"Update docs/THREAT_MODEL_TRIANGULATION.md §3 to match the "
+            f"new SUBSYSTEM_PRIORS, or revert the prior change."
+        )
+        all_ok = False
+    print(f"  priors: {[(s.name, s.p) for s in SUBSYSTEM_PRIORS]}")
     dist = poisson_binom_dist(ps)
     all_ok &= check("PB P(X=0)", dist[0], 0.4070)
     all_ok &= check("PB P(X=1)", dist[1], 0.4146)
@@ -84,7 +96,7 @@ def main() -> int:
     }
     for p6, by_k in expected.items():
         for k, exp in by_k.items():
-            actual = poisson_binom_ge(ps + (p6,), k)
+            actual = poisson_binom_ge((*ps, p6), k)
             all_ok &= check(f"PB(6) p_6={p6} k={k}", actual, exp)
 
     print("\n§(boundary) straddle probability (P3 sanitization doc)")
