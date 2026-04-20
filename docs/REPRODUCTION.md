@@ -40,17 +40,31 @@ Sanctum end-to-end against a real CFReDS case on a clean machine.
    <https://cfreds-archive.nist.gov/FileSystems/hacking-case.html>
 2. Download the evidence image (public domain in the US per 17 U.S.C. §105).
 3. Place the image under `/cases/cfreds-hacking-case/`.
-4. Mount read-only and extract registry hives:
+4. Mount read-only and extract registry hives. `noload,norecovery` are
+   load-bearing for ext-family filesystems — without them, the kernel will
+   replay the journal on mount even with `-o ro`, writing to the underlying
+   block device. `blockdev --setro` on the loop device is the belt-and-
+   suspenders guarantee:
 
    ```bash
-   sudo mount -o ro,loop,noexec,nosuid \
-       /cases/cfreds-hacking-case/SCHARDT.dd \
+   sudo losetup -f --show --read-only /cases/cfreds-hacking-case/SCHARDT.dd
+   # e.g. output: /dev/loop0
+   sudo blockdev --setro /dev/loop0
+   sudo mount -o ro,noload,norecovery,noexec,nosuid \
+       /dev/loop0 \
        /mnt/hacking-case
    mkdir -p /cases/cfreds-hacking-case/registry
    sudo cp /mnt/hacking-case/Windows/AppCompat/Programs/Amcache.hve \
        /cases/cfreds-hacking-case/registry/
    sudo chmod 0444 /cases/cfreds-hacking-case/registry/Amcache.hve
    ```
+
+   The Sanctum MCP server runs an evidence-mount check at startup and will
+   refuse to serve tool calls if `/cases` is writable. If you see
+   `RuntimeError: evidence mount ... is writable`, re-run the mount block
+   above. For dev work on a writable host filesystem set
+   `SANCTUM_SKIP_MOUNT_CHECK=1` — the server logs a WARN so the bypass is
+   never silent.
 
 ## Step 3 — Install Sanctum
 
@@ -116,6 +130,14 @@ In the Claude Code session, attempt:
 
 ## Troubleshooting
 
+- **`cast install` fails with "Detected conflicting IDs" / `sift-ubuntu-ports-repo`** —
+  this is upstream [`teamdfir/sift-saltstack#226`](https://github.com/teamdfir/sift-saltstack/issues/226)
+  (open as of 2026-04-19, filed 2026-04-17). The duplicate SLS ID lives in
+  `sift/repos/ubuntu-multiverse.sls` and `sift/repos/ubuntu-universe.sls`.
+  `scripts/bootstrap_vm.sh` detects this specific failure mode and prints the
+  documented workaround (rename one of the duplicates via `sed`, then re-run
+  `cast install`). Record any sed edit in your VM's local CHANGELOG so
+  reviewers know you diverged from the upstream pin.
 - **`cast install` hangs** — usually GPG-key drift on one of the 11 external
   apt repos. See `teamdfir/sift/issues` for current workarounds.
 - **`Amcache.hve` missing after mount** — the CFReDS image is NTFS; confirm the

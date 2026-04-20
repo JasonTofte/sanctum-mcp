@@ -52,6 +52,55 @@ def test_zero_width_characters_are_stripped() -> None:
     r = sanitize(raw)
     assert "\u200b" not in r.payload
     assert "\u202e" not in r.payload
+    # New invisibles_stripped counter must report both codepoints removed.
+    assert r.invisibles_stripped == 2
+
+
+def test_unicode_tag_block_is_stripped() -> None:
+    """Tag block U+E0001-U+E007F is the arXiv 2510.05025 smuggling channel.
+
+    ProtectAI llm-guard and multiple peer-reviewed preprints report 100% ASR
+    versus untrained guardrails when payloads are encoded in this block. A
+    forensic tool output containing tag-block codepoints is almost certainly
+    a smuggling attempt — strip them silently.
+    """
+    # U+E0054 = TAG LATIN SMALL LETTER T. An attacker can encode a full
+    # instruction in the Tag block that is invisible to visible-pattern filters.
+    smuggled = "benign log " + "\U000e0054\U000e0041\U000e0047" + " more log"
+    r = sanitize(smuggled)
+    assert "\U000e0054" not in r.payload
+    assert "\U000e0041" not in r.payload
+    assert "\U000e0047" not in r.payload
+    assert r.invisibles_stripped == 3
+
+
+def test_variation_selectors_are_stripped() -> None:
+    """Variation selectors (VS1-VS16 and VS17-VS256) are smuggling vectors.
+
+    Even a legitimate-looking emoji can carry an invisible instruction via
+    a sequence of variation selectors. Forensic evidence rarely needs emoji
+    *presentation fidelity*; we strip for safety.
+    """
+    # VS16 (U+FE0F) and VS17 (U+E0100) — one from each block.
+    raw = "payload\ufe0f\U000e0100rest"
+    r = sanitize(raw)
+    assert "\ufe0f" not in r.payload
+    assert "\U000e0100" not in r.payload
+    assert r.invisibles_stripped == 2
+
+
+def test_emoji_smuggling_dense_payload_is_stripped() -> None:
+    """A dense run of invisibles must strip cleanly without REDACTED noise.
+
+    The silent-strip ordering exists so a 50-char Tag-block payload doesn't
+    produce 50 copies of ``[REDACTED:injection-candidate]`` in the output.
+    This pins the observable behaviour.
+    """
+    dense = "".join(chr(0xE0001 + i) for i in range(50))
+    r = sanitize("hello" + dense + "world")
+    assert r.payload == "helloworld"
+    assert r.invisibles_stripped == 50
+    assert "[REDACTED" not in r.payload
 
 
 def test_truncation_at_64kib() -> None:

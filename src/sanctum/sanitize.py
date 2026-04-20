@@ -1,15 +1,37 @@
 """Prompt-injection sanitization for evidence-derived tool output.
 
 Every forensic tool output passes through this module before the LLM sees it.
-Known injection patterns are stripped; the remaining content is wrapped in an
-`<evidence-untrusted>` delimiter so the system prompt can instruct the model to
-treat that zone as data only. A SHA-256 hash of both the pre- and post-sanitization
-payload is returned for the audit ledger.
+Two-stage defense:
+
+1. **Invisible-codepoint stripping** — silently delete every codepoint whose
+   only plausible use in forensic evidence is to smuggle instructions past a
+   visible-pattern filter. Covers zero-width, bidi controls, general-format
+   controls, BOM, the Unicode Tag block (U+E0001–U+E007F), and both blocks
+   of variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF). Stripping is
+   silent — no ``[REDACTED]`` marker — because a dense payload of invisibles
+   produces unreadable output otherwise. The count is written to the audit
+   ledger via :attr:`SanitizationResult.invisibles_stripped`.
+
+2. **Known-pattern redaction** — replace every match of an injection pattern
+   (Sygnia RED TEAM REALITY CHECK, "ignore previous instructions", role-play
+   jailbreak, etc.) with a visible ``[REDACTED:injection-candidate]`` marker
+   so analysts reviewing the ledger see exactly where sanitization fired.
+
+The two stages are independent: a payload can contain both invisible smuggling
+and visible injection patterns; both are caught. Ordering rationale lives in
+``docs/THREAT_MODEL_SANITIZATION.md``.
 
 Threat references:
 - Greshake et al. (arXiv 2302.12173) — indirect prompt injection theory.
 - Sygnia (2025-08) — PowerShell-script-block log poisoning PoC.
+- Hines et al. (arXiv 2403.14720) — Spotlighting; delimiting alone ≈ 50% ASR
+  reduction, so this layer is defense-in-depth behind the MCP typed-tool
+  architectural boundary.
+- arXiv 2510.05025 — Imperceptible Jailbreaking via variation selectors and
+  Tag-block codepoints; reported 100% attack success versus untrained
+  guardrails. Motivates the expanded codepoint set here.
 - OWASP LLM01:2025 — prompt injection as top LLM risk.
+- ProtectAI llm-guard Invisible Text scanner — reference range set.
 """
 
 from __future__ import annotations
@@ -20,6 +42,29 @@ from dataclasses import dataclass
 
 EVIDENCE_OPEN = "<evidence-untrusted>"
 EVIDENCE_CLOSE = "</evidence-untrusted>"
+
+# Every codepoint whose only plausible use in forensic-evidence bytes is
+# instruction-smuggling. Each range has a specific documented attack class;
+# dropping any range without replacement is a regression.
+#
+# - \u200b-\u200f          zero-width space, ZWNJ, ZWJ, LRM, RLM
+# - \u202a-\u202e          bidi embedding + RLO override (visual reorder attacks)
+# - \u2060-\u206f          word joiner, invisible operators, isolate controls
+# - \ufe00-\ufe0f          variation selectors 1-16 (emoji presentation smuggling)
+# - \ufeff                 BOM / ZWNBSP
+# - \U000E0001-\U000E007F  Unicode Tag block — arXiv 2510.05025 channel, 100% ASR
+# - \U000E0100-\U000E01EF  variation selectors supplement (VS17-VS256)
+_INVISIBLE_CODEPOINTS = re.compile(
+    "["
+    "\u200b-\u200f"
+    "\u202a-\u202e"
+    "\u2060-\u206f"
+    "\ufe00-\ufe0f"
+    "\ufeff"
+    "\U000e0001-\U000e007f"
+    "\U000e0100-\U000e01ef"
+    "]"
+)
 
 # Patterns observed in published prompt-injection research plus common variants.
 # Extend cautiously; every addition needs a test in tests/test_sanitize.py.
@@ -34,8 +79,6 @@ _INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(you\s+are\s+now|act\s+as|pretend\s+to\s+be)\s+a\s+(red\s*team|pentest|security)\s*(engineer|researcher|tester)", re.IGNORECASE),  # noqa: E501
     # Markdown-style authoritative tags injected into unstructured logs.
     re.compile(r"\[\[(SYSTEM|ADMIN|ROOT|OVERRIDE)\]\]", re.IGNORECASE),
-    # Prompt-smuggling via zero-width / invisible characters (strip them outright).
-    re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]"),
 )
 
 # Cap on payload size returned to the LLM — prevents context-window blow-up from
@@ -56,11 +99,12 @@ class InputTooLargeError(ValueError):
 
 @dataclass(frozen=True)
 class SanitizationResult:
-    """Output of :func:`sanitize`. Both hashes go to the audit ledger."""
+    """Output of :func:`sanitize`. Both hashes and both counts go to the audit ledger."""
 
     payload: str
     pre_hash: str
     post_hash: str
+    invisibles_stripped: int
     patterns_stripped: int
     truncated: bool
 
@@ -75,7 +119,13 @@ def sanitize(
     max_bytes: int = MAX_PAYLOAD_BYTES,
     max_input_bytes: int = MAX_INPUT_BYTES,
 ) -> SanitizationResult:
-    """Strip known injection patterns, truncate to ``max_bytes``, return hashed bookends.
+    """Strip invisibles, redact known injection patterns, truncate, hash bookends.
+
+    Ordering: reject oversize input first, then invisibles (silent), then
+    visible injection patterns (with ``[REDACTED:injection-candidate]``
+    marker), then truncation. The prefix-closure correctness argument in
+    ``docs/THREAT_MODEL_SANITIZATION.md`` applies to the combined strip pass
+    because both stages are local full-stream transforms.
 
     Guarantees:
       - Raw input above ``max_input_bytes`` (default 16 MiB) is **rejected**
@@ -83,9 +133,11 @@ def sanitize(
         closes the DoS surface that strip-then-truncate would otherwise leave
         open — see docs/THREAT_MODEL_SANITIZATION.md §7.
       - The returned ``payload`` is never longer than ``max_bytes`` (UTF-8 bytes).
+      - Every codepoint in the invisible-codepoint set is deleted; the count
+        lands in ``invisibles_stripped``.
       - Every pattern match in :data:`_INJECTION_PATTERNS` is replaced with a
-        visible ``[REDACTED:injection-candidate]`` marker so reviewers can see
-        the sanitization fired.
+        visible ``[REDACTED:injection-candidate]`` marker; count in
+        ``patterns_stripped``.
       - ``pre_hash`` is SHA-256 of the input exactly as received.
       - ``post_hash`` is SHA-256 of the final ``payload`` — both land in the
         audit ledger, so any drift between raw tool output and LLM-visible
@@ -99,12 +151,18 @@ def sanitize(
         )
 
     pre_hash = _sha256(raw)
-    cleaned = raw
-    stripped = 0
-    for pattern in _INJECTION_PATTERNS:
-        cleaned, count = pattern.subn("[REDACTED:injection-candidate]", cleaned)
-        stripped += count
 
+    # Stage 1 — silent invisibles strip.
+    cleaned, invisibles_count = _INVISIBLE_CODEPOINTS.subn("", raw)
+
+    # Stage 2 — visible pattern redaction.
+    patterns_count = 0
+    for pattern in _INJECTION_PATTERNS:
+        cleaned, n = pattern.subn("[REDACTED:injection-candidate]", cleaned)
+        patterns_count += n
+
+    # Stage 3 — truncate. Per prefix-closure: truncating a pattern-free,
+    # invisibles-free string yields a pattern-free, invisibles-free prefix.
     truncated = False
     encoded = cleaned.encode("utf-8")
     if len(encoded) > max_bytes:
@@ -117,7 +175,8 @@ def sanitize(
         payload=cleaned,
         pre_hash=pre_hash,
         post_hash=post_hash,
-        patterns_stripped=stripped,
+        invisibles_stripped=invisibles_count,
+        patterns_stripped=patterns_count,
         truncated=truncated,
     )
 

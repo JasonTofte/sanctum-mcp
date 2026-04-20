@@ -1,8 +1,9 @@
-"""Tests for :mod:`sanctum.audit` — append-only ledger with chain verification."""
+"""Tests for :mod:`sanctum.audit` — append-only ledger with HMAC-chain verification."""
 
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,9 @@ from sanctum import audit
 def ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "ledger.jsonl"
     monkeypatch.setenv(audit.LEDGER_ENV, str(path))
+    # Every test gets its own fresh HMAC key — verifies key isolation and
+    # rules out test-pollution from a cached key.
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, secrets.token_hex(32))
     return path
 
 
@@ -68,6 +72,79 @@ def test_verify_chain_catches_tampered_entry(ledger: Path) -> None:
 def test_each_audit_id_is_unique(ledger: Path) -> None:
     ids = {_append().audit_id for _ in range(50)}
     assert len(ids) == 50
+
+
+def test_missing_hmac_key_refuses_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``SANCTUM_LEDGER_HMAC_KEY``, append MUST refuse.
+
+    The ledger never silently downgrades to plain SHA-256 — that was the
+    prior behaviour and was the biggest inaccuracy in Sanctum's
+    architecture docs (README claimed "HMAC-chained" while the code
+    computed unsalted SHA-256). Refusing to start is the correct failure
+    mode.
+    """
+    monkeypatch.setenv(audit.LEDGER_ENV, str(tmp_path / "ledger.jsonl"))
+    monkeypatch.delenv(audit.HMAC_KEY_ENV, raising=False)
+    with pytest.raises(RuntimeError, match="HMAC"):
+        audit.append_entry(
+            case_id="c",
+            tool="t",
+            args={},
+            input_ref=None,
+            pre_sanitization_sha256="a" * 64,
+            post_sanitization_sha256="b" * 64,
+        )
+
+
+def test_short_hmac_key_refuses_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An HMAC key shorter than 16 bytes MUST be refused.
+
+    128-bit is the NIST-recommended minimum for HMAC-SHA256. A too-short key
+    at startup is more likely a misconfiguration (e.g., truncated copy/paste)
+    than an intentional choice — refuse loudly.
+    """
+    monkeypatch.setenv(audit.LEDGER_ENV, str(tmp_path / "ledger.jsonl"))
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, "deadbeef")  # 4 bytes
+    with pytest.raises(RuntimeError, match="at least"):
+        audit.append_entry(
+            case_id="c",
+            tool="t",
+            args={},
+            input_ref=None,
+            pre_sanitization_sha256="a" * 64,
+            post_sanitization_sha256="b" * 64,
+        )
+
+
+def test_verify_chain_fails_with_wrong_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Swapping the HMAC key between write and verify MUST break verification.
+
+    This is the property that distinguishes HMAC from plain SHA-256: the
+    attacker needs the key, not just disk-write access. A forger who mutates
+    the ledger cannot produce a matching line_hash without the key.
+    """
+    path = tmp_path / "ledger.jsonl"
+    monkeypatch.setenv(audit.LEDGER_ENV, str(path))
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, secrets.token_hex(32))
+    audit.append_entry(
+        case_id="c",
+        tool="t",
+        args={},
+        input_ref=None,
+        pre_sanitization_sha256="a" * 64,
+        post_sanitization_sha256="b" * 64,
+    )
+    # Swap the key as if an attacker tried to recompute the chain.
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, secrets.token_hex(32))
+    ok, _, bad = audit.verify_chain(path)
+    assert ok is False
+    assert bad is not None
 
 
 def test_args_hash_is_canonical(ledger: Path) -> None:

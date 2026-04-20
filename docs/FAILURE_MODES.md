@@ -20,8 +20,12 @@ for the full mapping table.
 *Tested in*: enforced by project `.claude/settings.local.json` design; lint-level concern, not a code-path test.
 
 
-- **Trigger**: developer adds `"Bash(*)"` to `settings.json` → all hook
-  permission decisions are silently ignored (Claude Code issue #41151).
+- **Trigger**: developer adds `"Bash(*)"` to `settings.json`. Every matching
+  bash command is then auto-accepted, and Claude Code silently ignores any
+  PreToolUse `ask`/`deny` decision on auto-accepted tools (issue #41151,
+  *"PreToolUse hooks 'ask'/'deny' decisions are silently ignored for all
+  auto-accepted tools"*; companion issue #31523 on the `Bash(*)` wildcard
+  specifically).
 - **Behaviour**: `PreToolUse` hook fires and returns `permissionDecision: "deny"`;
   Claude Code ignores it; tool executes.
 - **Detection**: CI lint (`scripts/check_settings.sh`, week 2) rejects any
@@ -71,6 +75,32 @@ for the full mapping table.
   quantifies forgery probability for the `claim_finding ≥2-of-5`
   gate and makes the case for a stratified `CORROBORATED | FINAL`
   tier split.
+
+## State 3b: Evidence mount silently writable (ext-family journal replay)
+
+*Tested in*: [`tests/test_bypass.py::test_invariant4_writable_mount_refused_at_startup`](../tests/test_bypass.py), [`tests/test_server_boundaries.py::test_validate_evidence_mount_*`](../tests/test_server_boundaries.py) — 4 tests.
+
+
+- **Trigger**: operator mounts evidence with `-o ro,noexec,nosuid` alone (no
+  `noload,norecovery`) on an ext3/ext4 image whose journal wasn't cleanly
+  closed before acquisition. Kernel replays the journal on mount — a real
+  write to the block device despite the ro flag.
+- **Behaviour (unmitigated)**: evidence mtime/atime may change; a
+  sufficiently aware attacker could pre-stage a dirty journal to inject
+  content at mount time. The VFS ro flag is also strippable via
+  `mount --bind,remount,rw` at the original superblock if an attacker has
+  root on the host.
+- **Detection**: `_validate_evidence_mount()` checks the VFS ro flag at
+  server startup via `os.statvfs(path).f_flag & os.ST_RDONLY`; refuses to
+  start if unset. The runtime check does **not** detect journal-replay
+  writes (statvfs reports the mount flag, not the block-device state) — the
+  `noload,norecovery` + `blockdev --setro` commands in `docs/REPRODUCTION.md`
+  are load-bearing together with this check, not alternatives.
+- **Recovery**: error message names the correct mount command to re-run.
+- **Classification**: **fail-closed** at server startup when the mount is
+  VFS-writable; **silent corruption** if operator uses insufficient mount
+  flags and journal replay fires — mitigated only by the documented command
+  and operator discipline.
 
 ## State 4: Case-path traversal via `case_id`
 
