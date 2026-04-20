@@ -125,11 +125,14 @@ the full security property on its own. Two obligations remain:
 2. **DoS via unbounded `L`.** `f` runs in `Θ(L)` (regex engine worst
    case is higher for some patterns, but the current set is linear on
    non-pathological input). A caller that submits a 10 GB evidence
-   blob forces a 10 GB scan. In production this must be capped at the
-   server boundary — reject inputs above `L_max ≫ B`, do not silently
-   feed them to `sanitize`. The current `sanitize` API exposes
-   `max_bytes` for truncation only; the input-size cap belongs one
-   layer above (see follow-up issue).
+   blob forces a 10 GB scan. **Closed** as of
+   `sanctum.sanitize.MAX_INPUT_BYTES = 16 MiB`: inputs above the cap
+   raise `InputTooLargeError` before any regex work runs. The cap is
+   configurable per-call via the `max_input_bytes` kwarg for callers
+   with legitimate outsize payloads, but the default is strict —
+   matching this document's "reject, don't silently feed" principle.
+   Regression pinned by
+   `tests/test_sanitize.py::test_input_over_max_input_bytes_is_rejected`.
 
 ## Relation to existing tests
 

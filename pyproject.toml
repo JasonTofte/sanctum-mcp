@@ -56,6 +56,11 @@ ignore = ["S101"]  # allow assert in tests
 # the 100-char line length (E501) — test names are self-documenting and wrapping
 # them at column limits hurts readability without protecting anything.
 "tests/*" = ["S", "E501"]
+# Allow math-notation single-capital variable names (N806) in scripts/ — the
+# threat-model validators intentionally mirror the docs' notation
+# (S = subset, L = length, k = threshold). Renaming to lowercase would
+# disconnect code from the proofs it implements.
+"scripts/*" = ["N806"]
 
 [tool.black]
 line-length = 100

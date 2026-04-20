@@ -6,6 +6,25 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- `sanctum.sanitize.MAX_INPUT_BYTES` (16 MiB) + `InputTooLargeError`:
+  closes the unbounded-`L` DoS surface flagged in
+  `docs/THREAT_MODEL_SANITIZATION.md` §7. Inputs above the cap raise
+  before any regex scanning runs. Per-call override available via the
+  `max_input_bytes` kwarg for callers with legitimate outsize
+  payloads. Regression pinned by new boundary tests.
+- `sanctum.audit.FindingConfidence` (enum: DRAFT | CORROBORATED |
+  FINAL) and `classify_confidence(n_distinct_subsystems)` helper —
+  pins the tier boundaries recommended in
+  `docs/THREAT_MODEL_TRIANGULATION.md` §5 into code so the future
+  week-4 `claim_finding` implementation cannot silently drift from
+  the threat-model doc. Ledger-stable string values enforced by test.
+
+### Changed
+
+- `sanctum.sanitize.sanitize`: accepts new `max_input_bytes` kwarg
+  with default `MAX_INPUT_BYTES`. Pre-existing callers are unaffected
+  (sub-16-MiB inputs behave identically).
+
 - `docs/THREAT_MODEL_SANITIZATION.md`: formal justification for the
   `strip → truncate` ordering in `sanctum.sanitize`. Proves correctness
   via prefix-closure of pattern-freeness; derives the random-placement

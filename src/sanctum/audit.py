@@ -36,12 +36,50 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 LEDGER_ENV = "SANCTUM_LEDGER_PATH"
 DEFAULT_LEDGER = "/var/lib/sanctum/ledger.jsonl"
 _GENESIS_PREV = "0" * 64
+
+
+class FindingConfidence(str, Enum):
+    """Evidence-corroboration tier emitted by the future ``claim_finding`` gate.
+
+    String values are stable — they land in the audit ledger, so renaming a
+    member is a backwards-incompatible ledger-format change.
+    """
+
+    DRAFT = "DRAFT"
+    CORROBORATED = "CORROBORATED"
+    FINAL = "FINAL"
+
+
+def classify_confidence(n_distinct_subsystems: int) -> FindingConfidence:
+    """Map distinct-subsystem count to a confidence tier.
+
+    Pins the recommendation from docs/THREAT_MODEL_TRIANGULATION.md §5:
+
+    - ``n <= 1`` -> DRAFT (single-source or none; hypothesis only)
+    - ``n == 2`` -> CORROBORATED (P(forgery) ~17.8% under realistic priors)
+    - ``n >= 3`` -> FINAL (P(forgery) ~2.7%, ~7x harder to forge)
+
+    The week-4 ``claim_finding`` implementation is expected to call this
+    helper rather than re-encode the tier rules inline, so the threat-model
+    doc and the gate cannot silently drift.
+    """
+
+    if n_distinct_subsystems < 0:
+        raise ValueError(
+            f"n_distinct_subsystems must be >= 0, got {n_distinct_subsystems}"
+        )
+    if n_distinct_subsystems <= 1:
+        return FindingConfidence.DRAFT
+    if n_distinct_subsystems == 2:
+        return FindingConfidence.CORROBORATED
+    return FindingConfidence.FINAL
 
 
 @dataclass(frozen=True)

@@ -149,8 +149,16 @@ this document spells out the tier bands.
 
 ## Followups
 
-- [ ] Add a `confidence` enum (`DRAFT | CORROBORATED | FINAL`) to
-      `claim_finding`, gated on `len(distinct_subsystems(audit_ids))`.
+- [x] **Shipped.** `FindingConfidence` enum
+      (`DRAFT | CORROBORATED | FINAL`) + `classify_confidence(n)`
+      helper in `sanctum.audit`. The week-4 `claim_finding`
+      implementation is expected to call the helper rather than
+      inline the tier rules, so the threat-model doc and the gate
+      cannot drift. Pinned by tier-boundary tests in
+      `tests/test_audit.py`.
+- [ ] Wire `claim_finding` to the helper when it ships (week-4 per
+      README roadmap); reject/DRAFT single-source claims at the MCP
+      typed boundary.
 - [ ] Encode the `p_i` table in `docs/` as data (YAML) and regenerate
       this doc's tables from a test fixture, so forensic-community
       feedback on the priors updates the thresholds automatically.

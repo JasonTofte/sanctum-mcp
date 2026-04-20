@@ -88,3 +88,40 @@ def test_args_hash_is_canonical(ledger: Path) -> None:
         post_sanitization_sha256="y",
     )
     assert e1.args_hash == e2.args_hash
+
+
+# --- FindingConfidence tier classifier ---
+
+def test_classify_confidence_draft_for_zero_and_one() -> None:
+    """n <= 1 is DRAFT — single-source or none, hypothesis only."""
+    assert audit.classify_confidence(0) == audit.FindingConfidence.DRAFT
+    assert audit.classify_confidence(1) == audit.FindingConfidence.DRAFT
+
+
+def test_classify_confidence_corroborated_at_exactly_two() -> None:
+    """n == 2 is CORROBORATED — docs/THREAT_MODEL_TRIANGULATION.md §5."""
+    assert audit.classify_confidence(2) == audit.FindingConfidence.CORROBORATED
+
+
+def test_classify_confidence_final_at_three_and_above() -> None:
+    """n >= 3 is FINAL — P(forgery) drops ~7x vs CORROBORATED."""
+    assert audit.classify_confidence(3) == audit.FindingConfidence.FINAL
+    assert audit.classify_confidence(5) == audit.FindingConfidence.FINAL
+    assert audit.classify_confidence(100) == audit.FindingConfidence.FINAL
+
+
+def test_classify_confidence_negative_raises() -> None:
+    """Negative subsystem count is a programmer error, not a tier."""
+    with pytest.raises(ValueError, match="must be >= 0"):
+        audit.classify_confidence(-1)
+
+
+def test_finding_confidence_values_are_ledger_stable_strings() -> None:
+    """Enum values are ledger-stable — renaming a member is a format change.
+
+    Pinning the exact string values here makes accidental renames fail CI
+    before they ship into the append-only ledger.
+    """
+    assert audit.FindingConfidence.DRAFT.value == "DRAFT"
+    assert audit.FindingConfidence.CORROBORATED.value == "CORROBORATED"
+    assert audit.FindingConfidence.FINAL.value == "FINAL"
