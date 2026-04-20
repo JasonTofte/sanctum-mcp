@@ -25,6 +25,17 @@ set -euo pipefail
 SIFT_SALTSTACK_SHA="96b7d9898bc55264679b9ea50949ddc919f76f59"
 SIFT_SALTSTACK_PINNED_AT="2026-04-14T03:53:03Z"   # commit date of pinned SHA
 SIFT_SALTSTACK_PIN_NOTE="Merge pull request #219 from digitalsleuth/vol3"
+#
+# Known upstream issue: teamdfir/sift-saltstack#226 "Broken install conflicting
+# SLS IDs" (opened 2026-04-17, still open/unassigned at the time this pin was
+# set). The duplicate ID sift-ubuntu-ports-repo lives in both
+# sift.repos.ubuntu-multiverse and sift.repos.ubuntu-universe and halts
+# salt-call. The bug was present at v2026.03.24 (2026-03-24) and no fix has
+# been merged; this pin (2026-04-14) sits on master after v2026.03.24, so the
+# install may fail with "Detected conflicting IDs" on fresh VMs. The
+# post-install sanity check below detects that exact failure and prints the
+# documented workaround. Track upstream issue for a merged fix; bump the pin
+# when one ships.
 CFREDS_HACKING_CASE_URL="https://cfreds-archive.nist.gov/FileSystems/hacking-case.html"
 # --------------------------------------------------------------------------
 
@@ -60,8 +71,37 @@ cd sift-saltstack
 git fetch --all
 git checkout "$SIFT_SALTSTACK_SHA"
 
-# Run the SIFT install
-sudo cast install "$PWD"
+# Run the SIFT install. Capture output so we can detect the #226 failure mode
+# and emit a specific pointer instead of letting the generic cast error fly.
+sift_install_log=$(mktemp)
+if ! sudo cast install "$PWD" 2>&1 | tee "$sift_install_log"; then
+  if grep -q "Detected conflicting IDs" "$sift_install_log" \
+     || grep -qE "sift-ubuntu-ports-repo.*(multiverse|universe)" "$sift_install_log"; then
+    cat >&2 <<'SIFT226'
+
+==== known upstream issue: teamdfir/sift-saltstack#226 ====
+The install failed with a conflicting-SLS-ID error. This is the documented
+upstream bug; track https://github.com/teamdfir/sift-saltstack/issues/226
+for a merged fix.
+
+Workaround (until upstream fixes): rename one of the duplicate occurrences
+of 'sift-ubuntu-ports-repo' in the cloned sift-saltstack tree, e.g.:
+
+  cd "$HOME/sift-src/sift-saltstack"
+  sed -i 's/^sift-ubuntu-ports-repo:/sift-ubuntu-ports-repo-universe:/' \
+      sift/repos/ubuntu-universe.sls
+  sudo cast install "$PWD"
+
+If the workaround succeeds, record the sed edit in the CHANGELOG of the VM so
+reviewers know you diverged from upstream.
+SIFT226
+    rm -f "$sift_install_log"
+    exit 1
+  fi
+  rm -f "$sift_install_log"
+  exit 1
+fi
+rm -f "$sift_install_log"
 
 # Protocol SIFT reference (read-only clone, for comparison only)
 cd "$HOME"

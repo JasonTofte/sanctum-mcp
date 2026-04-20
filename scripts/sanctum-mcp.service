@@ -1,0 +1,114 @@
+# Sanctum MCP server — hardened systemd unit.
+#
+# Drop into /etc/systemd/system/sanctum-mcp.service (root-owned, 0644) and
+# enable with:
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sanctum-mcp.service
+#
+# Edit the two marked environment entries before enabling. The HMAC key must
+# already exist — generate one via:
+#
+#   python3 -c 'import secrets; print(secrets.token_hex(32))'
+#
+# ...and paste it into /etc/sanctum/env (0600, root:sanctum) as a single line:
+#
+#   SANCTUM_LEDGER_HMAC_KEY=<64-hex-chars>
+#
+# The confinement below is intentional defense-in-depth for the MCP server
+# process. Sanctum's architectural guarantees come from the typed tool surface
+# (see CLAUDE.md invariants #1 and #2), not from this unit — but the systemd
+# confinement tightens the failure-domain-isolation lens. If a typed tool body
+# is ever compromised (e.g., a future regression in _resolve_case), the
+# sandbox limits blast radius to the cases path the tool was designed to
+# read.
+
+[Unit]
+Description=Sanctum DFIR MCP server (typed, hardened)
+Documentation=https://github.com/JasonTofte/sanctum-mcp
+# Start after the evidence mount is present — if /cases is a separate mount
+# unit, name it here via Requires= and After= so the server never boots
+# against an unmounted path.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EDIT — the sanctum user must exist; create with:
+#   sudo useradd --system --home-dir /var/lib/sanctum --shell /usr/sbin/nologin sanctum
+User=sanctum
+Group=sanctum
+
+# EDIT — absolute path to the Sanctum venv's python + the stdio entry point.
+# Default layout places venv under /opt/sanctum on servers; pick something
+# stable and document it.
+ExecStart=/opt/sanctum/.venv/bin/python -m sanctum.server
+
+# Environment — sensitive values live in a root-owned, mode-0600 file.
+EnvironmentFile=/etc/sanctum/env
+Environment=SANCTUM_LOG_LEVEL=INFO
+Environment=SANCTUM_CASES_ROOT=/cases
+Environment=SANCTUM_LEDGER_PATH=/var/lib/sanctum/ledger.jsonl
+
+# ---- sandboxing (systemd.exec(5)) ----
+# POLA enforcement: the MCP server process cannot acquire new privileges,
+# cannot write outside its ledger directory, cannot exec setuid binaries,
+# cannot reach non-localhost networks (the stdio transport is in-process;
+# outbound TSA stamps should run from a separate cron/timer unit that is
+# allowed to reach the TSA URL).
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+
+# Read-only: evidence paths. Read-write: ledger dir only.
+ReadOnlyPaths=/cases /evidence
+ReadWritePaths=/var/lib/sanctum
+
+# Drop all capabilities — the stdio MCP server needs none of them.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Block non-Linux address families (AF_INET6/INET for the TSA stamp are
+# intentionally present because future sanctum.notary calls from the server
+# process may POST to a TSA; if you run the notary from a separate unit, you
+# can drop AF_INET too).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# System-call filter: allow the core service set plus network syscalls. Deny
+# @privileged, @debug, @mount, @reboot, @swap.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @debug @mount @reboot @swap
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+# Harden the working directory.
+WorkingDirectory=/var/lib/sanctum
+UMask=0027
+
+# Automatic restart on unexpected exit. The server should exit cleanly on
+# SIGTERM so systemd doesn't need to fall through to SIGKILL.
+Restart=on-failure
+RestartSec=2s
+
+# Journal the stdout/stderr of the MCP server. The ledger file is the
+# primary artefact; this journal is supplementary.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

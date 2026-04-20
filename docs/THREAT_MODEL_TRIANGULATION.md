@@ -125,20 +125,117 @@ The README's existing claim — "Single-source claims are returned as
 DRAFT with `needs_corroboration`" — already implies a stratified gate;
 this document spells out the tier bands.
 
+## Family coupling and the AppCompat correction
+
+The Bernoulli-independence model above is how the literature usually
+presents triangulation analysis, but it materially overstates Sanctum's
+defence when two of the five subsystems share a trust root. An internal
+architecture audit surfaced the specific instance:
+
+**ShimCache and Amcache are not independent.** Both are written by the
+Windows Application Experience Service / Program Compatibility Assistant
+path (Mandiant 2024-08;
+[Harlan Carvey](http://windowsir.blogspot.com/2024/11/program-execution-shimcacheamcache-myth.html)
+2024-11). The Microsoft-documented kernel primitive
+`BaseFlushAppcompatCache`/`ShimFlushCache` clears ShimCache with one
+syscall; open-source tooling (`AntiForensic.NET`) clears both in a single
+run. An adversary with SYSTEM privileges defeats both in under a second —
+the "two independent subsystems" premise of a `{ShimCache, Amcache}`
+corroboration pair is false under active attack.
+
+The correct framing is **artifact families, not per-artifact subsystems**.
+Each family has a distinct trust root and a distinct tampering cost:
+
+| Family              | Members                 | Shared trust root                        |
+|---------------------|-------------------------|------------------------------------------|
+| AppCompat           | ShimCache, Amcache      | Application Experience Service / CSRSS   |
+| Explorer / NTUSER   | UserAssist              | `explorer.exe` + per-user NTUSER.dat     |
+| Background service  | BAM                     | `bam.sys` kernel driver + SYSTEM registry |
+| Kernel ETW          | Sysmon / EventID 4688   | Windows Event Log + `sysmon.exe`         |
+| SysMain             | Prefetch                | `SysMain` service + `C:\Windows\Prefetch\` |
+
+Two audit_ids pointing into the **same** family count as one source for
+the `≥ k` gate. The rule-table shape `claim_finding` will ship with
+(week 4) therefore reads:
+
+```
+sources = {family(audit_id) for audit_id in audit_ids}
+if len(sources) < 2: return DRAFT("needs_corroboration")
+if len(sources) < 3: return CORROBORATED
+return FINAL
+```
+
+This is a minimal change to the P0 design; it strictly tightens the gate
+without touching the numeric `k` threshold.
+
+## Revised Poisson-binomial with artifact families
+
+Under the family reframe, two changes propagate into the probability
+model:
+
+1. ShimCache and Amcache collapse into one family at
+   `p_AppCompat = 0.10` (dominated by the easier-to-tamper Amcache; a
+   forensically-distinguishable rewrite of the AppCompat hive requires a
+   matching SHA-1 in the Amcache hive, so `p_AppCompat < p_Amcache` is
+   unjustified).
+2. UserAssist and BAM, previously collapsed into one `0.15` line item,
+   split — they live in different hives with different writers and
+   should count separately. `p_UserAssist = 0.15`,
+   `p_BAM = 0.15`.
+
+Resulting family tuple: `ps = (0.10, 0.15, 0.15, 0.20, 0.30)`. Mean
+`p̄ = 0.18` (vs `0.16` under the prior ordering).
+
+| Threshold | P(forgery), revised | P(forgery), prior (§3) | Change |
+|-----------|---------------------|------------------------|--------|
+| k = 2     | **21.98%**          | 17.84%                 | +4.14 pp |
+| k = 3     | **4.05%**           | 2.67%                  | +1.38 pp |
+| k = 4     | **0.37%**           | 0.18%                  | +0.19 pp |
+
+Full distribution under the family tuple:
+
+| X | P(X) |
+|---|------|
+| 0 | 0.3641 |
+| 1 | 0.4161 |
+| 2 | 0.1793 |
+| 3 | 0.0368 |
+| 4 | 0.0036 |
+| 5 | 0.0001 |
+
+Reading the delta: the prior non-uniform table was optimistic because it
+treated two coupled artifacts as independent high-difficulty tamper
+targets. The family-revised model shifts probability mass toward higher
+X by replacing one "hard" target with the mean-difficulty of its family.
+
+**Design implication.** The §5 recommendation (stratified
+`CORROBORATED | FINAL` tiers) is strengthened, not weakened, by the
+family reframe: a `FINAL` gate at `k = 3` still puts forgery probability
+at ~4%, an order of magnitude better than any `k = 2` configuration, and
+the gate now reflects the actual trust topology.
+
+Regression tests for the new numbers live in
+[`scripts/validate_threat_model_math.py`](../scripts/validate_threat_model_math.py)
+alongside the original non-uniform table.
+
 ## Load-bearing assumptions
 
 1. **Independence.** The Bernoulli/Poisson-binomial model assumes
    `p_i` are independent. In reality all five subsystems run on the
    same host, often share on-disk storage, and fall to a single
-   SYSTEM-level compromise. A kernel rootkit that can forge one
-   registry hive can forge three. If `Pr(all 5 compromised | any
-   compromised)` is non-trivial, the model *understates* forgery
-   probability; the real defence is that **tampering leaves distinct
-   trace artifacts in each subsystem** — a live kernel module
-   touching ShimCache, Amcache, and Prefetch makes forensically
-   distinguishable writes. Quantifying the joint distribution
-   properly requires a correlation model (copula or shared-latent-
-   factor); that is out of scope here and flagged as an open item.
+   SYSTEM-level compromise. The **family reframe** above partially
+   addresses this by collapsing the one known worst-offender pair
+   (ShimCache ∧ Amcache under the AppCompat service) into a single
+   family member; further same-host coupling remains. A kernel
+   rootkit that can forge one registry hive can forge three. If
+   `Pr(all 5 compromised | any compromised)` is non-trivial, the
+   model *understates* forgery probability; the real defence is that
+   **tampering leaves distinct trace artifacts in each subsystem** —
+   a live kernel module touching AppCompat, Prefetch, and Sysmon
+   makes forensically distinguishable writes. Quantifying the joint
+   distribution properly requires a correlation model (copula or
+   shared-latent-factor); that is out of scope here and flagged as
+   an open item.
 2. **Symmetric attacker capability.** The model treats "compromised"
    as binary — attacker can forge freely. In practice attackers differ
    at forging content that passes downstream consistency checks
@@ -163,8 +260,15 @@ this document spells out the tier bands.
       cannot drift. Pinned by tier-boundary tests in
       `tests/test_audit.py`.
 - [ ] Wire `claim_finding` to the helper when it ships (week-4 per
-      README roadmap); reject/DRAFT single-source claims at the MCP
-      typed boundary.
+      README roadmap). The gate MUST operate on **distinct families**,
+      not raw subsystem counts — see "Family coupling and the
+      AppCompat correction" above. Reference mapping to apply to
+      each `audit_id`: look up the `tool` field of the ledger entry
+      and map `{get_shimcache, get_amcache}` → `"AppCompat"`,
+      `{get_userassist}` → `"Explorer"`, `{get_bam}` → `"BAM"`,
+      `{get_sysmon_4688}` → `"Sysmon"`,
+      `{get_prefetch}` → `"Prefetch"`. The count passed to
+      `classify_confidence` is `len(set(map(family, audit_ids)))`.
 - [x] **Shipped.** Priors centralized in
       `scripts/threat_model_priors.py`; both validators import from
       there. `tests/test_threat_model_priors.py` pins the canonical

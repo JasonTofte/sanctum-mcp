@@ -4,6 +4,67 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Security
+
+- **BREAKING — audit ledger upgraded from plain SHA-256 to HMAC-SHA-256.**
+  The prior implementation computed `hashlib.sha256(canonical(entry))`
+  with no keyed primitive; the README and CLAUDE.md architecture block
+  described it as "HMAC-SHA256 chain" despite the code being a plain
+  hash chain. An internal audit flagged the discrepancy: a plain-SHA-256
+  chain is forgeable by any attacker with ledger write access, whereas an
+  HMAC chain requires the attacker to also compromise
+  `SANCTUM_LEDGER_HMAC_KEY`. The env var is now mandatory at server
+  startup; `append_entry` and `verify_chain` both raise
+  `RuntimeError` if the key is missing or shorter than 16 bytes. Operators
+  must generate a 32-byte key via
+  `python -c 'import secrets; print(secrets.token_hex(32))'` and export it
+  before starting the server. No silent downgrade path exists — by design.
+- **New optional RFC 3161 TSA witness — `src/sanctum/notary.py`.**
+  `stamp_head()` binds the current ledger head to a Trusted Timestamp
+  Authority's digital signature via ``openssl ts`` (no new Python deps);
+  archives the request (`.tsq`) and response (`.tsr`) bytes alongside the
+  ledger. Raises the integrity guarantee from tamper-evident (HMAC) to
+  non-repudiable (PKI-signed witness) — the tier required by FRE 902(14)
+  self-authentication and NIST SP 800-53 AU-10(5) Digital Signatures.
+  Default TSA is `https://rfc3161.ai.moda`; override via `tsa_url`. Call
+  at whatever cadence the incident context justifies (per-session for
+  hackathon demos; per-N-entries for continuous monitoring).
+- **Hardened `mount -o ro` invariant.** Sanctum now actually implements
+  the runtime mount-check that CLAUDE.md has been promising: `main()`
+  calls `server._validate_evidence_mount(cases_root)` at startup, checks
+  the VFS ro flag via `os.statvfs`, and refuses to start on a writable
+  mount. `docs/REPRODUCTION.md` expands the mount command to include
+  `noload,norecovery` (required to prevent ext3/4 journal replay, which
+  writes to the block device even on `-o ro`) plus `blockdev --setro`
+  on the loop device. Dev-only `SANCTUM_SKIP_MOUNT_CHECK=1` bypasses
+  with a WARN log — never silent.
+- **Expanded sanitizer invisible-codepoint coverage.** `sanctum.sanitize`
+  now strips the Unicode Tag block (U+E0001–U+E007F), both variation-
+  selector blocks (U+FE00–U+FE0F, U+E0100–U+E01EF), and the classic
+  zero-width / bidi / general-format ranges. Motivated by arXiv 2510.05025
+  "Imperceptible Jailbreaking" — 100% ASR emoji-smuggling attacks that
+  visible-pattern regex strip lists cannot catch. Invisibles are now
+  stripped silently (no `[REDACTED]` marker) so dense smuggling payloads
+  produce readable output; `SanitizationResult.invisibles_stripped` is a
+  new field carried to the ledger.
+
+### Changed
+
+- **Triangulation gate reframed as *artifact families* not *subsystems*.**
+  ShimCache and Amcache are both written by the Windows Application
+  Experience Service and defeated together by the one-syscall
+  `BaseFlushAppcompatCache` / `ShimFlushCache` anti-forensic primitive
+  (open-source `AntiForensic.NET` clears both in one run). Counting them
+  as two independent sources overstated forgery resistance by ~4
+  percentage points at `k=2`. Updated README "senior-analyst gate",
+  CLAUDE.md invariant #5, and `docs/THREAT_MODEL_TRIANGULATION.md` with
+  a new "Family coupling and the AppCompat correction" section — the
+  five families are {AppCompat, Explorer/NTUSER, BAM, Sysmon/ETW,
+  Prefetch/SysMain}. Revised Poisson-binomial table with the family
+  tuple `(0.10, 0.15, 0.15, 0.20, 0.30)` is regression-tested by
+  `scripts/validate_threat_model_math.py` alongside the existing
+  non-uniform table.
+
 ### Added
 
 - `scripts/threat_model_priors.py`: single source of truth for the
@@ -29,11 +90,37 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   week-4 `claim_finding` implementation cannot silently drift from
   the threat-model doc. Ledger-stable string values enforced by test.
 
+- `scripts/sanctum-mcp.service`: hardened systemd unit for production /
+  dedicated-host deployments. Runs Sanctum as a non-privileged `sanctum`
+  user with `NoNewPrivileges`, `ProtectSystem=strict`,
+  `ReadOnlyPaths=/cases /evidence`, `MemoryDenyWriteExecute`, dropped
+  `CapabilityBoundingSet`, and a seccomp filter that denies
+  `@privileged @debug @mount @reboot @swap` syscalls. Architectural
+  defences still come from the typed tool surface; the sandbox limits
+  blast radius under the failure-domain-isolation lens.
+  `docs/DEV_PLATFORM.md` gains an install/verification section.
+
+- `docs/THREAT_MODEL_LEDGER.md`: full threat model for the audit-ledger
+  posture ladder (rung 0 = plain SHA-256, rung 1 = HMAC, rung 2 = RFC 3161
+  witness, rung 3 = public Merkle-tree). Documents the attacker model at
+  each rung, residual risk, operational cadence guidance, and the
+  `openssl ts -verify` command an independent party would run to check a
+  stamp.
+- `src/sanctum/notary.py`: RFC 3161 TSA stamping for the ledger head.
+  `openssl`-based, no new Python dependencies.
+- `tests/test_notary.py`: 6 tests covering the stamp-head happy path,
+  head-binding correctness, openssl-missing/TSA-rejection error paths,
+  archive-dir override, and empty-ledger behaviour. All tests mock
+  subprocess + urllib so the suite never hits the network.
+
 ### Changed
 
 - `sanctum.sanitize.sanitize`: accepts new `max_input_bytes` kwarg
   with default `MAX_INPUT_BYTES`. Pre-existing callers are unaffected
-  (sub-16-MiB inputs behave identically).
+  (sub-16-MiB inputs behave identically). The staged pipeline is now
+  invisibles-strip → pattern-redact → truncate; the new first stage
+  covers the Unicode Tag block, both variation-selector blocks, and
+  the classic zero-width / bidi / general-format ranges.
 
 - `docs/THREAT_MODEL_SANITIZATION.md`: formal justification for the
   `strip → truncate` ordering in `sanctum.sanitize`. Proves correctness

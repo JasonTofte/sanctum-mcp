@@ -99,6 +99,21 @@ def main() -> int:
             actual = poisson_binom_ge((*ps, p6), k)
             all_ok &= check(f"PB(6) p_6={p6} k={k}", actual, exp)
 
+    print("\n§(family) Poisson-Binomial under artifact-family tuple")
+    # AppCompat collapses ShimCache+Amcache at p=0.10; UserAssist and BAM split.
+    ps_fam = (0.10, 0.15, 0.15, 0.20, 0.30)
+    dist_fam = poisson_binom_dist(ps_fam)
+    all_ok &= check("PB-fam P(X=0)", dist_fam[0], 0.3641)
+    all_ok &= check("PB-fam P(X=1)", dist_fam[1], 0.4161)
+    all_ok &= check("PB-fam P(X=2)", dist_fam[2], 0.1793)
+    all_ok &= check("PB-fam P(X=3)", dist_fam[3], 0.0368)
+    all_ok &= check("PB-fam P(X=4)", dist_fam[4], 0.0036)
+    all_ok &= check("PB-fam P(X=5)", dist_fam[5], 0.0001, tol=5e-5)
+    all_ok &= check("PB-fam sum=1", sum(dist_fam), 1.0, tol=1e-9)
+    all_ok &= check("PB-fam P(X>=2)", poisson_binom_ge(ps_fam, 2), 0.2198)
+    all_ok &= check("PB-fam P(X>=3)", poisson_binom_ge(ps_fam, 3), 0.0405)
+    all_ok &= check("PB-fam P(X>=4)", poisson_binom_ge(ps_fam, 4), 0.0037)
+
     print("\n§(boundary) straddle probability (P3 sanitization doc)")
     # P_straddle = (k-1) / (L - k + 1); for k=30, L=200 KiB = 204,800
     k_pat, L = 30, 200 * 1024

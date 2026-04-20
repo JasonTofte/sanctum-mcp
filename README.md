@@ -19,15 +19,19 @@ GTG-1002 (Anthropic, Nov 2025) documented attackers defeating prompt-based guard
 
 ## The senior-analyst gate
 
-Findings cannot be reported from a single artifact source. A "program X was executed" claim requires **at least two of**:
+Findings cannot be reported from a single artifact source. A "program X was executed" claim requires **at least two distinct artifact families**. The five families and their members:
 
-- Prefetch (memory-manager subsystem)
-- Amcache (AppCompat telemetry scheduled task — records SHA1 hash; rename/timestomp-resistant)
-- ShimCache (shim engine subsystem)
-- UserAssist / BAM (per-user registry subsystems)
-- Sysmon / EventID 4688 (event-log subsystem)
+| Family              | Members                 | Trust root                                |
+|---------------------|-------------------------|-------------------------------------------|
+| **AppCompat**       | ShimCache, Amcache      | Application Experience Service / CSRSS    |
+| **Explorer / NTUSER** | UserAssist            | `explorer.exe` + per-user NTUSER.dat      |
+| **Background service** | BAM                  | `bam.sys` kernel driver + SYSTEM registry |
+| **Kernel ETW**      | Sysmon / EventID 4688   | Windows Event Log + `sysmon.exe`          |
+| **SysMain**         | Prefetch                | `SysMain` service + `C:\Windows\Prefetch\` |
 
-These are produced by **independent OS subsystems**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function forces the agent to behave like a senior analyst: single-source finding = hypothesis; multi-source = evidence.
+Why families rather than individual artifacts: ShimCache and Amcache are both written by the AppCompat subsystem, so `BaseFlushAppcompatCache` (one syscall) or `AntiForensic.NET` (one tool) defeats them together. An internal architecture audit flagged this coupling — two audit_ids pointing into the **same** family count as one source for the gate. A `{ShimCache, Amcache}` pair is a single-family finding, not a corroborated one.
+
+The five families listed are produced by **distinct trust roots**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function (`claim_finding(hypothesis, audit_ids[])` — week 4) forces the agent to behave like a senior analyst: single-family finding = hypothesis; multi-family = evidence.
 
 Quantitative justification for the `≥2` threshold — and the stratified
 `CORROBORATED | FINAL` case — lives in
@@ -85,7 +89,10 @@ Every numeric claim in both docs is regression-tested by
                          │                                    │
                          │  Audit ledger:                     │
                          │    • append-only JSONL             │
-                         │    • HMAC-SHA256 chain             │
+                         │    • HMAC-SHA-256 chain            │
+                         │      (key externalised via env)    │
+                         │    • RFC 3161 TSA witness (opt-in) │
+                         │      via sanctum.notary            │
                          │    • every tool call → audit_id    │
                          │    • every finding → audit_ids[]   │
                          └────────────────────────────────────┘
@@ -118,7 +125,7 @@ that exercises it.
 
 | Attack class | Failure mode | Test |
 |---|---|---|
-| `Bash(*)` wildcard in allowlist silently voids hook decisions (cc #41151) | State 1 — silent corruption | Enforced by project `.claude/settings.local.json` design (no wildcard). Lint-level concern; not a code-path test. |
+| `Bash(*)` wildcard in allowlist auto-accepts every bash command; PreToolUse `ask`/`deny` is silently ignored for auto-accepted tools (cc #41151, #31523) | State 1 — silent corruption | Enforced by project `.claude/settings.local.json` design (no wildcard). Lint-level concern; not a code-path test. |
 | MCP tool-call bypasses PreToolUse hook (cc #33106) | State 2 — fail-open relative to hooks | `test_state2_no_write_exec_verb_exposed` — server cannot expose a destructive verb; hooks become irrelevant. |
 | Evidence-driven prompt injection (Sygnia 2025-08; GTG-1002 role-play) | State 3 — silent corruption | `test_state3_*` — 5 tests: classic, Sygnia RED TEAM, bidi/zero-width, system override, role-play. |
 | Case-path traversal via `case_id` | State 4 — fail-closed | `test_state4_*` — 3 tests: `..`, absolute, nonexistent. |

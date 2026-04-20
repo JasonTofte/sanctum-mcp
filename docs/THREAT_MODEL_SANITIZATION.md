@@ -16,11 +16,24 @@ argument an auditor can check without reading the code.
   a filename on disk). The attacker chooses both the bytes **and the
   byte position** at which their payload appears in the unstructured blob
   returned by a forensic tool.
-- **Defender pipeline.** `sanitize(raw)` applies two transforms:
-  1. `strip` — regex pass that replaces every match of
+- **Defender pipeline.** `sanitize(raw)` applies three local full-stream
+  transforms in this order:
+  1. `strip-invisibles` — silent removal of every codepoint in the
+     invisible-control set (zero-width, bidi, general-format, Tag block
+     U+E0001–U+E007F, variation selectors U+FE00–U+FE0F and
+     U+E0100–U+E01EF). No visible marker because a dense Tag-block payload
+     would otherwise produce an unreadable wall of `[REDACTED]` tokens; the
+     count is preserved in `SanitizationResult.invisibles_stripped` for the
+     audit ledger.
+  2. `strip-patterns` — regex pass that replaces every match of
      `_INJECTION_PATTERNS` with `[REDACTED:injection-candidate]`.
-  2. `truncate` — reject payload bytes past `MAX_PAYLOAD_BYTES` (64 KiB),
+  3. `truncate` — reject payload bytes past `MAX_PAYLOAD_BYTES` (64 KiB),
      appending a visible `[TRUNCATED: …]` marker.
+  Stages 1 and 2 are both local full-stream passes, so the prefix-closure
+  argument below applies to their composition as a single pattern-freeness
+  operation. The Tag-block coverage (stage 1) is the load-bearing defense
+  against arXiv 2510.05025-class smuggling; without it the visible-pattern
+  regex is structurally bypassable at near-100% ASR.
 - **Asset.** The bytes the LLM eventually sees inside
   `<evidence-untrusted>…</evidence-untrusted>` must not contain any
   pattern in the injection set.
@@ -115,14 +128,26 @@ it — but both demonstrate the attack has real downstream teeth.
 ## Residual obligations
 
 The proof above guarantees pattern-freeness; it does **not** guarantee
-the full security property on its own. Two obligations remain:
+the full security property on its own. Three obligations remain:
 
 1. **Pattern coverage.** `f` only defeats patterns enumerated in
-   `_INJECTION_PATTERNS`. A novel injection outside the set slips
-   through independent of ordering. Mitigated by the
-   `<evidence-untrusted>` wrapper and the downstream `claim_finding`
-   triangulation gate (defense-in-depth, not this document's concern).
-2. **DoS via unbounded `L`.** `f` runs in `Θ(L)` (regex engine worst
+   `_INJECTION_PATTERNS` **plus** the codepoints enumerated in
+   `_INVISIBLE_CODEPOINTS`. A novel *visible* injection outside the
+   regex set slips through independent of ordering. Mitigated by the
+   `<evidence-untrusted>` wrapper (Hines et al. 2024 show delimiting
+   alone is ≈ 50% ASR reduction — defense in depth, not primary) and
+   the downstream `claim_finding` triangulation gate.
+2. **Invisible-codepoint coverage.** The Tag block (U+E0001–U+E007F)
+   and variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF) are the
+   currently-known high-ASR smuggling vectors (arXiv 2510.05025
+   reports 100% ASR via Tag block against untrained guardrails).
+   `_INVISIBLE_CODEPOINTS` covers them plus the classic zero-width
+   and bidi ranges. New invisible-smuggling vectors (e.g., future
+   Unicode categories whose semantics permit presentation but not
+   semantics) must extend this set; regressions here are gated by
+   `tests/test_sanitize.py::test_unicode_tag_block_is_stripped` and
+   sibling tests.
+3. **DoS via unbounded `L`.** `f` runs in `Θ(L)` (regex engine worst
    case is higher for some patterns, but the current set is linear on
    non-pathological input). A caller that submits a 10 GB evidence
    blob forces a 10 GB scan. **Closed** as of

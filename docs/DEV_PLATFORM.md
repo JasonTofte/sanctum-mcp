@@ -196,6 +196,72 @@ path is AWS EC2:
 - **Recording**: `asciinema rec` for the terminal portion; add an OBS capture
   of a desktop VNC session to the EC2 only if a graphical panel is essential.
 
+## Hardened systemd unit (production-posture sandbox)
+
+For non-interactive deployments (a SOC running Sanctum as a service, not a
+hackathon demo), [`scripts/sanctum-mcp.service`](../scripts/sanctum-mcp.service)
+ships a systemd unit with defense-in-depth confinement: `NoNewPrivileges`,
+`ProtectSystem=strict`, `ReadOnlyPaths=/cases /evidence`, `ReadWritePaths=/var/lib/sanctum`,
+`MemoryDenyWriteExecute`, `PrivateTmp`, dropped `CapabilityBoundingSet`,
+seccomp `SystemCallFilter=@system-service ~@privileged @debug @mount @reboot @swap`.
+
+Sanctum's architectural guarantees come from the typed tool surface (CLAUDE.md
+invariants #1–#2) — **not** from this unit. The sandbox tightens the
+[failure-domain-isolation](../.claude/lenses/failure-domain-isolation.md) lens:
+if a typed tool body is ever compromised, the confinement limits the blast
+radius to the cases path the tool was designed to read.
+
+### When to use
+
+- **Hackathon demo / single-shot analysis**: skip this unit. Run
+  `python -m sanctum.server` directly from the venv — simpler, and the
+  stdio MCP client (Claude Code) manages lifetime naturally.
+- **Production or judge-facing reproduction on a dedicated host**: install
+  the unit. Then the MCP server runs under a dedicated `sanctum` user with
+  no privileges to spare.
+
+### Install
+
+```bash
+# 1. Create the dedicated user.
+sudo useradd --system --home-dir /var/lib/sanctum --shell /usr/sbin/nologin sanctum
+sudo install -d -o sanctum -g sanctum -m 0750 /var/lib/sanctum
+
+# 2. Place the venv where the unit expects it.
+sudo install -d -o root -g root -m 0755 /opt/sanctum
+sudo python3 -m venv /opt/sanctum/.venv
+sudo /opt/sanctum/.venv/bin/pip install /path/to/find-evil
+
+# 3. Populate the environment file with the HMAC key.
+sudo install -d -o root -g sanctum -m 0750 /etc/sanctum
+sudo tee /etc/sanctum/env > /dev/null <<ENV
+SANCTUM_LEDGER_HMAC_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+ENV
+sudo chmod 0640 /etc/sanctum/env
+sudo chown root:sanctum /etc/sanctum/env
+
+# 4. Install and enable the unit.
+sudo install -o root -g root -m 0644 \
+    scripts/sanctum-mcp.service /etc/systemd/system/sanctum-mcp.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now sanctum-mcp.service
+sudo systemctl status sanctum-mcp.service
+```
+
+### Verification
+
+`systemd-analyze security sanctum-mcp` reports the sandbox strength. The
+unit targets `OK` for every confinement line — audit the output after
+install:
+
+```bash
+systemd-analyze security sanctum-mcp
+```
+
+Exposure score should be well below the default `5.0` threshold (typical
+value with this unit: `~1.6`). Anything materially higher than the stock
+unit is a regression — treat as a security bug.
+
 ## Follow-up work
 
 - Rename `scripts/bootstrap_vm.sh` → `scripts/bootstrap_host.sh` to remove the
@@ -204,3 +270,7 @@ path is AWS EC2:
   one command, not a manual process.
 - Commit measured `cast install` timings to `docs/MEASURED_TIMINGS.md` once
   the bootstrap runs on the reference T14.
+- Add a separate systemd timer unit for `sanctum.notary.stamp_head()` so the
+  RFC 3161 witness runs on a schedule (e.g., every 30 minutes during an
+  active case) without leaving the TSA network allowlist on the main server
+  unit.

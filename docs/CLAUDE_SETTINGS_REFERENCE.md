@@ -19,8 +19,12 @@ can reproduce an architecturally-sound configuration.
 {
   "permissions": {
     "allow": [
-      // Explicit named bash commands only. NO "Bash(*)" — wildcard allow
-      // silently voids PreToolUse hook decisions (Claude Code issue #41151).
+      // Explicit named bash commands only. NO "Bash(*)" — a wildcard Bash
+      // allow makes every matching command auto-accepted, and PreToolUse
+      // "ask"/"deny" decisions on auto-accepted tools are silently ignored
+      // (Claude Code issue #41151, "PreToolUse hooks 'ask'/'deny' decisions
+      // are silently ignored for all auto-accepted tools"; see also #31523
+      // on the Bash(*) wildcard specifically).
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(head:*)",
@@ -109,7 +113,8 @@ exercise these directly. If you see a hook silently fail, check against:
 
 | Issue | Condition that voids the hook |
 |---|---|
-| #41151 | `Bash(*)` in allow list — any bash command bypasses hook decisions |
+| #41151 | PreToolUse `ask`/`deny` silently ignored for *any* auto-accepted tool; `Bash(*)` in allow list is the most common way to inadvertently auto-accept |
+| #31523 | Companion UX/security issue: `Bash(*)` wildcard is undiscoverable as a silent hook-decision voider |
 | #33106 | PreToolUse deny is NOT enforced on `mcp__*` tool calls |
 | #44534, #46044 | PreToolUse deny is NOT enforced on `Task`/Agent subagent calls |
 | #37210, #47853 | Edit tool ignores some hook decisions in certain versions |
