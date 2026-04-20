@@ -65,6 +65,17 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   `scripts/validate_threat_model_math.py` alongside the existing
   non-uniform table.
 
+- **README IR-Accuracy baseline citation — Memory-LLM → DFIR-Metric.**
+  The prior "Memory-LLM ACM 2025 = <20% precision" baseline could not
+  be verified. A directed literature search against arXiv / DFRWS /
+  ACL / OpenReview found no ACM-published paper matching that title.
+  Pinned to **DFIR-Metric** (Cherif et al.,
+  [arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025) —
+  the verifiable closest prior-art DFIR-LLM benchmark; GPT-4.1's best
+  reported score is 38.52% TUS@4 on Module III (disk/memory forensic
+  tasks). `docs/ACCURACY.md` (roadmap week 8) will pin regression
+  numbers against DFIR-Metric TUS@m going forward.
+
 ### Added
 
 - `docs/LLM_AGNOSTIC.md` + `scripts/smoke_test_mcp_stdio.sh`: document and

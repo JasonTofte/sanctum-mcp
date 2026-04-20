@@ -117,7 +117,7 @@ protocol-compatibility smoke test.
 | Rubric axis | How Sanctum scores |
 |---|---|
 | Autonomous Execution Quality *(tiebreaker)* | Reflexion-style `<reflect>` pass on every tool call; triangulation gate forces re-planning on single-source findings |
-| IR Accuracy | Measured precision/recall vs published baseline (Memory-LLM ACM 2025 = <20% precision); regression table in `docs/ACCURACY.md` |
+| IR Accuracy | Measured against DFIR-Metric ([arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). Regression table in `docs/ACCURACY.md`. |
 | Breadth & Depth | Complete Windows execution-evidence triangulation set + core memory volatility; depth over breadth per brief |
 | Constraint Implementation | **Architectural** — typed tools, hash-anchored I/O, no shell passthrough; bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
 | Audit Trail Quality | Every finding traces to ≥2 `audit_id` entries; `audit_ids[]` cross-links to input hashes + tool outputs |
