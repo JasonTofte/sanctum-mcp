@@ -44,6 +44,14 @@ Every numeric claim in both docs is regression-tested by
 
 ## Architecture
 
+The diagram below shows Claude Code + Opus 4.7 as the reference MCP client
+(per the hackathon brief), but Sanctum's architectural invariants are
+enforced server-side and hold for **any** compliant stdio MCP client —
+Cline, Claude Desktop, Continue, or the OpenAI MCP shim. See
+[`docs/LLM_AGNOSTIC.md`](docs/LLM_AGNOSTIC.md) for the contract and
+[`scripts/smoke_test_mcp_stdio.sh`](scripts/smoke_test_mcp_stdio.sh) for the
+protocol-compatibility smoke test.
+
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ Claude Code (Opus 4.7)                                         │

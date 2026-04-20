@@ -67,6 +67,19 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- `docs/LLM_AGNOSTIC.md` + `scripts/smoke_test_mcp_stdio.sh`: document and
+  verify the LLM-agnosticism claim. The doc states the invariant-by-invariant
+  contract between the server and any compliant stdio MCP client, names the
+  Claude-Code-specific defense-in-depth layer (PreToolUse hook, Bash
+  allowlist, hook-induced demo determinism) with generic equivalents for
+  Cline / Continue / Claude Desktop / OpenAI MCP shim, and gives connection
+  snippets for each. The smoke test pipes a three-message JSON-RPC handshake
+  (`initialize` → `notifications/initialized` → `tools/list`) through
+  `python -m sanctum.server` and verifies `get_amcache` is advertised —
+  passing this is necessary + sufficient for any stdio MCP client to inherit
+  Sanctum's server-side guarantees. Claude Code remains the reference client;
+  portability is an architectural claim, not a tested-everywhere one.
+
 - `scripts/threat_model_priors.py`: single source of truth for the
   per-subsystem compromise probabilities feeding
   `docs/THREAT_MODEL_TRIANGULATION.md`. Self-contained dataclass +
