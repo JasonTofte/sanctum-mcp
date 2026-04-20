@@ -47,8 +47,14 @@ to `k = 3` drops it by about an order of magnitude.
 
 ## Non-uniform — Poisson-binomial with realistic `p_i`
 
-The subsystems are not equally tamper-resistant. A defensible first-cut
-ordering, from hardest to easiest to tamper:
+The subsystems are not equally tamper-resistant. The canonical priors
+live in [`scripts/threat_model_priors.py`](../scripts/threat_model_priors.py)
+as the single source of truth — both validators import from there, and
+[`tests/test_threat_model_priors.py`](../tests/test_threat_model_priors.py)
+asserts the table below matches the module. Update either, and the test
+fires until both agree.
+
+A defensible first-cut ordering, from hardest to easiest to tamper:
 
 | Subsystem         | `p_i` | Rationale                                                 |
 |-------------------|-------|-----------------------------------------------------------|
@@ -159,8 +165,11 @@ this document spells out the tier bands.
 - [ ] Wire `claim_finding` to the helper when it ships (week-4 per
       README roadmap); reject/DRAFT single-source claims at the MCP
       typed boundary.
-- [ ] Encode the `p_i` table in `docs/` as data (YAML) and regenerate
-      this doc's tables from a test fixture, so forensic-community
-      feedback on the priors updates the thresholds automatically.
+- [x] **Shipped.** Priors centralized in
+      `scripts/threat_model_priors.py`; both validators import from
+      there. `tests/test_threat_model_priors.py` pins the canonical
+      values so a prior change cannot silently land without updating
+      this doc. (Tables themselves remain hand-curated rather than
+      auto-regenerated — the validator failure is the regen prompt.)
 - [ ] Model the joint compromise distribution (copula with shared
       SYSTEM-access latent factor); rerun the table.
