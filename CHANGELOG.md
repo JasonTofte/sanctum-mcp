@@ -4,6 +4,8 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-25
+
 ### Security
 
 - **BREAKING — audit ledger upgraded from plain SHA-256 to HMAC-SHA-256.**
@@ -77,6 +79,14 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   numbers against DFIR-Metric TUS@m going forward.
 
 ### Added
+
+- `docs/PRIVACY_AND_PUBLIC_RECORD.md`: reviewer-facing document explaining the
+  boundary between public artifacts (code, threat models, tests, reproduction
+  harness) and the maintainer's private development process (dev-rig
+  configuration, investigation notes, vendor-specific findings, secrets,
+  framework-proprietary tooling). Cross-references `CLAUDE.md` §"What does NOT
+  go in this repo" and `docs/REPRODUCTION.md` so the public/private boundary
+  is traceable through existing project conventions.
 
 - `docs/LLM_AGNOSTIC.md` + `scripts/smoke_test_mcp_stdio.sh`: document and
   verify the LLM-agnosticism claim. The doc states the invariant-by-invariant
