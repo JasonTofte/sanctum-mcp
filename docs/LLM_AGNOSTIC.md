@@ -2,9 +2,24 @@
 
 Sanctum's architectural guarantees live in the **MCP server**, not in the
 model on the other end of the stdio transport. This document is the contract
-between Sanctum and any MCP-compliant client — it states what the server
-guarantees independently of the client, names the thin Claude-Code-specific
-layer, and shows how to connect non-Claude clients.
+between Sanctum and any MCP-compliant client.
+
+> ⚠️ **Scope of this claim — read first.** "LLM-agnostic" is an
+> *architectural* claim — the server's bytes-level invariants do not
+> depend on the client. It is **not** a *tested-everywhere* claim.
+> Sanctum's reference and only validated client is **Claude Code with
+> Opus 4.7** (the hackathon brief prescribes Claude-family models);
+> judges reproduce against that configuration. The MCP smoke test
+> ([`scripts/smoke_test_mcp_stdio.sh`](../scripts/smoke_test_mcp_stdio.sh))
+> proves protocol-stdio compatibility for any compliant client, but
+> behavioral quality per model — sanitization residual against novel
+> payloads, deception-signature interpretation, IR accuracy
+> ([`docs/ACCURACY.md`](ACCURACY.md)) — is **measured on Opus 4.7
+> only**. v2 may extend the validation matrix; v1 does not claim it.
+
+This document states what the server guarantees independently of the
+client, names the thin Claude-Code-specific layer, and shows how to
+connect non-Claude clients.
 
 ## TL;DR
 
@@ -131,10 +146,12 @@ this class by pushing as much as possible into the typed tool surface.
 
 ## Caveat — tested-with vs. compliant-with
 
-Sanctum's reference client is **Claude Code with Opus 4.7** (per the hackathon
-brief, which prescribes Claude-family models). The hackathon judges will
-reproduce against that configuration. LLM-agnosticism is an *architectural*
-claim (the server's invariants don't depend on the client), not a
-*tested-everywhere* claim. The smoke test proves MCP-stdio compatibility for
-any compliant client; observed behavior quality per model is a separate
-measurement axis.
+The "Scope of this claim" callout at the top of this doc is the canonical
+statement. To restate inline so it is not misread: protocol compatibility
+(MCP-stdio handshake + `tools/list` advertising the typed surface) holds
+for any compliant client and is verified by the smoke test. Observed
+behavioral quality on a specific model — model robustness to residual
+injection, Reflexion-style reasoning, IR-accuracy regression — is
+measured only on the reference configuration (Claude Code with Opus 4.7)
+for v1. Other clients/models inherit the architectural guarantees but
+not the behavioral measurements.

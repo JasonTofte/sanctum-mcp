@@ -3,6 +3,18 @@
 This document is for **hackathon judges** and contributors who want to run
 Sanctum end-to-end against a real CFReDS case on a clean machine.
 
+> ⚠️ **OPERATOR DISCIPLINE — READ BEFORE MOUNTING EVIDENCE.** The
+> Sanctum runtime evidence-mount check (`os.statvfs`-based) verifies
+> the *VFS-level* read-only flag. It does **not** detect kernel
+> journal-replay writes that happen during ext-family mount with
+> `-o ro` alone — the kernel will silently write to the underlying
+> block device while the VFS reports read-only. **`noload,norecovery`
+> are load-bearing in addition to `-o ro`** for ext2/ext3/ext4
+> images. Step 2 below has the correct mount incantation; deviating
+> from it silently downgrades the read-only guarantee with no
+> warning from the runtime check. Use `blockdev --setro` on the loop
+> device as a belt-and-suspenders guard, as Step 2 shows.
+
 ## Host requirements
 
 - 16 GB RAM minimum (SIFT + evidence mount + MCP + Claude Code)

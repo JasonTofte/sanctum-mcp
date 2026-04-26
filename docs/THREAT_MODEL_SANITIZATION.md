@@ -159,6 +159,26 @@ the full security property on its own. Three obligations remain:
    Regression pinned by
    `tests/test_sanitize.py::test_input_over_max_input_bytes_is_rejected`.
 
+## Test-coverage scope (what bypass tests do and don't verify)
+
+The bypass tests below verify **server-side invariants**: that
+pattern-bearing inputs produce pattern-free outputs, that oversized
+inputs are rejected, that invisibles are stripped before truncation.
+They are property tests against the sanitizer implementation.
+
+**Out of scope for v1.** End-to-end LLM behavioural robustness —
+whether Opus 4.7 still misinterprets evidence after sanitization
+removes a known pattern, or whether a novel pattern outside
+`_INJECTION_PATTERNS` succeeds against the downstream model — is a
+distinct class of test requiring the LLM in-context against
+attacker-authored evidence. Tracked as a v2 followup, not shipped in
+v1.
+
+The §"Residual obligations" above name *what the sanitizer cannot
+guarantee*; this section names *what the test suite cannot verify*.
+They are different boundaries; both are surfaced explicitly so judges
+can assess what the bypass suite does and does not establish.
+
 ## Relation to existing tests
 
 - [`test_gap_injection_pattern_survives_across_truncation_boundary`](../tests/test_bypass.py)
