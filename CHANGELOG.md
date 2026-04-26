@@ -4,6 +4,19 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+
+- **`scripts/submission_dry_run.sh` + `Makefile`** — dev-time safety net that
+  stashes `./.claude/` aside, runs `pytest`, the MCP stdio smoke test, and
+  `scripts/check_no_secrets.sh`, then restores `./.claude/` via a shell
+  `trap`. Verifies that Sanctum's behaviour is not load-bearing on
+  framework-proprietary tooling under `./.claude/` — the property the
+  hackathon submission's "architectural guardrails, not framework
+  scaffolding" claim depends on. Refuses to run if a previous invocation
+  left a `.claude.stash` behind (avoids overwriting manual recovery
+  state). Invoke via `make submission-dry-run` or directly as
+  `./scripts/submission_dry_run.sh`.
+
 ## [0.2.0] — 2026-04-25
 
 ### Security
