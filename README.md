@@ -116,7 +116,7 @@ protocol-compatibility smoke test.
 
 | Rubric axis | How Sanctum scores |
 |---|---|
-| Autonomous Execution Quality *(tiebreaker)* | Reflexion-style `<reflect>` pass on every tool call; triangulation gate forces re-planning on single-source findings |
+| Autonomous Execution Quality *(co-equal 1/6 weight; first tiebreaker; Stage 1 gating)* | `claim_finding(hypothesis, audit_ids[])` is an **external-signal self-correction primitive** in the sense of Kamoi (TACL 2024): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection. A single-family claim returns DRAFT, forcing the agent to gather a second-family corroborator before promoting to CORROBORATED. This is the form of self-correction Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows empirically helps; intrinsic "reflect on mistakes" loops are not used because Huang shows they degrade reasoning on average. |
 | IR Accuracy | Measured against DFIR-Metric ([arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). Regression table in `docs/ACCURACY.md`. |
 | Breadth & Depth | Complete Windows execution-evidence triangulation set + core memory volatility; depth over breadth per brief |
 | Constraint Implementation | **Architectural** — typed tools, hash-anchored I/O, no shell passthrough; bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
@@ -155,9 +155,9 @@ consolidated adversarial-scenario view.
 
 - **Week 1 (P0, current)**: end-to-end skeleton. One typed tool (`get_amcache`), hardened `settings.json`, JSONL audit ledger, one CFReDS case loaded. Prove the architecture closes the loop.
 - **Week 2–3**: scale to 8 execution-evidence tools; integrate sanitization layer.
-- **Week 4**: triangulation gate (`claim_finding`).
-- **Week 5**: Reflexion loop + memory tool set.
-- **Week 6**: poisoned-evidence defense tests.
+- **Week 4**: triangulation gate (`claim_finding`) — wires the existing `FindingConfidence` enum into a typed function; the DRAFT→CORROBORATED transition is the demo's self-correction beat.
+- **Week 5**: `sanctum.deception` reason-code layer (forensic-deception detection — see [`docs/THREAT_MODEL_DECEPTION.md`](docs/THREAT_MODEL_DECEPTION.md)) + memory tool set. Reflexion `<reflect>` loop **dropped** — Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic self-correction degrades reasoning; the family gate is the empirically-supported external-signal alternative.
+- **Week 6**: poisoned-evidence defense tests + adversarial benchmark (~10 synthetic tampered cases under `tests/adversarial/`) measuring **refusal-under-tampering** — i.e., whether Sanctum correctly emits `DRAFT_TAMPER_SUSPECTED` rather than a confident wrong answer.
 - **Week 7** *(partially delivered week 1)*: bypass test suite
   [`tests/test_bypass.py`](tests/test_bypass.py) — 16 tests mapping to
   documented attack classes; see [Bypass coverage](#bypass-coverage) above.
@@ -177,7 +177,10 @@ consolidated adversarial-scenario view.
 - **Protocol SIFT** (teamdfir) — the POC this hackathon extends. Protocol SIFT is a Claude Code configuration bundle with no MCP server; Sanctum provides the out-of-process architectural boundary Protocol SIFT lacks.
 - **Sygnia** "When Your Logs Lie to You" (Aug 2025) — the concrete evidence-driven prompt-injection PoC Sanctum's sanitization layer is designed against.
 - **Greshake et al.**, *Not what you've signed up for* (arXiv 2302.12173) — the theoretical foundation for indirect prompt injection.
-- **Reflexion** (Shinn et al., arXiv 2303.11366) — the self-correction primitive mapped to the tiebreaker criterion.
+- **Reflexion** (Shinn et al., [arXiv:2303.11366](https://arxiv.org/abs/2303.11366)) and **Self-Refine** (Madaan et al., [arXiv:2303.17651](https://arxiv.org/abs/2303.17651)) — the intrinsic self-correction lineage Sanctum *deliberately does not adopt* after Huang ICLR 2024 showed these methods degrade reasoning when no external signal is present. The family-coupling gate is the external-signal alternative in Kamoi TACL 2024's taxonomy.
+- **Huang et al.**, *Large Language Models Cannot Self-Correct Reasoning Yet* ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798), ICLR 2024) — the negative result that anchors Sanctum's choice of architecture-over-introspection self-correction.
+- **Kamoi et al.**, *When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs* ([arXiv:2406.01297](https://arxiv.org/abs/2406.01297), TACL 2024) — the survey that defines the intrinsic-vs-external-signal taxonomy Sanctum cites.
+- **Conlan, Baggili, Breitinger**, *Anti-Forensics: Furthering Digital Forensic Science Through a New Extended, Granular Taxonomy* (DFRWS 2016) — taxonomic foundation for the `sanctum.deception` reason codes.
 
 ## Local development
 

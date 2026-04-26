@@ -76,6 +76,24 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Changed
 
+- **README — Autonomous Execution Quality row reframed; Reflexion dropped from
+  roadmap.** The brief's "Autonomous Execution Quality" criterion is co-equal
+  weight (1/6) **and** first tiebreaker **and** Stage 1 gating — three
+  load-bearing roles. The prior README marked it as just "tiebreaker" and
+  promised a Reflexion-style `<reflect>` pass on every tool call alongside
+  the family gate. Huang ICLR 2024
+  ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic
+  self-correction (Reflexion / Self-Refine) degrades reasoning on average;
+  Kamoi TACL 2024 ([arXiv:2406.01297](https://arxiv.org/abs/2406.01297))
+  classifies the family-coupling gate Sanctum already plans to ship as the
+  empirically-supported *external-signal* alternative. Net effect: scoring
+  table row rewritten to reframe `claim_finding` as the primary self-
+  correction primitive; week-5 Reflexion implementation **dropped**;
+  freed week becomes `sanctum.deception` reason-code layer + week-6
+  adversarial benchmark (refusal-under-tampering). Prior-art section
+  adds Huang, Kamoi, and Conlan-Baggili-Breitinger DFRWS 2016 (the
+  taxonomic foundation for the deception reason codes).
+
 - **Triangulation gate reframed as *artifact families* not *subsystems*.**
   ShimCache and Amcache are both written by the Windows Application
   Experience Service and defeated together by the one-syscall
@@ -104,13 +122,23 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
-- `docs/PRIVACY_AND_PUBLIC_RECORD.md`: reviewer-facing document explaining the
-  boundary between public artifacts (code, threat models, tests, reproduction
-  harness) and the maintainer's private development process (dev-rig
-  configuration, investigation notes, vendor-specific findings, secrets,
-  framework-proprietary tooling). Cross-references `CLAUDE.md` §"What does NOT
-  go in this repo" and `docs/REPRODUCTION.md` so the public/private boundary
-  is traceable through existing project conventions.
+- **`src/sanctum/deception.py` — forensic-deception reason-code layer.** New
+  module recognises three named anti-forensic technique signatures
+  (`BaseFlushAppcompatCache` / AppCompat flush, SysMain disabling to
+  suppress Prefetch, MFT `$STANDARD_INFORMATION` timestomp) and emits typed
+  `TamperReason` enum values consumed by the week-4 `claim_finding` gate
+  as a confidence-downgrade signal. Deterministic predicates only — no
+  ML, no tuned thresholds; each predicate is a small Boolean over named
+  artifact fields. Surfaces explicit ambiguity codes
+  (`AMBIGUOUS_LEGITIMATE_FLUSH_CONSISTENT`,
+  `AMBIGUOUS_SYSMAIN_DISABLED_OPERATOR_PLAUSIBLE`) when a fingerprint
+  also matches a legitimate operator action, per Garfinkel ICIW 2007
+  false-positive discipline. Threat model in
+  `docs/THREAT_MODEL_DECEPTION.md`; 17 unit tests in
+  `tests/test_deception.py` pin signature, ambiguity, and absence-of-
+  signal behaviour. Closes the structural-deception gap (attacker-
+  authored evidence *structure*, not text) that `sanctum.sanitize`
+  does not address.
 
 - `docs/LLM_AGNOSTIC.md` + `scripts/smoke_test_mcp_stdio.sh`: document and
   verify the LLM-agnosticism claim. The doc states the invariant-by-invariant
