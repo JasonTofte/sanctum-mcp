@@ -74,9 +74,7 @@ def test_each_audit_id_is_unique(ledger: Path) -> None:
     assert len(ids) == 50
 
 
-def test_missing_hmac_key_refuses_append(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_hmac_key_refuses_append(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Without ``SANCTUM_LEDGER_HMAC_KEY``, append MUST refuse.
 
     The ledger never silently downgrades to plain SHA-256 — that was the
@@ -98,9 +96,7 @@ def test_missing_hmac_key_refuses_append(
         )
 
 
-def test_short_hmac_key_refuses_append(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_short_hmac_key_refuses_append(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An HMAC key shorter than 16 bytes MUST be refused.
 
     128-bit is the NIST-recommended minimum for HMAC-SHA256. A too-short key
@@ -120,9 +116,7 @@ def test_short_hmac_key_refuses_append(
         )
 
 
-def test_verify_chain_fails_with_wrong_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_chain_fails_with_wrong_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Swapping the HMAC key between write and verify MUST break verification.
 
     This is the property that distinguishes HMAC from plain SHA-256: the
@@ -169,6 +163,7 @@ def test_args_hash_is_canonical(ledger: Path) -> None:
 
 # --- FindingConfidence tier classifier ---
 
+
 def test_classify_confidence_draft_for_zero_and_one() -> None:
     """n <= 1 is DRAFT — single-source or none, hypothesis only."""
     assert audit.classify_confidence(0) == audit.FindingConfidence.DRAFT
@@ -202,3 +197,51 @@ def test_finding_confidence_values_are_ledger_stable_strings() -> None:
     assert audit.FindingConfidence.DRAFT.value == "DRAFT"
     assert audit.FindingConfidence.CORROBORATED.value == "CORROBORATED"
     assert audit.FindingConfidence.FINAL.value == "FINAL"
+    assert audit.FindingConfidence.DRAFT_TAMPER_SUSPECTED.value == "DRAFT_TAMPER_SUSPECTED"
+
+
+# --- deception-signal demotion table ---
+
+
+def test_classify_confidence_no_signal_unchanged() -> None:
+    """deception_signal_present=False reproduces the legacy 3-tier mapping."""
+    assert (
+        audit.classify_confidence(0, deception_signal_present=False)
+        == audit.FindingConfidence.DRAFT
+    )
+    assert (
+        audit.classify_confidence(2, deception_signal_present=False)
+        == audit.FindingConfidence.CORROBORATED
+    )
+    assert (
+        audit.classify_confidence(3, deception_signal_present=False)
+        == audit.FindingConfidence.FINAL
+    )
+
+
+def test_classify_confidence_signal_demotes_final_to_corroborated() -> None:
+    assert (
+        audit.classify_confidence(3, deception_signal_present=True)
+        == audit.FindingConfidence.CORROBORATED
+    )
+    assert (
+        audit.classify_confidence(10, deception_signal_present=True)
+        == audit.FindingConfidence.CORROBORATED
+    )
+
+
+def test_classify_confidence_signal_demotes_corroborated_to_draft() -> None:
+    assert (
+        audit.classify_confidence(2, deception_signal_present=True) == audit.FindingConfidence.DRAFT
+    )
+
+
+def test_classify_confidence_signal_demotes_draft_to_tamper_suspected() -> None:
+    assert (
+        audit.classify_confidence(1, deception_signal_present=True)
+        == audit.FindingConfidence.DRAFT_TAMPER_SUSPECTED
+    )
+    assert (
+        audit.classify_confidence(0, deception_signal_present=True)
+        == audit.FindingConfidence.DRAFT_TAMPER_SUSPECTED
+    )

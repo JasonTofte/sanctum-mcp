@@ -122,6 +122,28 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/finding.py` + `src/sanctum/families.py` — `claim_finding`
+  family-corroboration gate (week-4 milestone).** The README's "Autonomous
+  Execution Quality" row now points to actual code: `claim_finding(case_id,
+  hypothesis, audit_ids, deception_signals=())` reads the referenced ledger
+  entries, resolves each `audit_id` → family via the `TOOL_TO_FAMILY` policy
+  table in `sanctum.families`, deduplicates families per CLAUDE.md invariant
+  5, and routes `(n_distinct_families, deception_signal_present)` through
+  `classify_confidence()` to produce a tier in
+  `{DRAFT_TAMPER_SUSPECTED, DRAFT, CORROBORATED, FINAL}`. The result is
+  appended to the audit ledger as a `tool="claim_finding"` entry with the
+  finding payload packed into `input_ref.finding` — non-breaking schema
+  extension; existing `verify_chain` covers findings on the same HMAC chain
+  as `get_*` calls. `FindingConfidence` enum gained
+  `DRAFT_TAMPER_SUSPECTED` (the post-demotion floor when a deception
+  signal accompanies a single-family claim). `classify_confidence` gained
+  a keyword-only `deception_signal_present` arg, default False — fully
+  backward-compatible. Strict-fail-closed: empty `audit_ids`, missing
+  ledger references, and unknown tool names all raise rather than silently
+  routing past the gate. 22 new tests across `test_finding.py` (15) and
+  `test_families.py` (7); existing `test_audit.py` extended with 5 new
+  tests covering the demotion table.
+
 - **`src/sanctum/deception.py` — forensic-deception reason-code layer.** New
   module recognises three named anti-forensic technique signatures
   (`BaseFlushAppcompatCache` / AppCompat flush, SysMain disabling to

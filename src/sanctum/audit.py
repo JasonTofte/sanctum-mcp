@@ -76,18 +76,32 @@ _MIN_KEY_BYTES = 16  # 128-bit minimum; 256-bit (32 bytes) recommended.
 
 
 class FindingConfidence(str, Enum):
-    """Evidence-corroboration tier emitted by the future ``claim_finding`` gate.
+    """Evidence-corroboration tier emitted by the ``claim_finding`` gate.
 
     String values are stable — they land in the audit ledger, so renaming a
     member is a backwards-incompatible ledger-format change.
+
+    Tier order from weakest to strongest:
+    ``DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL``.
+
+    ``DRAFT_TAMPER_SUSPECTED`` is the post-demotion tier emitted when a
+    single-family claim is also accompanied by an active ``sanctum.deception``
+    signal — the analyst sees both the weak corroboration AND the named
+    anti-forensic suspicion, so the audit trail records *why* the finding
+    was held below ``DRAFT``.
     """
 
+    DRAFT_TAMPER_SUSPECTED = "DRAFT_TAMPER_SUSPECTED"
     DRAFT = "DRAFT"
     CORROBORATED = "CORROBORATED"
     FINAL = "FINAL"
 
 
-def classify_confidence(n_distinct_subsystems: int) -> FindingConfidence:
+def classify_confidence(
+    n_distinct_subsystems: int,
+    *,
+    deception_signal_present: bool = False,
+) -> FindingConfidence:
     """Map distinct-subsystem count to a confidence tier.
 
     Pins the recommendation from docs/THREAT_MODEL_TRIANGULATION.md §5:
@@ -96,20 +110,43 @@ def classify_confidence(n_distinct_subsystems: int) -> FindingConfidence:
     - ``n == 2`` -> CORROBORATED (P(forgery) ~17.8% under realistic priors)
     - ``n >= 3`` -> FINAL (P(forgery) ~2.7%, ~7x harder to forge)
 
-    The week-4 ``claim_finding`` implementation is expected to call this
-    helper rather than re-encode the tier rules inline, so the threat-model
-    doc and the gate cannot silently drift.
+    When ``deception_signal_present`` is True the result is demoted one
+    tier (FINAL→CORROBORATED, CORROBORATED→DRAFT, DRAFT→DRAFT_TAMPER_SUSPECTED).
+    Demotion is binary in signal-count by design (see
+    ``docs/THREAT_MODEL_DECEPTION.md``): a second signal in the same case is
+    not independent evidence of more tampering — typically one attacker
+    runs one anti-forensic toolkit, so signals are correlated. Treating
+    signal-count as binary avoids correlation double-counting.
+
+    ``claim_finding`` calls this helper rather than re-encoding tier rules
+    inline, so the threat-model doc and the gate cannot silently drift.
     """
 
     if n_distinct_subsystems < 0:
-        raise ValueError(
-            f"n_distinct_subsystems must be >= 0, got {n_distinct_subsystems}"
-        )
+        raise ValueError(f"n_distinct_subsystems must be >= 0, got {n_distinct_subsystems}")
     if n_distinct_subsystems <= 1:
-        return FindingConfidence.DRAFT
-    if n_distinct_subsystems == 2:
-        return FindingConfidence.CORROBORATED
-    return FindingConfidence.FINAL
+        base = FindingConfidence.DRAFT
+    elif n_distinct_subsystems == 2:
+        base = FindingConfidence.CORROBORATED
+    else:
+        base = FindingConfidence.FINAL
+
+    if not deception_signal_present:
+        return base
+    return _demote(base)
+
+
+_DEMOTION: dict[FindingConfidence, FindingConfidence] = {
+    FindingConfidence.FINAL: FindingConfidence.CORROBORATED,
+    FindingConfidence.CORROBORATED: FindingConfidence.DRAFT,
+    FindingConfidence.DRAFT: FindingConfidence.DRAFT_TAMPER_SUSPECTED,
+    FindingConfidence.DRAFT_TAMPER_SUSPECTED: FindingConfidence.DRAFT_TAMPER_SUSPECTED,  # floor
+}
+
+
+def _demote(tier: FindingConfidence) -> FindingConfidence:
+    """One-tier demotion. ``DRAFT_TAMPER_SUSPECTED`` is the floor."""
+    return _DEMOTION[tier]
 
 
 @dataclass(frozen=True)
@@ -172,9 +209,7 @@ def require_hmac_key() -> bytes:
     try:
         key = bytes.fromhex(hex_key)
     except ValueError as exc:
-        raise RuntimeError(
-            f"{HMAC_KEY_ENV} must be a hex string; got {hex_key!r}"
-        ) from exc
+        raise RuntimeError(f"{HMAC_KEY_ENV} must be a hex string; got {hex_key!r}") from exc
     if len(key) < _MIN_KEY_BYTES:
         raise RuntimeError(
             f"{HMAC_KEY_ENV} must be at least {_MIN_KEY_BYTES} bytes "
