@@ -1,0 +1,4 @@
+SANCTUM-FIXTURE-STUB RuntimeBroker.exe-A1B2C3D4.pf placeholder for case_temp_exec_001.
+Real Prefetch (`.pf`) bytes are NOT committed; the sidecar JSON drives the
+parser. The hash suffix A1B2C3D4 is synthetic, not derived from real path
+hashing. See README.md in the case root for synthetic-case provenance.

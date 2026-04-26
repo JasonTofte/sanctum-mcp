@@ -1,0 +1,3 @@
+SANCTUM-FIXTURE-STUB Amcache.hve placeholder for case_temp_exec_001.
+Real Amcache hive bytes are NOT committed; the sidecar JSON drives the
+parser. See README.md in the case root for synthetic-case provenance.

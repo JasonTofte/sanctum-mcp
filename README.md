@@ -153,8 +153,9 @@ consolidated adversarial-scenario view.
 
 ## Status / roadmap
 
-- **Week 1 (P0, current)**: end-to-end skeleton. One typed tool (`get_amcache`), hardened `settings.json`, JSONL audit ledger, one CFReDS case loaded. Prove the architecture closes the loop.
-- **Week 2–3**: scale to 8 execution-evidence tools; integrate sanitization layer.
+- **Week 1 (P0)**: end-to-end skeleton. One typed tool (`get_amcache`), hardened `settings.json`, JSONL audit ledger, one CFReDS case loaded. Prove the architecture closes the loop.
+- **Week 2 (current — parser *layer* landed)**: typed parser layer + frozen `ExecutionEvent` contract under `src/sanctum/parsers/` (Amcache, ShimCache, Prefetch, Sysmon, BAM, UserAssist) consuming `<artifact>.sanctum-fixture.json` ingestion via `SANCTUM_USE_FIXTURE_SIDECAR=1`. The discriminator map in `sanctum.families.TOOL_TO_FAMILY` is the contract this layer writes against. Sanitization layer integrated. Real registry/EVTX/Prefetch decoders ship in week 3.
+- **Week 3**: replace fixture path with real parser bodies (`regipy` for hives, `python-evtx` for Sysmon, `libscca`/native-Python for Prefetch).
 - **Week 4**: triangulation gate (`claim_finding`) — wires the existing `FindingConfidence` enum into a typed function; the DRAFT→CORROBORATED transition is the demo's self-correction beat.
 - **Week 5**: `sanctum.deception` reason-code layer (forensic-deception detection — see [`docs/THREAT_MODEL_DECEPTION.md`](docs/THREAT_MODEL_DECEPTION.md)) + memory tool set. Reflexion `<reflect>` loop **dropped** — Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic self-correction degrades reasoning; the family gate is the empirically-supported external-signal alternative.
 - **Week 6**: poisoned-evidence defense tests + adversarial benchmark (~10 synthetic tampered cases under `tests/adversarial/`) measuring **refusal-under-tampering** — i.e., whether Sanctum correctly emits `DRAFT_TAMPER_SUSPECTED` rather than a confident wrong answer.

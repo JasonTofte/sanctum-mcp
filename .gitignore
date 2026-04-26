@@ -7,13 +7,17 @@
 # Evidence / case data — never ships with source
 cases/
 evidence/
-/*.raw
-/*.e01
-/*.dd
-/*.img
-/*.mem
-/*.vmem
-/*.vmsn
+
+# Evidence-image extensions — globbed so they apply EVERYWHERE. Without
+# `**/`, a smuggled `tests/fixtures/<something>/disk.e01` could slip past
+# a root-anchored `/*.e01` form. AC-19b regression tests pin these.
+**/*.raw
+**/*.e01
+**/*.dd
+**/*.img
+**/*.mem
+**/*.vmem
+**/*.vmsn
 ledger/
 audit/
 *.jsonl
@@ -57,3 +61,11 @@ logs/
 # Hackathon-specific: draft submission materials that are iterated locally
 demo_takes/
 .scratch/
+
+# Session-shaped design scaffolding (Sherlock 8-step methodology). The durable
+# design record is `docs/ADR_*.md`; the plan and test-matrix are process
+# artifacts that age out of date quickly. Keeping them local also avoids
+# leaking the upstream dev-framework dependency to the public repo (see
+# `feedback_framework_integration_strategy.md`).
+.sherlock-plan.md
+.test-matrix.md

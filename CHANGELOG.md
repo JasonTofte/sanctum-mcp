@@ -88,6 +88,87 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   state). Invoke via `make submission-dry-run` or directly as
   `./scripts/submission_dry_run.sh`.
 
+- **`docs/ADR_PARSER_LAYER.md` — five Architecture Decision Records for the
+  parser layer.** Permanent extraction of the load-bearing decisions made
+  during week-2 (frozen `ExecutionEvent` contract; BOTH-field sidecar
+  validation; fail-loud `PartialImplementationError` over null-object;
+  env-gated fixture mode; exception-message scrubbing via `_safe_field`).
+  Working planning artifact `.sherlock-plan.md` remains the implementation
+  trail; the ADR doc is the contributor-facing reference for *why* each
+  invariant exists. Cross-linked from `src/sanctum/parsers/__init__.py`.
+- **Typed parser layer + frozen `ExecutionEvent` contract.** New
+  `src/sanctum/events.py` and the `src/sanctum/parsers/` package (6
+  modules: `amcache`, `appcompat`/ShimCache, `prefetch`, `sysmon`, `bam`,
+  `userassist`) ship the data contract between artifact parsing and the
+  `claim_finding` triangulation gate. Parsers return `list[ExecutionEvent]`
+  — a frozen dataclass whose `family` field uses the canonical
+  `sanctum.families.TOOL_TO_FAMILY` strings (`AppCompat`, `Explorer/NTUSER`,
+  `Background-service`, `Kernel-ETW`, `SysMain`) so the gate's family-count
+  dedup works without re-mapping. `extras` is wrapped in `MappingProxyType`
+  post-construction so consumers cannot silently mutate evidence records,
+  and timezone-naive timestamps raise at the constructor boundary because
+  a wrong timezone in DFIR is a wrong answer to "did this run before or
+  after the breach window?". Parser bodies are env-gated stubs in week 2:
+  with `SANCTUM_USE_FIXTURE_SIDECAR=1` they load
+  `<artifact>.sanctum-fixture.json` via `parsers/_fixture_io.py`; without
+  the env var they raise `PartialImplementationError(NotImplementedError)`,
+  which FastMCP surfaces as MCP-spec-compliant `isError: true`. Production
+  `server.py` never sets the env var, so real-evidence callers fail loudly
+  and the parser layer does not silently shadow `_parse_amcache_stub`.
+- **Sidecar loader hardening (`parsers/_fixture_io.py`).** Validates
+  **both** `family` AND `tool` fields against the calling parser — same-family
+  cross-talk closure (a sidecar's family alone collapses across AppCompat,
+  so `parse_shimcache` could otherwise inherit Amcache events and the
+  family-count gate would tally a single source as two corroborations; the
+  AC-15d regression test pins this). Caps sidecar size at 1 MiB,
+  `program_path` at 4 KiB, `evidence_size_bytes` at 2^40. Rejects `bool`-as-int
+  in numeric fields; requires string-typed `program_path` and timestamp,
+  `dict[str,str]` extras, tz-aware ISO-8601 timestamps. Splits `OSError`
+  (I/O fault → propagates) from `JSONDecodeError` (data fault →
+  `ArtifactMalformedError`) so the audit ledger's fault classifier does
+  not mistype permission/IO errors as malformed evidence.
+- **Error-channel quarantine bypass closed.** Attacker-influenceable sidecar
+  fields are now scrubbed by `_safe_field()` before they appear in
+  exception messages — the angle brackets, control characters, and
+  newlines that would re-open the `<evidence-untrusted>` quarantine when
+  FastMCP serialises the exception into an `isError: true` MCP response
+  are replaced with `?` and the value is truncated to 128 characters.
+  Two independent Phase-6 reviewers (types+errors, security) flagged this
+  bypass independently — the success path runs through
+  `sanctum.sanitize.sanitize()` but the exception path does not. AC-15e
+  pins the regression with a sidecar declaring
+  `family="</evidence-untrusted>\n<inject>"`.
+- **Synthetic-fixture realisation of `case_temp_exec_001` —
+  `tests/fixtures/case_temp_exec_001_synthetic/`.** Hand-built sidecar
+  fixture corroborating the same scenario as the VM-regen skeleton at
+  `tests/fixtures/case_temp_exec_001/`, but populated immediately for
+  contract-level testing of the parser layer (the VM-regen flow takes
+  ~10 minutes; the synthetic fixture takes 0). Contains an Amcache hive
+  + Prefetch `.pf` (LOLBAS-style `RUNTIMEBROKER.EXE` masquerading as the
+  legitimate Windows binary) plus their `.sanctum-fixture.json` sidecars.
+  `tests/test_synthetic_case.py` asserts (a) two distinct families
+  surface, (b) all events agree on the suspect path, (c) `git ls-files`
+  includes the fixture tree, (d) a smuggled disk-image extension
+  (`*.raw|e01|dd|img|mem|vmem|vmsn`) under the fixture path is still
+  hard-denied — closes the broad-re-include hole.
+- **`tests/test_parsers.py`** — 19 tests for ACs 1–15e. Each parser
+  exercised in fixture mode for happy path, missing artifact, malformed
+  sidecar, empty events, and same-family cross-talk closure
+  (`test_sidecar_rejects_same_family_wrong_tool_shimcache_vs_amcache` —
+  AC-15d, the load-bearing regression for the silent-corruption path
+  identified in `feedback_sidecar_path_lookup.md`). AC-13 verifies
+  `_TOOL`/`_FAMILY` constants in every parser module match the canonical
+  `families.TOOL_TO_FAMILY` map via `importlib.import_module` — a regex
+  over `family="..."` would have been tautological because the parsers
+  use module-level constants.
+
+### Changed
+
+- **`.gitignore`** — adds globbed disk/memory-image extension hard-denies
+  (`**/*.raw`, `e01`, `dd`, `img`, `mem`, `vmem`, `vmsn`) so a smuggled
+  evidence-image under any future re-include path is still ignored.
+  Last-match-wins gitignore semantics; AC-19b regression test pins this.
+
 ## [0.2.0] — 2026-04-25
 
 ### Security

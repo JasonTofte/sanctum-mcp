@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "family": "SysMain",
+  "tool": "get_prefetch",
+  "generated_by": "manual:case_temp_exec_001 (week 2 minimum-viable synthetic case)",
+  "generated_at": "2026-04-25T14:00:00+00:00",
+  "source_artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "events": [
+    {
+      "program_path": "C:\\ProgramData\\runtimebroker.exe",
+      "timestamp": "2026-04-15T13:42:03+00:00",
+      "evidence_size_bytes": 35840,
+      "extras": {
+        "executable_name": "RUNTIMEBROKER.EXE",
+        "path_hash": "A1B2C3D4",
+        "run_count": "1"
+      }
+    }
+  ]
+}

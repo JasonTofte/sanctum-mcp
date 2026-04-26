@@ -100,7 +100,12 @@ Expected behaviour in the week-1 P0 skeleton:
 
 - Agent invokes `get_amcache(case_id="cfreds-hacking-case")`
 - MCP server resolves the case path, hashes the Amcache.hve file
-- Stub parser returns a placeholder row (real parser ships in week 2)
+- Stub parser returns a placeholder row. The typed parser **layer** + frozen
+  `ExecutionEvent` contract shipped in week 2 (`src/sanctum/parsers/`,
+  `src/sanctum/events.py`); real registry parsing of `.hve` bodies ships in
+  week 3 — until then the layer raises `PartialImplementationError` in
+  production (FastMCP returns `isError: true`) and accepts sidecar fixtures
+  only under `SANCTUM_USE_FIXTURE_SIDECAR=1` for tests.
 - Sanitization layer emits pre/post SHA-256
 - Audit entry appended to `/var/lib/sanctum/ledger.jsonl`
 - Tool output arrives in the LLM context wrapped in `<evidence-untrusted>`
@@ -146,6 +151,9 @@ In the Claude Code session, attempt:
 
 ## Known limitations
 
-This is a **week-1 P0 skeleton**. The Amcache parser is a stub. The full
-triangulation gate, Reflexion loop, and bypass test suite ship in weeks 4–7
-per the roadmap in [`../README.md`](../README.md).
+This is a **week-1 P0 skeleton with the week-2 typed-parser layer landed**.
+Parser **bodies** are still stubs — the registry/EVTX/Prefetch decoders ship
+in week 3 — but the data contract (`ExecutionEvent`), family discriminator
+map, and `<artifact>.sanctum-fixture.json` ingestion path are in place. The
+full triangulation gate, Reflexion loop, and bypass test suite ship in
+weeks 4–7 per the roadmap in [`../README.md`](../README.md).
