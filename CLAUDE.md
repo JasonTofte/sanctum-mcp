@@ -21,6 +21,10 @@ This file is the project-local guide for AI-assisted development on Sanctum. It 
 - API keys, ledger HMAC salts, or test-case ground-truth answers (gate-able data).
 - Screenshots or transcripts that contain third-party copyrighted material.
 
+## Private content lives in `/private/`
+
+Drafts, scratch notes, hackathon scoring or ground-truth records, demo takes, copyrighted screenshots, transcripts, and any IP-flavored documentation that must NOT ship with the public repo live in a top-level `/private/` directory. The directory is gitignored as a single line; structure inside is free-form (`notes/`, `scratch/`, `drafts/`, `demo_takes/`, etc.). Do not place private content under `docs/` (which is committed) or in scattered top-level dot-directories — `/private/` is the single root for non-public content, and a single gitignore line is easier to audit than N scattered patterns.
+
 ## Project-local `.claude/` is gitignored
 
 The local Claude Code settings (`.claude/settings.json`, any local skills) are gitignored. This is deliberate — the settings file references local absolute paths and may embed developer-specific conventions. A `docs/CLAUDE_SETTINGS_REFERENCE.md` documents the *shape* of the recommended settings for reviewers and contributors.

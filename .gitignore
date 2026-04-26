@@ -58,9 +58,11 @@ Thumbs.db
 *.log
 logs/
 
-# Hackathon-specific: draft submission materials that are iterated locally
-demo_takes/
-.scratch/
+# Private content — drafts, scratch notes, hackathon scoring/ground-truth,
+# demo takes, copyrighted screenshots, transcripts, anything not for the
+# public repo. Single top-level root by convention; see CLAUDE.md
+# §"Private content lives in `/private/`".
+/private/
 
 # Session-shaped design scaffolding (Sherlock 8-step methodology). The durable
 # design record is `docs/ADR_*.md`; the plan and test-matrix are process
