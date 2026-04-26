@@ -6,6 +6,66 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`claim_finding` exposed as an MCP tool in `src/sanctum/server.py`.**
+  The agent can now invoke the family-corroboration gate over the wire:
+  `claim_finding(case_id, hypothesis, audit_ids)` is `@mcp.tool()`-decorated,
+  validates `case_id` against the same Unicode/path-traversal allowlist as
+  `get_amcache` (refactored shared helper `_validate_case_id_format`), calls
+  `sanctum.finding.claim_finding`, JSON-encodes the resulting `Finding`, and
+  returns the payload through `sanitize() → wrap_evidence()` per CLAUDE.md
+  invariant 2 (all tool output is quarantined). The MCP surface intentionally
+  omits the `deception_signals` parameter — `DeceptionSignal` objects don't
+  serialize cleanly across MCP and week-5 will wire deception detection into
+  `get_*` calls automatically. Refusal exceptions
+  (`ClaimFindingError`, `UnknownToolError`, `ValueError`) bubble naturally
+  to the MCP client so the agent observes them as part of its self-correction
+  loop. New boundary tests in `tests/test_server_boundaries.py` pin the
+  evidence-wrap, the strict-fail-closed refusal of fabricated audit_ids
+  (the most architecturally load-bearing test in the suite), the unsafe-
+  case_id rejection (including a bidi-override codepoint case), and the
+  property that successful findings extend the same HMAC chain as `get_*`
+  calls.
+
+- **`src/sanctum/finding.py` + `src/sanctum/families.py` — `claim_finding`
+  family-corroboration gate (week-4 milestone).** The README's "Autonomous
+  Execution Quality" row now points to actual code: `claim_finding(case_id,
+  hypothesis, audit_ids, deception_signals=())` reads the referenced ledger
+  entries, resolves each `audit_id` → family via the `TOOL_TO_FAMILY` policy
+  table in `sanctum.families`, deduplicates families per CLAUDE.md invariant
+  5, and routes `(n_distinct_families, deception_signal_present)` through
+  `classify_confidence()` to produce a tier in
+  `{DRAFT_TAMPER_SUSPECTED, DRAFT, CORROBORATED, FINAL}`. The result is
+  appended to the audit ledger as a `tool="claim_finding"` entry with the
+  finding payload packed into `input_ref.finding` — non-breaking schema
+  extension; existing `verify_chain` covers findings on the same HMAC chain
+  as `get_*` calls. `FindingConfidence` enum gained
+  `DRAFT_TAMPER_SUSPECTED` (the post-demotion floor when a deception
+  signal accompanies a single-family claim). `classify_confidence` gained
+  a keyword-only `deception_signal_present` arg, default False — fully
+  backward-compatible. Strict-fail-closed: empty `audit_ids`, missing
+  ledger references, and unknown tool names all raise rather than silently
+  routing past the gate. 22 new tests across `test_finding.py` (15) and
+  `test_families.py` (7); existing `test_audit.py` extended with 5 new
+  tests covering the demotion table.
+
+- **`src/sanctum/deception.py` — forensic-deception reason-code layer.** New
+  module recognises three named anti-forensic technique signatures
+  (`BaseFlushAppcompatCache` / AppCompat flush, SysMain disabling to
+  suppress Prefetch, MFT `$STANDARD_INFORMATION` timestomp) and emits typed
+  `TamperReason` enum values consumed by the week-4 `claim_finding` gate
+  as a confidence-downgrade signal. Deterministic predicates only — no
+  ML, no tuned thresholds; each predicate is a small Boolean over named
+  artifact fields. Surfaces explicit ambiguity codes
+  (`AMBIGUOUS_LEGITIMATE_FLUSH_CONSISTENT`,
+  `AMBIGUOUS_SYSMAIN_DISABLED_OPERATOR_PLAUSIBLE`) when a fingerprint
+  also matches a legitimate operator action, per Garfinkel ICIW 2007
+  false-positive discipline. Threat model in
+  `docs/THREAT_MODEL_DECEPTION.md`; 17 unit tests in
+  `tests/test_deception.py` pin signature, ambiguity, and absence-of-
+  signal behaviour. Closes the structural-deception gap (attacker-
+  authored evidence *structure*, not text) that `sanctum.sanitize`
+  does not address.
+
 - **First test fixture skeleton — `tests/fixtures/case_temp_exec_001/`.**
   README documenting the scenario (benign signed binary executed from
   `%TEMP%`, exercising AppCompat ↔ SysMain triangulation) plus the VM
@@ -76,6 +136,24 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Changed
 
+- **README — Autonomous Execution Quality row reframed; Reflexion dropped from
+  roadmap.** The brief's "Autonomous Execution Quality" criterion is co-equal
+  weight (1/6) **and** first tiebreaker **and** Stage 1 gating — three
+  load-bearing roles. The prior README marked it as just "tiebreaker" and
+  promised a Reflexion-style `<reflect>` pass on every tool call alongside
+  the family gate. Huang ICLR 2024
+  ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic
+  self-correction (Reflexion / Self-Refine) degrades reasoning on average;
+  Kamoi TACL 2024 ([arXiv:2406.01297](https://arxiv.org/abs/2406.01297))
+  classifies the family-coupling gate Sanctum already plans to ship as the
+  empirically-supported *external-signal* alternative. Net effect: scoring
+  table row rewritten to reframe `claim_finding` as the primary self-
+  correction primitive; week-5 Reflexion implementation **dropped**;
+  freed week becomes `sanctum.deception` reason-code layer + week-6
+  adversarial benchmark (refusal-under-tampering). Prior-art section
+  adds Huang, Kamoi, and Conlan-Baggili-Breitinger DFRWS 2016 (the
+  taxonomic foundation for the deception reason codes).
+
 - **Triangulation gate reframed as *artifact families* not *subsystems*.**
   ShimCache and Amcache are both written by the Windows Application
   Experience Service and defeated together by the one-syscall
@@ -103,14 +181,6 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   numbers against DFIR-Metric TUS@m going forward.
 
 ### Added
-
-- `docs/PRIVACY_AND_PUBLIC_RECORD.md`: reviewer-facing document explaining the
-  boundary between public artifacts (code, threat models, tests, reproduction
-  harness) and the maintainer's private development process (dev-rig
-  configuration, investigation notes, vendor-specific findings, secrets,
-  framework-proprietary tooling). Cross-references `CLAUDE.md` §"What does NOT
-  go in this repo" and `docs/REPRODUCTION.md` so the public/private boundary
-  is traceable through existing project conventions.
 
 - `docs/LLM_AGNOSTIC.md` + `scripts/smoke_test_mcp_stdio.sh`: document and
   verify the LLM-agnosticism claim. The doc states the invariant-by-invariant

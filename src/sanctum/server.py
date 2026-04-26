@@ -19,6 +19,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from sanctum.audit import append_entry, require_hmac_key
+from sanctum.finding import claim_finding as _claim_finding_impl
 from sanctum.sanitize import sanitize, wrap_evidence
 
 log = logging.getLogger("sanctum.server")
@@ -91,6 +92,19 @@ def _validate_evidence_mount(cases_root: Path) -> None:
     log.info("evidence mount ro-check passed: %s", cases_root)
 
 
+def _validate_case_id_format(case_id: str) -> None:
+    """Format-only check on ``case_id`` — does not touch the filesystem.
+
+    Layers 1 and 2 of :func:`_resolve_case`'s defense, factored out so tools
+    that don't need filesystem resolution (e.g., :func:`claim_finding`, which
+    operates over the ledger only) can still gate against bidi-override,
+    zero-width, shell-metacharacter, and ``..``-traversal attacks before the
+    untrusted string lands in the audit ledger.
+    """
+    if not case_id or not _SAFE_CASE_ID.match(case_id) or ".." in case_id:
+        raise ValueError(f"unsafe case_id: {case_id!r}")
+
+
 def _resolve_case(case_id: str) -> CasePaths:
     """Resolve and validate a case directory. Refuses paths outside the cases root.
 
@@ -112,8 +126,7 @@ def _resolve_case(case_id: str) -> CasePaths:
     the case-dir check alone would miss.
     """
 
-    if not case_id or not _SAFE_CASE_ID.match(case_id) or ".." in case_id:
-        raise ValueError(f"unsafe case_id: {case_id!r}")
+    _validate_case_id_format(case_id)
 
     root = Path(os.environ.get(CASES_ROOT_ENV, DEFAULT_CASES_ROOT)).resolve()
     case_dir = (root / case_id).resolve()
@@ -124,9 +137,7 @@ def _resolve_case(case_id: str) -> CasePaths:
 
     amcache = (case_dir / "registry" / "Amcache.hve").resolve()
     if case_dir not in amcache.parents:
-        raise ValueError(
-            f"Amcache path escapes case directory (symlink?): {amcache}"
-        )
+        raise ValueError(f"Amcache path escapes case directory (symlink?): {amcache}")
 
     return CasePaths(case_id=case_id, root=case_dir, amcache_hve=amcache)
 
@@ -200,6 +211,80 @@ def get_amcache(case_id: str) -> str:
     )
 
     return wrapped
+
+
+@mcp.tool()
+def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> str:
+    """Gate a forensic claim through the family-corroboration check.
+
+    The agent calls this after gathering evidence via ``get_*`` tools. The
+    server reads each ``audit_id`` from the HMAC-chained ledger, resolves
+    the contributing artifact family (CLAUDE.md invariant 5; the five
+    families are AppCompat, Explorer/NTUSER, Background-service, Kernel-ETW,
+    SysMain), counts distinct families, and returns a Finding whose
+    ``tier`` is ``DRAFT``, ``CORROBORATED``, ``FINAL``, or
+    ``DRAFT_TAMPER_SUSPECTED``. ≥2 distinct families promotes to
+    CORROBORATED; ≥3 to FINAL.
+
+    This is the **external-signal self-correction** primitive in Kamoi
+    (TACL 2024)'s taxonomy — the agent's claim is checked against an
+    independent signal (artifact-family coupling) rather than against the
+    agent's own introspection (Reflexion / Self-Refine, both shown by
+    Huang ICLR 2024 to degrade reasoning when the model is its own judge).
+
+    The result is written to the ledger as a ``tool="claim_finding"``
+    entry on the same HMAC chain as ``get_*`` calls — so a forged finding
+    requires compromising ``SANCTUM_LEDGER_HMAC_KEY``, not just disk
+    write access.
+
+    Returns a JSON object describing the Finding (audit_id, tier,
+    families, audit_ids that voted, n_distinct_families) wrapped in
+    ``<evidence-untrusted>``. Downstream agent behaviour MUST condition
+    on the ``tier`` field — DRAFT means the corroboration threshold is
+    not met and the agent must seek another artifact family before
+    re-claiming.
+
+    Refusal contracts (each surfaces an exception the agent observes):
+
+    - Empty ``audit_ids`` → :class:`sanctum.finding.ClaimFindingError`.
+    - Any ``audit_id`` not present in the ledger → ``ClaimFindingError``.
+      This is the strict-fail-closed gate against an agent fabricating
+      audit_ids under prompt-injection pressure — the most
+      architecturally load-bearing refusal in the system.
+    - Any referenced ledger entry has an unmapped tool →
+      :class:`sanctum.families.UnknownToolError`.
+    - Unsafe ``case_id`` (Unicode/bidi/zero-width/path-traversal) →
+      :class:`ValueError`.
+    """
+
+    _validate_case_id_format(case_id)
+
+    finding = _claim_finding_impl(
+        case_id=case_id,
+        hypothesis=hypothesis,
+        audit_ids=audit_ids,
+    )
+
+    payload = {
+        "audit_id": finding.audit_id,
+        "case_id": finding.case_id,
+        "hypothesis": finding.hypothesis,
+        "tier": finding.tier.value,
+        "audit_ids": list(finding.audit_ids),
+        "families": list(finding.families),
+        "n_distinct_families": finding.n_distinct_families,
+        "reason_codes": list(finding.reason_codes),
+        "demoted_for_tamper": finding.demoted_for_tamper,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, indent=2)
+
+    # The Finding payload is server-authored, not evidence-authored, so
+    # the sanitizer is functionally a no-op here — but the
+    # ``<evidence-untrusted>`` wrap is real: it tells the LLM the
+    # response is data, not instructions, and keeps the tool's output
+    # contract symmetric with ``get_*`` per CLAUDE.md invariant 2.
+    result = sanitize(raw)
+    return wrap_evidence(result.payload)
 
 
 def main() -> None:
