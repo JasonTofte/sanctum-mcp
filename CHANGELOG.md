@@ -4,6 +4,30 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+
+- **First test fixture skeleton — `tests/fixtures/case_temp_exec_001/`.**
+  README documenting the scenario (benign signed binary executed from
+  `%TEMP%`, exercising AppCompat ↔ SysMain triangulation) plus the VM
+  workflow to populate `artifacts/`; `ground_truth.py` encodes the
+  typed expected findings the parser test will assert. Two distinct
+  artifact families satisfies CLAUDE.md invariant #5 — `claim_finding`
+  must return `CONFIRMED`. Format choice (Python module rather than
+  YAML/JSON) is documented in the module docstring per the principle
+  that fixture data read by code in the same project should not need
+  a parsing layer. `artifacts/` is intentionally empty; the README
+  documents how to regenerate it from the Parallels test rig.
+- **`scripts/submission_dry_run.sh` + `Makefile`** — dev-time safety net that
+  stashes `./.claude/` aside, runs `pytest`, the MCP stdio smoke test, and
+  `scripts/check_no_secrets.sh`, then restores `./.claude/` via a shell
+  `trap`. Verifies that Sanctum's behaviour is not load-bearing on
+  framework-proprietary tooling under `./.claude/` — the property the
+  hackathon submission's "architectural guardrails, not framework
+  scaffolding" claim depends on. Refuses to run if a previous invocation
+  left a `.claude.stash` behind (avoids overwriting manual recovery
+  state). Invoke via `make submission-dry-run` or directly as
+  `./scripts/submission_dry_run.sh`.
+
 ## [0.2.0] — 2026-04-25
 
 ### Security

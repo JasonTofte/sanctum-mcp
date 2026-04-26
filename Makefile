@@ -1,0 +1,33 @@
+# Sanctum — convenience targets. Thin wrappers around scripts/ and the
+# project's Python tooling. The substantive logic lives in scripts/ to keep
+# behaviour identical whether invoked via make, the shell, or CI.
+
+.PHONY: help test lint format smoke check-secrets submission-dry-run
+
+help:
+	@echo "Sanctum make targets:"
+	@echo "  test                — pytest"
+	@echo "  lint                — ruff check ."
+	@echo "  format              — black ."
+	@echo "  smoke               — MCP stdio handshake smoke test"
+	@echo "  check-secrets       — scan tracked files for secrets / framework leakage"
+	@echo "  submission-dry-run  — stash .claude/, run checks, restore (verifies"
+	@echo "                        Sanctum stands without private framework tooling)"
+
+test:
+	pytest -q
+
+lint:
+	ruff check .
+
+format:
+	black .
+
+smoke:
+	./scripts/smoke_test_mcp_stdio.sh
+
+check-secrets:
+	./scripts/check_no_secrets.sh
+
+submission-dry-run:
+	./scripts/submission_dry_run.sh
