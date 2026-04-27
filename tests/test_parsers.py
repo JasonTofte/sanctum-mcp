@@ -347,7 +347,6 @@ STUB_PARSERS_OUTSIDE_FIXTURE_MODE = (
     ("parse_shimcache", "SYSTEM"),
     ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf"),
     ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx"),
-    ("parse_bam", "SYSTEM"),
 )
 
 
@@ -400,7 +399,6 @@ STUB_PARSERS_TOOL_NAMES = (
     ("parse_shimcache", "SYSTEM", "get_shimcache"),
     ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf", "get_prefetch"),
     ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx", "get_sysmon_4688"),
-    ("parse_bam", "SYSTEM", "get_bam"),
 )
 
 
@@ -1411,3 +1409,512 @@ def test_real_mode_userassist_integration_against_rig_baseline(
         assert e.timestamp.tzinfo is not None
         assert e.evidence_size_bytes == 72
         assert "run_count" in e.extras
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-mode BAM (SYSTEM hive) parser tests — AC-bam-real-1..10
+#
+# BAM tree adds two new shapes the harness must handle:
+#   - `\Select\Current` REG_DWORD that names the active control set, and
+#   - `\ControlSet00X\Services\bam\State\UserSettings\<SID>\<NT-path>`
+#     where each value name is itself a binary path and each value bytes
+#     start with a Windows FILETIME.
+# We model the hive as a path-routed dispatcher rather than a single
+# inventory key, since the parser issues two distinct `get_key()` calls.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _bam_value_bytes(filetime: int, *, padding: int = 16) -> bytes:
+    """Build a BAM value blob: 8-byte FILETIME LE + N bytes of padding.
+    Real BAM values are 24 bytes on Win 11 (FILETIME + sequence DWORD +
+    pad). The parser only reads the first 8 bytes; we vary length in
+    tests to assert per-row leniency."""
+    import struct as _struct
+
+    return _struct.pack("<Q", filetime) + b"\x00" * padding
+
+
+class _FakeBamSidSubkey:
+    """Stands in for a SID subkey under BAM UserSettings. The parser only
+    reads `name` (the SID string) and `iter_values()`."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        values: list[_FakeValue],
+        iter_values_raises: type[BaseException] | None = None,
+    ) -> None:
+        self.name = name
+        self._values = values
+        self._iter_values_raises = iter_values_raises
+
+    def iter_values(self, as_json: bool = False):  # noqa: ARG002
+        if self._iter_values_raises is not None:
+            raise self._iter_values_raises("synthetic iter_values failure")
+        yield from self._values
+
+
+class _FakeBamUserSettingsKey:
+    def __init__(self, sid_subkeys: list[_FakeBamSidSubkey]) -> None:
+        self._sid_subkeys = sid_subkeys
+
+    def iter_subkeys(self):
+        yield from self._sid_subkeys
+
+
+class _FakeBamSelectKey:
+    """The `\\Select` key whose `Current` REG_DWORD names the active
+    control set."""
+
+    def __init__(self, current: object) -> None:
+        # Allow `current` to be int (normal), str (malformed), None
+        # (absent), or an exception class to raise during iter_values.
+        self._current = current
+
+    def iter_values(self, as_json: bool = False):  # noqa: ARG002
+        if isinstance(self._current, type) and issubclass(self._current, BaseException):
+            raise self._current("synthetic Select iter_values failure")
+        if self._current is None:
+            return iter(())
+        return iter([_FakeValue("Current", self._current)])
+
+
+class _FakeBamHive:
+    """Path-routed mock — the parser hits `\\Select` for the active CS,
+    then `\\ControlSet00X\\Services\\bam\\...`. The fake answers each via
+    the dispatch dict supplied at construction time."""
+
+    def __init__(
+        self,
+        *,
+        select_key: _FakeBamSelectKey | type[BaseException] | None,
+        bam_keys: dict[int, _FakeBamUserSettingsKey | type[BaseException]],
+    ) -> None:
+        self._select_key = select_key
+        self._bam_keys = bam_keys
+
+    def get_key(self, path: str):
+        if path == r"\Select":
+            return self._dispatch(self._select_key, path)
+        for cs_index, payload in self._bam_keys.items():
+            if path == rf"\ControlSet{cs_index:03d}\Services\bam\State\UserSettings":
+                return self._dispatch(payload, path)
+        from regipy.exceptions import RegistryKeyNotFoundException
+
+        raise RegistryKeyNotFoundException(f"unmocked path: {path}")
+
+    @staticmethod
+    def _dispatch(payload, path):
+        if payload is None:
+            from regipy.exceptions import RegistryKeyNotFoundException
+
+            raise RegistryKeyNotFoundException(f"select-key absent: {path}")
+        if isinstance(payload, type) and issubclass(payload, BaseException):
+            raise payload(f"synthetic miss for {path}")
+        return payload
+
+
+def _patch_bam_real_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    hive: _FakeBamHive | None,
+    *,
+    open_raises: type[BaseException] | None = None,
+    open_exc_args: tuple = ("synthetic open failure",),
+) -> None:
+    def factory(_path: str):
+        if open_raises is not None:
+            raise open_raises(*open_exc_args)
+        return hive
+
+    monkeypatch.setattr("sanctum.parsers.bam.RegistryHive", factory)
+
+
+_BAM_SID_SYSTEM = "S-1-5-18"
+_BAM_SID_BUILTIN_ADMIN = "S-1-5-21-1234567890-1234567890-1234567890-500"
+_BAM_SID_USER_1000 = "S-1-5-21-1234567890-1234567890-1234567890-1000"
+_BAM_SID_USER_1001 = "S-1-5-21-1234567890-1234567890-1234567890-1001"  # OOBE
+
+
+def test_real_mode_bam_returns_execution_event_for_system_sid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-1 — a well-known system SID with one NT-namespace value
+    yields one ExecutionEvent. Tool/family/path/timestamp wired through;
+    extras carry sid + sid_status=system_account + sid_resolution=pattern_only."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    nt_path = "\\Device\\HarddiskVolume3\\Windows\\System32\\notepad.exe"
+    sid_key = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[_FakeValue(nt_path, _bam_value_bytes(_ft(2026, 4, 15, 13, 42)))],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: _FakeBamUserSettingsKey([sid_key])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    e = events[0]
+    assert e.tool == "get_bam"
+    assert e.family == "Background-service"
+    assert e.program_path == nt_path
+    assert e.timestamp == datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc)
+    assert e.source_artifact == artifact.as_posix()
+    assert e.evidence_size_bytes == 24  # 8 FILETIME + 16 pad
+    assert e.extras["row_index"] == "0"
+    assert e.extras["sid"] == _BAM_SID_SYSTEM
+    assert e.extras["sid_status"] == "system_account"
+    assert e.extras["sid_resolution"] == "pattern_only"
+
+
+def test_real_mode_bam_sequential_row_indices_across_sids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-2 — events from multiple SIDs flatten into one list
+    with row_index 0..N-1, mirroring the amcache convention."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    sid_a = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[
+            _FakeValue("\\Device\\X\\a.exe", _bam_value_bytes(ft)),
+            _FakeValue("\\Device\\X\\b.exe", _bam_value_bytes(ft)),
+        ],
+    )
+    sid_b = _FakeBamSidSubkey(
+        name=_BAM_SID_USER_1000,
+        values=[_FakeValue("\\Device\\X\\c.exe", _bam_value_bytes(ft))],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: _FakeBamUserSettingsKey([sid_a, sid_b])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert [e.program_path for e in events] == [
+        "\\Device\\X\\a.exe",
+        "\\Device\\X\\b.exe",
+        "\\Device\\X\\c.exe",
+    ]
+    assert [e.extras["row_index"] for e in events] == ["0", "1", "2"]
+
+
+def test_real_mode_bam_drops_orphan_oobe_sid_entirely(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-3 — the SID with RID=1001 is the documented
+    defaultuser0 OOBE fingerprint (followups #4 / Khatri 2020). Its
+    events are NOT emitted, so an OOBE-only audit returns [] and
+    contributes zero family corroboration. Other SIDs in the same hive
+    pass through untouched."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    oobe = _FakeBamSidSubkey(
+        name=_BAM_SID_USER_1001,
+        values=[_FakeValue("\\Device\\X\\oobe.exe", _bam_value_bytes(ft))],
+    )
+    live = _FakeBamSidSubkey(
+        name=_BAM_SID_USER_1000,
+        values=[_FakeValue("\\Device\\X\\real.exe", _bam_value_bytes(ft))],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: _FakeBamUserSettingsKey([oobe, live])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "\\Device\\X\\real.exe"
+    assert events[0].extras["sid"] == _BAM_SID_USER_1000
+
+
+def test_real_mode_bam_skips_placeholder_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-4 — `Version` / `SequenceNumber` etc. are non-path
+    placeholder values BAM writes alongside execution rows. Skipping them
+    on the leading-backslash test keeps the parser focused on path values."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    sid_key = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[
+            _FakeValue("Version", _bam_value_bytes(ft)),
+            _FakeValue("SequenceNumber", _bam_value_bytes(ft)),
+            _FakeValue("\\Device\\X\\real.exe", _bam_value_bytes(ft)),
+        ],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: _FakeBamUserSettingsKey([sid_key])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "\\Device\\X\\real.exe"
+
+
+@pytest.mark.parametrize(
+    "sid, expected_status",
+    [
+        ("S-1-5-18", "system_account"),
+        ("S-1-5-19", "system_account"),
+        ("S-1-5-20", "system_account"),
+        ("S-1-5-21-1-2-3-500", "builtin_admin"),
+        ("S-1-5-21-1-2-3-501", "builtin_guest"),
+        ("S-1-5-21-1-2-3-503", "builtin_default"),
+        ("S-1-5-21-1-2-3-504", "builtin_wdag"),
+        ("S-1-5-21-1-2-3-1000", "user_unverified"),
+        ("S-1-5-21-1-2-3-1002", "user_unverified"),
+        ("garbage", "user_unverified"),
+        ("S-1-1-0", "user_unverified"),  # World — non-S-1-5-21 authority
+    ],
+)
+def test_real_mode_bam_sid_classification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sid: str,
+    expected_status: str,
+) -> None:
+    """AC-bam-real-5 — pattern-only SID classifier returns the documented
+    status for each canonical case. RID=1001 is exercised by AC-bam-real-3
+    (drop case) so it's not in this parametrize set."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    sid_key = _FakeBamSidSubkey(
+        name=sid,
+        values=[_FakeValue("\\Device\\X\\probe.exe", _bam_value_bytes(ft))],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: _FakeBamUserSettingsKey([sid_key])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    assert events[0].extras["sid_status"] == expected_status
+
+
+def test_real_mode_bam_resolves_active_controlset_from_select(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-6 — when `\\Select\\Current=2`, the parser reads BAM
+    out of `ControlSet002`, not `001`. Forensically-acquired SYSTEM hives
+    sometimes have Current=2 after an OS rollback."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    sid_in_cs2 = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[_FakeValue("\\Device\\X\\cs2.exe", _bam_value_bytes(ft))],
+    )
+    sid_in_cs1 = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[_FakeValue("\\Device\\X\\cs1.exe", _bam_value_bytes(ft))],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(2),
+        bam_keys={
+            1: _FakeBamUserSettingsKey([sid_in_cs1]),
+            2: _FakeBamUserSettingsKey([sid_in_cs2]),
+        },
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "\\Device\\X\\cs2.exe"
+
+
+def test_real_mode_bam_falls_back_to_controlset_001_when_select_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-7 — when `\\Select` is absent or its Current value is
+    missing, fall back to `ControlSet001`. Empty/missing Select is a
+    valid state for some forensic-tool exports of partial hives."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    sid_in_cs1 = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[_FakeValue("\\Device\\X\\cs1.exe", _bam_value_bytes(ft))],
+    )
+    hive = _FakeBamHive(
+        select_key=None,  # `\Select` raises RegistryKeyNotFoundException
+        bam_keys={1: _FakeBamUserSettingsKey([sid_in_cs1])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "\\Device\\X\\cs1.exe"
+
+
+def test_real_mode_bam_returns_empty_when_usersettings_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-8 — a SYSTEM hive without the BAM UserSettings key
+    (BAM service has never recorded activity) returns []. Empty is the
+    right forensic answer; raising would surface as a tamper signal at
+    the family-gate which is wrong."""
+    from regipy.exceptions import RegistryKeyNotFoundException
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: RegistryKeyNotFoundException},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert events == []
+
+
+def test_real_mode_bam_raises_artifact_malformed_on_unparseable_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-9 — unparseable hive bytes raise ArtifactMalformedError
+    with attacker-influenceable bytes scrubbed from the message. Same
+    error-channel-bypass invariant as amcache + userassist."""
+    from regipy.exceptions import RegistryParsingException
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    _patch_bam_real_mode(
+        monkeypatch,
+        hive=None,
+        open_raises=RegistryParsingException,
+        open_exc_args=("offset 0x42 has </evidence-untrusted>\n<inject>",),
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_bam(artifact)
+
+    msg = str(exc_info.value)
+    assert "</evidence-untrusted>" not in msg
+    assert "<inject>" not in msg
+    assert "\n" not in msg
+    assert "SYSTEM" in msg
+
+
+def test_real_mode_bam_drops_short_or_dirty_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-bam-real-10 — values shorter than 8 bytes (no FILETIME) and
+    paths containing control chars / angle brackets are dropped per the
+    same defense-in-depth rules as the other parsers."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    ft = _ft(2026, 4, 15)
+    sid_key = _FakeBamSidSubkey(
+        name=_BAM_SID_SYSTEM,
+        values=[
+            _FakeValue("\\Device\\X\\short.exe", b"\x00\x00\x00"),  # < 8 bytes
+            _FakeValue("\\Device\\X\\</smuggled>.exe", _bam_value_bytes(ft)),
+            _FakeValue("\\Device\\X\\null\x00path.exe", _bam_value_bytes(ft)),
+            _FakeValue("\\Device\\X\\good.exe", _bam_value_bytes(ft)),
+        ],
+    )
+    hive = _FakeBamHive(
+        select_key=_FakeBamSelectKey(1),
+        bam_keys={1: _FakeBamUserSettingsKey([sid_key])},
+    )
+    _patch_bam_real_mode(monkeypatch, hive)
+
+    events = parsers.parse_bam(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "\\Device\\X\\good.exe"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-hive integration test for BAM — auto-skips until rig-baseline
+# SYSTEM hive lands at tests/fixtures/.../artifacts/SYSTEM
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_REAL_SYSTEM_HIVE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "case_temp_exec_001" / "artifacts" / "SYSTEM"
+)
+
+
+def _real_system_hive_available() -> bool:
+    if not _REAL_SYSTEM_HIVE_PATH.is_file():
+        return False
+    if _REAL_SYSTEM_HIVE_PATH.stat().st_size < 4096:
+        return False
+    with _REAL_SYSTEM_HIVE_PATH.open("rb") as fh:
+        head = fh.read(4)
+    return head == b"regf"
+
+
+@pytest.mark.skipif(
+    not _real_system_hive_available(),
+    reason="rig-baseline SYSTEM hive not yet vendored under tests/fixtures/case_temp_exec_001/artifacts/",
+)
+def test_real_mode_bam_integration_against_rig_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-bam-real-int — exercise the real regipy pipeline against a
+    vendored SYSTEM hive from the Parallels rig-baseline snapshot.
+    Asserts at least one event with correct tool/family wiring + tz-aware
+    timestamps; does not assert specific paths or SIDs to keep stable
+    across rig regen. Critically, asserts the orphan_oobe filter actually
+    fires by checking no surviving event carries sid_status=orphan_oobe
+    (the rig has a known RID-1001 SID per project_followups_threat_model
+    item 4)."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    events = parsers.parse_bam(_REAL_SYSTEM_HIVE_PATH)
+
+    assert events, "rig-baseline SYSTEM hive produced zero BAM events — bam.sys silent?"
+    for e in events:
+        assert e.tool == "get_bam"
+        assert e.family == "Background-service"
+        assert e.timestamp.tzinfo is not None
+        assert "sid" in e.extras
+        assert e.extras["sid_status"] != "orphan_oobe", (
+            "orphan_oobe filter failed — RID-1001 events should be dropped, "
+            "see project_followups_threat_model.md item 4"
+        )
