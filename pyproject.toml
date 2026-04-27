@@ -34,6 +34,15 @@ dependencies = [
   # Pinned to >=6 for the iter_subkeys / get_values(as_json=True) API surface
   # this layer relies on.
   "regipy>=6",
+  # Windows Prefetch (.pf) parser. Used by `sanctum.parsers.prefetch` for
+  # version detection (v17/23/26/30), MAM/LZXPRESS-Huffman decompression
+  # on Win 10+ via `ctypes.windll.ntdll.RtlDecompressBufferEx`, and struct
+  # unpacking. Apache-2.0; pinned to >=4 for the v30 (Win 10/11) layout.
+  # NOTE: MAM decompression is Windows-only — non-Windows hosts surface
+  # MAM-compressed `.pf` files as `ArtifactMalformedError`, which is the
+  # right answer (the analyst is expected to run Sanctum on Windows when
+  # triaging Win 10/11 prefetch).
+  "windowsprefetch>=4",
 ]
 
 [project.optional-dependencies]

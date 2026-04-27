@@ -6,6 +6,88 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/parsers/prefetch.py` — real-mode `parse_prefetch` body
+  (week-3 milestone, SysMain family).** Replaces the stub with a
+  `windowsprefetch`-backed walk of `\Windows\Prefetch\<EXE>-<hash>.pf`.
+  Each `.pf` file is a versioned binary structure (v17 = Win 7, v23 =
+  Win 8, v26 = Win 8.1, v30 = Win 10/11) with MAM/LZXPRESS-Huffman
+  compression on Win 10+. The Adam-Witt-authored `windowsprefetch`
+  package (Apache-2.0) handles the version dispatch, MAM decompression
+  via `ctypes.windll.ntdll.RtlDecompressBufferEx`, and struct unpacking —
+  ~370 lines we'd otherwise have to maintain ourselves for zero forensic
+  benefit. **MAM decompression is Windows-only** by construction
+  (`ctypes.windll` doesn't exist on Linux/Darwin); MAM-compressed `.pf`
+  files on non-Windows hosts surface as `ArtifactMalformedError`, which
+  is the right answer — analysts triaging Win 10/11 prefetch are
+  expected to run Sanctum on Windows. Uncompressed legacy files
+  (v17/23/26) parse normally on any OS. **We bypass the library's
+  `Prefetch.timestamps` accessor and reparse `lastRunTime` directly**:
+  the library's `getTimeStamps` formats each FILETIME as a naive-datetime
+  *string* (`str(datetime + timedelta)`), violating the
+  `ExecutionEvent.timestamp` tz-aware contract. We `struct.unpack("<Q",
+  slot)` each 8-byte FILETIME and convert via `regipy.utils
+  .convert_wintime`, defensively wrapping naive results to `tzinfo=UTC`.
+  `convert_wintime` swallows the FILETIME overflow internally and returns
+  `1601-01-01 UTC` as a sentinel rather than raising — we treat that
+  sentinel as a per-row drop (Windows didn't ship in 1601). **One
+  `ExecutionEvent` per non-zero historical run slot.** Win 10/11 prefetch
+  retains up to 8 prior run timestamps; emitting all of them gives
+  analysts the full back-history for the binary, not just the most
+  recent run. Family-count arithmetic isn't affected (still one family
+  contribution per parser call) but timeline reconstruction is much
+  richer. `run_slot` in `extras` preserves the *original* slot index in
+  the buffer (most-recent-first) even when intermediate slots are
+  dropped, so analysts can tell "this was the most recent run" vs "this
+  was 6 runs ago". Best-effort full-NT-path resolution from the loaded-
+  resources list (case-insensitive basename match against
+  `executableName`); falls back to the basename alone on miss
+  (`prefetch_hash` in `extras` disambiguates which path Windows recorded
+  the binary at). Per-row leniency: a truncated `lastRunTime` buffer that
+  yields some valid FILETIMEs and one corrupt slot drops the corrupt
+  slot and keeps the valid events — same convention as Amcache /
+  UserAssist / BAM / ShimCache. Whole-file corruption (the library
+  raises during construction; we catch broadly to absorb `struct.error`,
+  `UnicodeDecodeError`, `AttributeError` from missing `ctypes.windll` on
+  non-Windows, plus arbitrary OS errors during the
+  `RtlDecompressBufferEx` ctypes call) bubbles up as
+  `ArtifactMalformedError` with attacker-influenceable bytes scrubbed
+  via `_safe_field` (the FastMCP `isError` channel bypasses success-path
+  sanitizers; see `feedback_error_channel_bypass.md`).
+
+- **`tests/test_parsers.py` — 13 new tests covering the real-mode
+  Prefetch path** (AC-pf-real-1..12 + AC-pf-real-int). Adds a
+  `_FakePrefetch` shim that stages `executableName`, `lastRunTime`,
+  `runCount`, `hash`, `fileSize`, and `resources` directly without
+  synthesising binary `.pf` blobs (the blob layout is
+  `windowsprefetch`'s contract — pinning tests to it would couple every
+  Windows-version bump to a Sanctum-test churn). Coverage: happy-path
+  field wiring with one event per non-zero slot, `run_slot` reflects
+  original buffer index across drops, `prefetch_hash` validation
+  (lower-case hex only, length-bounded), full-path resolution via
+  resources match (case-insensitive basename), basename fallback when
+  no resource matches, oversize `program_path` → `[]`, control-char /
+  angle-bracket `executableName` → `[]`, library construction failure →
+  scrubbed `ArtifactMalformedError`, missing `lastRunTime` → `[]`,
+  all-zero buffer → `[]`, corrupt-FILETIME slot dropped while
+  surrounding valid slots kept (asserts the
+  `convert_wintime`-overflow → 1601 sentinel handling). Integration
+  test gated on a real `.pf` at
+  `tests/fixtures/case_temp_exec_001/artifacts/Prefetch/` —
+  `pytest.raises(ArtifactMalformedError)` on non-Windows hosts (the MAM
+  decompression contract), full-event assertions on Windows. AC-14 and
+  AC-15a parametrize lists trimmed: `parse_prefetch` removed from
+  `STUB_PARSERS_OUTSIDE_FIXTURE_MODE` and `STUB_PARSERS_TOOL_NAMES` —
+  only `parse_sysmon` remains a stub.
+
+- **`pyproject.toml` — added `windowsprefetch>=4` dependency.** Pinned
+  `>=4` for the v30 (Win 10/11) layout. Apache-2.0. Used exclusively by
+  `sanctum.parsers.prefetch` for version detection (v17/23/26/30), MAM
+  decompression on Win 10+ via `ctypes.windll.ntdll.RtlDecompressBufferEx`,
+  and struct unpacking. Justification comment in the dep block calls out
+  the Windows-only MAM constraint and points at the parser's own
+  docstring for the architectural answer (non-Windows hosts surface
+  MAM-compressed `.pf` as `ArtifactMalformedError`).
+
 - **`src/sanctum/parsers/appcompat.py` — real-mode `parse_shimcache` body
   (week-3 milestone, AppCompat family).** Replaces the stub with a
   `regipy`-backed walk of
