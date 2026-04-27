@@ -23,40 +23,52 @@ classifiers = [
   "Topic :: Security",
 ]
 
+# Runtime deps are exact-pinned (`==`) and the resolved tree (with hashes for
+# every wheel) is captured in `requirements.txt`. Sanctum is an
+# operator-deployed MCP server, not a library — exact-pin protects evidence
+# integrity against silent transitive drift, and `pip install -r
+# requirements.txt --require-hashes` rejects any wheel whose hash doesn't
+# match the lockfile. See `CLAUDE.md` → "Pinning policy" for the regen flow.
+# When bumping a primary dep, run `pip-compile pyproject.toml --generate-hashes
+# -o requirements.txt` and commit both files together.
 dependencies = [
   # Official MCP Python SDK — provides FastMCP decorator API and stdio transport.
-  "mcp>=1.0",
+  "mcp==1.27.0",
   # Pure-Python Windows registry hive reader. Used by `sanctum.parsers.amcache`
-  # (and forthcoming AppCompat/UserAssist/BAM real-mode bodies) to walk hive
-  # binary structures without shelling out to a native tool. Pure-Python keeps
-  # the dependency surface small and lets the parser run on the same operator
-  # host as the MCP server (no kernel/OS-version coupling). MIT-licensed.
-  # Pinned to >=6 for the iter_subkeys / get_values(as_json=True) API surface
-  # this layer relies on.
-  "regipy>=6",
+  # (and AppCompat/UserAssist/BAM real-mode bodies) to walk hive binary
+  # structures without shelling out to a native tool. Pure-Python keeps the
+  # dependency surface small and lets the parser run on the same operator host
+  # as the MCP server (no kernel/OS-version coupling). MIT-licensed. The
+  # `iter_subkeys` / `get_values(as_json=True)` API surface this layer relies
+  # on first appears in 6.0.
+  "regipy==6.2.1",
   # Windows Prefetch (.pf) parser. Used by `sanctum.parsers.prefetch` for
-  # version detection (v17/23/26/30), MAM/LZXPRESS-Huffman decompression
-  # on Win 10+ via `ctypes.windll.ntdll.RtlDecompressBufferEx`, and struct
-  # unpacking. Apache-2.0; pinned to >=4 for the v30 (Win 10/11) layout.
+  # version detection (v17/23/26/30), MAM/LZXPRESS-Huffman decompression on
+  # Win 10+ via `ctypes.windll.ntdll.RtlDecompressBufferEx`, and struct
+  # unpacking. Apache-2.0. Upstream is single-maintainer and last released
+  # 4.0.3 on 2021-04-29; the exact pin + hash-locked install path is the
+  # supply-chain mitigation for that abandonment risk. If a CVE drops and no
+  # upstream patch lands, the contingency is to vendor under `third_party/`
+  # — see `docs/THREAT_MODEL_DEPENDENCIES.md` (forthcoming).
   # NOTE: MAM decompression is Windows-only — non-Windows hosts surface
-  # MAM-compressed `.pf` files as `ArtifactMalformedError`, which is the
-  # right answer (the analyst is expected to run Sanctum on Windows when
-  # triaging Win 10/11 prefetch).
-  "windowsprefetch>=4",
+  # MAM-compressed `.pf` files as `ArtifactMalformedError`, which is the right
+  # answer (the analyst is expected to run Sanctum on Windows when triaging
+  # Win 10/11 prefetch).
+  "windowsprefetch==4.0.3",
   # Pure-Python EVTX (.evtx) parser by Willi Ballenthin. Used by
-  # `sanctum.parsers.sysmon` to walk Sysmon-Operational EID 1 and
-  # Security EID 4688 (process-create) records — both Kernel-ETW family.
-  # Apache-2.0; pinned to >=0.8 for the chunked-records iterator API
-  # this layer relies on. Pure-Python keeps the dep cross-platform — no
-  # ctypes/OS coupling, unlike `windowsprefetch`.
-  "python-evtx>=0.8",
-  # XML-hardened parser used by `sanctum.parsers.sysmon` to consume the
-  # XML rendered by `python-evtx`. Modern stdlib `xml.etree` rejects
-  # external entities by default but does NOT cap entity-expansion
-  # (billion-laughs) — `defusedxml` adds that layer. EVTX bytes are
-  # attacker-controllable, so the hardening is load-bearing, not
-  # cosmetic. Python-Software-Foundation license.
-  "defusedxml>=0.7",
+  # `sanctum.parsers.sysmon` to walk Sysmon-Operational EID 1 and Security
+  # EID 4688 (process-create) records — both Kernel-ETW family. Apache-2.0.
+  # The chunked-records iterator API this layer relies on first appears in
+  # 0.8. Pure-Python keeps the dep cross-platform — no ctypes/OS coupling,
+  # unlike `windowsprefetch`.
+  "python-evtx==0.8.1",
+  # XML-hardened parser used by `sanctum.parsers.sysmon` to consume the XML
+  # rendered by `python-evtx`. Modern stdlib `xml.etree` rejects external
+  # entities by default but does NOT cap entity-expansion (billion-laughs)
+  # — `defusedxml` adds that layer. EVTX bytes are attacker-controllable, so
+  # the hardening is load-bearing, not cosmetic. Python-Software-Foundation
+  # license.
+  "defusedxml==0.7.1",
 ]
 
 [project.optional-dependencies]
@@ -66,6 +78,12 @@ dev = [
   "ruff>=0.6",
   "black>=24.0",
   "mypy>=1.10",
+  # Lockfile generator. Used to regenerate `requirements.txt` from this
+  # `pyproject.toml`'s `[project].dependencies`, with `--generate-hashes`
+  # producing the per-wheel SHA256 set that `pip install --require-hashes`
+  # validates. Runtime install path uses the lockfile; this dep exists
+  # only for the regen step. Dev-only — kept off the runtime tree.
+  "pip-tools>=7.4",
 ]
 # Optional extra for the LLM-injection eval driver (scripts/eval_llm_injection.py).
 # Kept out of [dev] so the test suite stays SDK-free and contributors who don't
