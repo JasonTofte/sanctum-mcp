@@ -344,7 +344,6 @@ def test_family_strings_used_match_tool_to_family_values_no_orphans() -> None:
 # bodies land (amcache moved to real-mode 2026-04-26), parsers come off
 # this list. When the list is empty, AC-14 / AC-15a get retired.
 STUB_PARSERS_OUTSIDE_FIXTURE_MODE = (
-    ("parse_shimcache", "SYSTEM"),
     ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf"),
     ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx"),
 )
@@ -396,7 +395,6 @@ def test_sidecar_rejects_family_mismatch(tmp_path: Path, monkeypatch: pytest.Mon
 # depends on: a fallback to the Python function name would silently
 # desynchronize the ledger from the MCP wire identifier.
 STUB_PARSERS_TOOL_NAMES = (
-    ("parse_shimcache", "SYSTEM", "get_shimcache"),
     ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf", "get_prefetch"),
     ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx", "get_sysmon_4688"),
 )
@@ -1918,3 +1916,573 @@ def test_real_mode_bam_integration_against_rig_baseline(
             "orphan_oobe filter failed — RID-1001 events should be dropped, "
             "see project_followups_threat_model.md item 4"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-mode ShimCache (SYSTEM hive) parser tests — AC-sc-real-1..12
+#
+# ShimCache stores all entries in a single REG_BINARY value at
+# \<active-CS>\Control\Session Manager\AppCompatCache\AppCompatCache. The
+# binary blob's layout depends on Windows version and is parsed by regipy's
+# bundled `get_shimcache_entries`. We do NOT construct synthetic blobs —
+# instead we monkeypatch `get_shimcache_entries` to stage entry dicts
+# directly, exercising the parser's own field-mapping / sanitization logic
+# without coupling tests to regipy's internal binary layout.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _FakeShimcacheValue:
+    """One REG_BINARY value under the AppCompatCache subkey."""
+
+    __slots__ = ("name", "value", "is_corrupted")
+
+    def __init__(self, name: str, value: object, *, is_corrupted: bool = False) -> None:
+        self.name = name
+        self.value = value
+        self.is_corrupted = is_corrupted
+
+
+class _FakeAppCompatCacheKey:
+    """Stands in for the `AppCompatCache` subkey under Control\\Session Manager."""
+
+    def __init__(
+        self,
+        values: list[_FakeShimcacheValue],
+        *,
+        iter_values_raises: type[BaseException] | None = None,
+    ) -> None:
+        self._values = values
+        self._iter_values_raises = iter_values_raises
+
+    def iter_values(self, as_json: bool = False):  # noqa: ARG002 — match regipy
+        if self._iter_values_raises is not None:
+            raise self._iter_values_raises("synthetic iter_values failure")
+        yield from self._values
+
+
+class _FakeShimcacheHive:
+    """Path-routed mock identical in spirit to `_FakeBamHive` — answers
+    `\\Select` and the AppCompatCache subkey under each ControlSet."""
+
+    def __init__(
+        self,
+        *,
+        select_key: _FakeBamSelectKey | type[BaseException] | None,
+        appcompat_keys: dict[int, _FakeAppCompatCacheKey | type[BaseException]],
+    ) -> None:
+        self._select_key = select_key
+        self._appcompat_keys = appcompat_keys
+
+    def get_key(self, path: str):
+        if path == r"\Select":
+            return self._dispatch(self._select_key, path)
+        for cs_index, payload in self._appcompat_keys.items():
+            if path == rf"\ControlSet{cs_index:03d}\Control\Session Manager\AppCompatCache":
+                return self._dispatch(payload, path)
+        from regipy.exceptions import RegistryKeyNotFoundException
+
+        raise RegistryKeyNotFoundException(f"unmocked path: {path}")
+
+    @staticmethod
+    def _dispatch(payload, path):
+        if payload is None:
+            from regipy.exceptions import RegistryKeyNotFoundException
+
+            raise RegistryKeyNotFoundException(f"select-key absent: {path}")
+        if isinstance(payload, type) and issubclass(payload, BaseException):
+            raise payload(f"synthetic miss for {path}")
+        return payload
+
+
+def _patch_shimcache_real_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    hive: _FakeShimcacheHive | None,
+    *,
+    open_raises: type[BaseException] | None = None,
+    open_exc_args: tuple = ("synthetic open failure",),
+    entries: list[dict] | type[BaseException] | None = None,
+    entries_raise_at: int | None = None,
+    entries_returns_none: bool = False,
+) -> None:
+    """Patch both `RegistryHive` (so the hive open is mocked) and
+    `get_shimcache_entries` (so the binary-blob parse is mocked).
+
+    `entries` — list of dicts to yield, OR an exception class to raise at
+        the call to `get_shimcache_entries(...)`.
+    `entries_raise_at` — yield N entries then raise a synthetic Exception,
+        modelling regipy's mid-iteration corruption behaviour.
+    `entries_returns_none` — short-blob path: regipy returns None instead
+        of yielding.
+    """
+
+    def factory(_path: str):
+        if open_raises is not None:
+            raise open_raises(*open_exc_args)
+        return hive
+
+    monkeypatch.setattr("sanctum.parsers.appcompat.RegistryHive", factory)
+
+    def fake_entries(_blob, as_json: bool = False):  # noqa: ARG001
+        if entries_returns_none:
+            return None
+        if isinstance(entries, type) and issubclass(entries, BaseException):
+            raise entries("synthetic shimcache magic failure")
+
+        def _gen():
+            yielded = 0
+            for entry in entries or []:
+                if entries_raise_at is not None and yielded == entries_raise_at:
+                    raise Exception("synthetic mid-stream entry corruption")
+                yield entry
+                yielded += 1
+
+        return _gen()
+
+    monkeypatch.setattr(
+        "sanctum.parsers.appcompat.get_shimcache_entries",
+        fake_entries,
+    )
+
+
+def _sc_appcompat_value(blob: bytes = b"\x00" * 64) -> _FakeShimcacheValue:
+    """A REG_BINARY `AppCompatCache` value. Bytes are opaque — `_patch_*`
+    monkeypatches `get_shimcache_entries` so the actual blob never matters."""
+
+    return _FakeShimcacheValue("AppCompatCache", blob)
+
+
+def _sc_entry(
+    *,
+    path: str = "C:\\Windows\\System32\\notepad.exe",
+    last_mod: datetime | None = None,
+    exec_flag: str | None = None,
+    file_size: int | None = None,
+) -> dict:
+    """Build a regipy-shaped ShimCache entry dict. last_mod_date defaults
+    to a tz-aware UTC datetime mirroring regipy's pytz-localized output."""
+
+    if last_mod is None:
+        last_mod = datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc)
+    entry: dict = {"last_mod_date": last_mod, "path": path}
+    if exec_flag is not None:
+        entry["exec_flag"] = exec_flag
+    if file_size is not None:
+        entry["file_size"] = file_size
+    return entry
+
+
+def test_real_mode_shimcache_returns_execution_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-1 — a well-formed Win 10 ShimCache entry yields one
+    `ExecutionEvent` with tool/family/path/timestamp wired through and
+    extras carrying row_index + appcompat_key."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[_sc_entry(path="C:\\Windows\\System32\\notepad.exe")],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 1
+    e = events[0]
+    assert e.tool == "get_shimcache"
+    assert e.family == "AppCompat"
+    assert e.program_path == "C:\\Windows\\System32\\notepad.exe"
+    assert e.timestamp == datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc)
+    assert e.timestamp.tzinfo is not None
+    assert e.source_artifact == artifact.as_posix()
+    assert e.extras["row_index"] == "0"
+    assert e.extras["appcompat_key"] == "AppCompatCache"
+
+
+def test_real_mode_shimcache_assigns_sequential_row_indices(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-2 — multiple entries get row_index 0..N-1 in yield order,
+    mirroring the amcache / bam convention."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[
+            _sc_entry(path="C:\\a.exe"),
+            _sc_entry(path="C:\\b.exe"),
+            _sc_entry(path="C:\\c.exe"),
+        ],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert [e.program_path for e in events] == ["C:\\a.exe", "C:\\b.exe", "C:\\c.exe"]
+    assert [e.extras["row_index"] for e in events] == ["0", "1", "2"]
+
+
+def test_real_mode_shimcache_drops_null_path_sentinel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-3 — regipy yields `path="None"` (the literal string) when
+    the encoded path length is zero. Treat that as a drop signal, not as a
+    Python-keyword-named binary."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[
+            _sc_entry(path="None"),  # regipy's null-path sentinel
+            _sc_entry(path="C:\\real.exe"),
+        ],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "C:\\real.exe"
+    # Surviving event got row_index 0; the dropped row was not pre-counted.
+    assert events[0].extras["row_index"] == "0"
+
+
+def test_real_mode_shimcache_drops_path_with_control_chars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-4 — paths with NUL/control chars or angle brackets are
+    dropped at the parser boundary. Defense-in-depth against quarantine-
+    breaking bytes reaching the LLM through extras."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[
+            _sc_entry(path="C:\\bad\x00null.exe"),
+            _sc_entry(path="C:\\bad</smuggled>.exe"),
+            _sc_entry(path="C:\\good.exe"),
+        ],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "C:\\good.exe"
+
+
+def test_real_mode_shimcache_preserves_exec_flag_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-5 — Win 8 entries carry an `exec_flag` value derived from
+    the CSRSS bit; preserve it verbatim in `extras` so analysts can see
+    whether the row represents a confirmed exec vs cache hit. Win 10
+    entries don't have this field — its absence is normal, not a parser
+    bug, and the resulting event simply lacks the key."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[
+            _sc_entry(path="C:\\with_flag.exe", exec_flag="True"),
+            _sc_entry(path="C:\\no_flag.exe"),  # Win 10 shape — no exec_flag
+        ],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 2
+    assert events[0].extras["exec_flag"] == "True"
+    assert "exec_flag" not in events[1].extras
+
+
+def test_real_mode_shimcache_populates_evidence_size_from_file_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-6 — NT5/WinXP entries carry a `file_size` int. Map it to
+    `evidence_size_bytes` (matching the contract documented in
+    ExecutionEvent). Win 7+ entries lack this field → 0."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[
+            _sc_entry(path="C:\\with_size.exe", file_size=98304),
+            _sc_entry(path="C:\\no_size.exe"),
+        ],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 2
+    assert events[0].evidence_size_bytes == 98304
+    assert events[1].evidence_size_bytes == 0
+
+
+def test_real_mode_shimcache_resolves_active_controlset_from_select(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-7 — when `\\Select\\Current=2`, parser reads ShimCache
+    out of `ControlSet002`. Same convention as bam.py: forensically-
+    acquired hives sometimes have Current=2 after rollback."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    cs1_key = _FakeAppCompatCacheKey([_FakeShimcacheValue("AppCompatCache", b"\xaa" * 64)])
+    cs2_key = _FakeAppCompatCacheKey([_FakeShimcacheValue("AppCompatCache", b"\xbb" * 64)])
+
+    seen_blobs: list[bytes] = []
+
+    def factory(_path: str):
+        return _FakeShimcacheHive(
+            select_key=_FakeBamSelectKey(2),
+            appcompat_keys={1: cs1_key, 2: cs2_key},
+        )
+
+    monkeypatch.setattr("sanctum.parsers.appcompat.RegistryHive", factory)
+
+    def fake_entries(blob, as_json: bool = False):  # noqa: ARG001
+        seen_blobs.append(bytes(blob))
+        return iter([_sc_entry(path="C:\\probe.exe")])
+
+    monkeypatch.setattr(
+        "sanctum.parsers.appcompat.get_shimcache_entries",
+        fake_entries,
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 1
+    # Confirm we read the CS002 blob, not CS001 — the parser actually
+    # selected the active control set rather than hardcoding 1.
+    assert seen_blobs == [b"\xbb" * 64]
+
+
+def test_real_mode_shimcache_falls_back_to_controlset_001_when_select_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-8 — `\\Select` absent → ControlSet001 fallback. Mirrors
+    bam.py AC-bam-real-7."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=None,  # `\Select` raises RegistryKeyNotFoundException
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[_sc_entry(path="C:\\fallback.exe")],
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "C:\\fallback.exe"
+
+
+def test_real_mode_shimcache_returns_empty_when_appcompat_key_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-9 — a SYSTEM hive without the AppCompatCache subkey
+    returns []. Empty is the right forensic answer (could be a freshly-
+    provisioned VM or a flush fingerprint); raising would surface as a
+    tamper signal at the family-gate, which would be wrong."""
+    from regipy.exceptions import RegistryKeyNotFoundException
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: RegistryKeyNotFoundException},
+    )
+    _patch_shimcache_real_mode(monkeypatch, hive, entries=[])
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert events == []
+
+
+def test_real_mode_shimcache_raises_artifact_malformed_on_unparseable_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-10 — unparseable hive bytes raise ArtifactMalformedError
+    with attacker-influenceable bytes scrubbed from the message. Same
+    error-channel-bypass invariant as the other real-mode parsers."""
+    from regipy.exceptions import RegistryParsingException
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive=None,
+        open_raises=RegistryParsingException,
+        open_exc_args=("offset 0x42 has </evidence-untrusted>\n<inject>",),
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_shimcache(artifact)
+
+    msg = str(exc_info.value)
+    assert "</evidence-untrusted>" not in msg
+    assert "<inject>" not in msg
+    assert "\n" not in msg
+    assert "SYSTEM" in msg
+
+
+def test_real_mode_shimcache_raises_when_get_entries_blows_up_on_bad_magic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-11 — regipy's `get_shimcache_entries` raises a generic
+    `Exception` with the unrecognised magic embedded when the blob isn't
+    one of the known Win XP/7/8/10 layouts. Surface as ArtifactMalformedError
+    with the message scrubbed (raw magic bytes are attacker-influenceable
+    via blob substitution on a writable hive)."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+
+    def factory(_path: str):
+        return hive
+
+    monkeypatch.setattr("sanctum.parsers.appcompat.RegistryHive", factory)
+
+    def boom(_blob, as_json: bool = False):  # noqa: ARG001
+        raise Exception("Got an unrecognized magic value of 0x</injected>\n0x42")
+
+    monkeypatch.setattr(
+        "sanctum.parsers.appcompat.get_shimcache_entries",
+        boom,
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_shimcache(artifact)
+
+    msg = str(exc_info.value)
+    assert "</injected>" not in msg
+    assert "\n" not in msg
+    assert "SYSTEM" in msg
+
+
+def test_real_mode_shimcache_keeps_pre_failure_events_on_midstream_corruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sc-real-12 — if `get_shimcache_entries` yields N good entries and
+    then raises (corrupt entry mid-blob), the parser keeps the N already-
+    emitted events instead of losing the whole hive. Per per-row leniency
+    policy: aggregate tamper detection at the family-gate, not strict
+    per-row rejection that would amplify a single-row corruption into a
+    whole-artifact loss."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "SYSTEM")
+    appcompat = _FakeAppCompatCacheKey([_sc_appcompat_value()])
+    hive = _FakeShimcacheHive(
+        select_key=_FakeBamSelectKey(1),
+        appcompat_keys={1: appcompat},
+    )
+    _patch_shimcache_real_mode(
+        monkeypatch,
+        hive,
+        entries=[
+            _sc_entry(path="C:\\one.exe"),
+            _sc_entry(path="C:\\two.exe"),
+            _sc_entry(path="C:\\never.exe"),  # never reached — raise before this
+        ],
+        entries_raise_at=2,
+    )
+
+    events = parsers.parse_shimcache(artifact)
+
+    assert [e.program_path for e in events] == ["C:\\one.exe", "C:\\two.exe"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-hive integration test for ShimCache — auto-skips until rig-baseline
+# SYSTEM hive lands at tests/fixtures/.../artifacts/SYSTEM.
+# Reuses _real_system_hive_available() defined for the BAM integration test.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(
+    not _real_system_hive_available(),
+    reason="rig-baseline SYSTEM hive not yet vendored under tests/fixtures/case_temp_exec_001/artifacts/",
+)
+def test_real_mode_shimcache_integration_against_rig_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-sc-real-int — exercise the real regipy + bundled ShimCacheParser
+    pipeline against a vendored SYSTEM hive. Asserts at least one event
+    with correct tool/family wiring + tz-aware timestamps; doesn't pin
+    specific paths because the rig snapshot evolves."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    events = parsers.parse_shimcache(_REAL_SYSTEM_HIVE_PATH)
+
+    assert events, "rig-baseline SYSTEM hive produced zero ShimCache events — flush?"
+    for e in events:
+        assert e.tool == "get_shimcache"
+        assert e.family == "AppCompat"
+        assert e.timestamp.tzinfo is not None
+        assert e.evidence_size_bytes >= 0
+        assert e.extras.get("appcompat_key") == "AppCompatCache"

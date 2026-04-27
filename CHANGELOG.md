@@ -6,6 +6,61 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/parsers/appcompat.py` — real-mode `parse_shimcache` body
+  (week-3 milestone, AppCompat family).** Replaces the stub with a
+  `regipy`-backed walk of
+  `\<active-control-set>\Control\Session Manager\AppCompatCache\AppCompatCache`
+  on the SYSTEM hive. ShimCache stores all entries in a single REG_BINARY
+  blob whose layout depends on Windows version (XP/Vista/7/8/8.1/10 each
+  differ; Win 10 Creators Update shifted the magic 4 bytes). We delegate
+  the binary parse to `regipy.plugins.system.external.ShimCacheParser
+  .get_shimcache_entries` — Mandiant-derived, Apache-2.0, ~489 lines —
+  which already handles every layout we care about. Active control set
+  is resolved from `\Select\Current` for parity with `parse_bam`
+  (forensically-acquired hives sometimes have `Current=2` after an OS
+  rollback), falling back to `ControlSet001`. Per-row mapping:
+  `last_mod_date` → `timestamp` (regipy returns pytz-aware UTC; we still
+  validate `tzinfo` defensively), `path` → `program_path` with the
+  literal `"None"` sentinel dropped (regipy's empty-path placeholder),
+  `exec_flag` (Win 8 only) preserved in `extras`, `file_size` (NT5
+  only) → `evidence_size_bytes`. Generic `Exception` from
+  `get_shimcache_entries` (raised on unrecognised magic) is caught and
+  re-raised as `ArtifactMalformedError` with the message scrubbed via
+  `_safe_field` — the raw 4-byte magic is attacker-influenceable on a
+  writable hive and would otherwise reach the LLM through FastMCP's
+  `isError` channel which bypasses success-path sanitizers. Mid-stream
+  iteration failures preserve already-yielded events per per-row leniency
+  policy. CLAUDE.md invariant 5 (AppCompat collapses Amcache + ShimCache
+  into one family) is unaffected: the `tool` discriminator on every
+  emitted `ExecutionEvent` (`get_shimcache` vs `get_amcache`) lets
+  `claim_finding` distinguish them while still counting them as one
+  family corroboration.
+
+- **`tests/test_parsers.py` — 13 new tests covering the real-mode
+  ShimCache path** (AC-sc-real-1..12 + AC-sc-real-int). Adds a path-
+  routed `_FakeShimcacheHive` dispatcher mirroring `_FakeBamHive` for
+  the active-CS resolution, plus a `_FakeAppCompatCacheKey` /
+  `_FakeShimcacheValue` pair. The test surface monkeypatches
+  `get_shimcache_entries` directly so tests stage entry dicts rather
+  than synthesise binary blobs — the blob layout is regipy's contract,
+  not ours, and pinning tests to it would couple every Windows-format
+  bump in regipy to a Sanctum-test churn. Coverage: happy-path field
+  wiring, sequential `row_index` across entries, `"None"` sentinel
+  drop, control-char/angle-bracket path drop, `exec_flag` preservation
+  on Win 8 entries (and absence on Win 10), `file_size` →
+  `evidence_size_bytes` mapping (NT5), active-CS resolution via
+  `\Select\Current=2` (asserts the parser actually reads the CS002
+  blob, not CS001), fallback to ControlSet001 when `\Select` is
+  absent, missing AppCompatCache subkey → `[]`, unparseable hive →
+  `ArtifactMalformedError` with attacker bytes scrubbed, bad-magic
+  exception from regipy surfaces as scrubbed `ArtifactMalformedError`,
+  mid-stream corruption preserves already-yielded events. Integration
+  test asserts `tool=get_shimcache` + tz-aware timestamps + the
+  `appcompat_key` extra, gated on a regf-magic + size sniff at
+  `tests/fixtures/case_temp_exec_001/artifacts/SYSTEM`. AC-14 and
+  AC-15a parametrize lists trimmed — `parse_shimcache` removed; only
+  `prefetch`/`sysmon` remain stubs.
+
 - **`src/sanctum/parsers/bam.py` — real-mode `parse_bam` body
   (week-3 milestone, Background-service family) with orphan-SID
   classification.** Replaces the stub with a `regipy`-backed walk of
