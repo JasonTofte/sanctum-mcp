@@ -190,14 +190,32 @@ def test_state2_no_write_exec_verb_exposed() -> None:
     reach it regardless of hook configuration.
 
     This test enforces the invariant at the module level: no symbol name
-    under ``sanctum.server`` may contain a destructive verb.
+    under ``sanctum.server`` may use a destructive verb as a TOKEN
+    (snake_case piece or camelCase word). Substring match would
+    false-flag legitimate types like ``ExecutionEvent`` (contains "exec")
+    or ``ArtifactMalformedError`` (contains "rm").
     """
+    import re as _re
+
     banned = {"write", "exec", "shell", "run", "delete", "rm", "mv", "cp_over", "unlink"}
+
+    def _tokens(name: str) -> set[str]:
+        # Token-boundary tokenizer (NOT substring). The `[A-Z]+(?=[A-Z]|$)`
+        # branch catches all-caps acronyms inside camelCase (e.g. `parseHTTP`
+        # → {parse, http}). Removing it would split acronyms into single
+        # letters and silently miss `parseRM` etc.
+        snake = name.split("_")
+        camel: list[str] = []
+        for piece in snake:
+            camel.extend(_re.findall(r"[A-Z][a-z]*|[a-z]+|[A-Z]+(?=[A-Z]|$)", piece))
+        return {t.lower() for t in camel if t}
+
     for tool_name in dir(server):
         if tool_name.startswith("_"):
             continue
-        assert not any(b in tool_name.lower() for b in banned), (
-            f"server module exports a banned-verb symbol: {tool_name}"
+        hits = _tokens(tool_name) & banned
+        assert not hits, (
+            f"server module exports a banned-verb symbol: {tool_name} (tokens: {hits})"
         )
 
 
