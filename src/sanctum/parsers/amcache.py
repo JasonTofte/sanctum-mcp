@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from construct.core import ConstError  # type: ignore[import-untyped]
 from regipy.exceptions import RegistryKeyNotFoundException, RegistryParsingException
 from regipy.registry import RegistryHive
 from regipy.utils import convert_wintime
@@ -99,8 +100,13 @@ def _parse_amcache_real(hive_path: Path) -> list[ExecutionEvent]:
     # re-verify and add explicit cleanup.
     try:
         hive = RegistryHive(str(hive_path))
-    except (RegistryParsingException, OSError) as exc:
+    except (RegistryParsingException, ConstError, OSError) as exc:
         # Unparseable bytes / wrong file type → data fault, not I/O fault.
+        # ConstError leaks from `construct` (regipy's transitive dep) when
+        # the byte stream is too short or malformed for regipy to wrap as
+        # RegistryParsingException — observed during week-3 → week-4 rewire
+        # when stub-bytes hives reached the real parser. Treating it as the
+        # same fault class is correct: both are "these bytes aren't a hive."
         # Scrub the exception text: regipy's parser embeds attacker-influenced
         # offsets and bytes which would otherwise reach the LLM through the
         # FastMCP `isError` channel (success-path sanitizers don't fire on

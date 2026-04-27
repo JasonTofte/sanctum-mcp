@@ -4,6 +4,45 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed — `get_amcache` MCP tool now returns real-parser rows (closes security MED-1)
+
+- **`src/sanctum/server.py`** — Replaced the week-1 placeholder
+  `_parse_amcache_stub(hive_path)` with a call to the real
+  `parse_amcache(hive_path)` shipped in week 3, mediated by a new
+  `_event_to_row(event) -> AmcacheRow` JSON-domain serialiser at the
+  typed-MCP boundary. `AmcacheRow` is a `TypedDict` declaring the seven
+  wire keys (`tool`, `family`, `program_path`, `timestamp` (ISO-8601 UTC,
+  T-separator), `source_artifact`, `evidence_size_bytes`, `extras`) so a
+  future rename / drop / addition surfaces as a mypy error at the
+  call site rather than as JSON parse failure on the LLM side.
+- **`src/sanctum/parsers/amcache.py`** — Broadened the parser-boundary
+  except clause to also wrap `construct.core.ConstError` (transitive
+  dep through regipy) as `ArtifactMalformedError`. Boundary
+  normalisation belongs in the parser layer, not behind a broad
+  `except Exception` in the server (which would be an encapsulation
+  leak — server would have to know about `construct` internals).
+- **`tests/test_server_boundaries.py`** — Migrated the two existing
+  `get_amcache` tests to fixture-mode (`SANCTUM_USE_FIXTURE_SIDECAR=1`)
+  and added 10 new tests (T-1 through T-12) covering the rewire's six
+  acceptance criteria: real-parser row shape, stub-symbol absence
+  (attribute + source-text), empty-hive `rowcount==0`, fixture-mode
+  migration round-trip, fixture-mode-off raises `ArtifactMalformedError`,
+  ISO-8601 timestamps round-trip via `datetime.fromisoformat`,
+  JSON-serialisability, and an ADR-PL-003 status-block doc-consistency
+  smoke test.
+- **`tests/test_server_boundaries.py` + `tests/test_bypass.py`** — Fixed
+  the banned-verb tests from substring matching (which false-flagged
+  `ExecutionEvent` on "exec" and `ArtifactMalformedError` on "rm") to
+  token-boundary matching across snake_case / camelCase pieces.
+  Preserves the original intent (catching `delete_record`,
+  `write_evidence`) without regressing on legitimate types whose names
+  happen to contain banned letters as substrings.
+
+This closes security MED-1 from the Phase 8 fix-up sweep (the only
+remaining open finding) and makes `docs/ADR_PARSER_LAYER.md`'s
+"AC-15c was retired when `server.py` swapped the stub call for
+`parse_amcache(hive_path)`" amendment factually true.
+
 ### Highlights — Phase 8 fix-up sweep (PRs #34–#40, commits b4c8eba..1478d0e)
 
 Seven independent PRs against `main` resolving the eight High findings + three
