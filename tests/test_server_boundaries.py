@@ -59,6 +59,49 @@ def test_get_amcache_output_is_evidence_wrapped(
     assert out.rstrip().endswith("</evidence-untrusted>")
 
 
+def test_get_amcache_response_surfaces_audit_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``get_amcache`` MUST return its ``audit_id`` so the agent can cite it.
+
+    The ``claim_finding`` gate's docstring says it takes "audit_ids
+    previously returned by ``get_*`` tool calls" — this test pins the
+    contract. Without the audit_id in the response, the agent has no
+    cite-able value to pass to ``claim_finding`` and the gate becomes
+    operationally unreachable over the MCP wire.
+
+    Also verifies the round-trip: the audit_id surfaced in the response
+    matches the audit_id of the corresponding ledger entry.
+    """
+    import json
+    import secrets as _secrets
+
+    cases = tmp_path / "cases"
+    case = cases / "smoke"
+    (case / "registry").mkdir(parents=True)
+    (case / "registry" / "Amcache.hve").write_bytes(b"stub hive")
+    ledger_path = tmp_path / "ledger.jsonl"
+
+    monkeypatch.setenv(server.CASES_ROOT_ENV, str(cases))
+    monkeypatch.setenv("SANCTUM_LEDGER_PATH", str(ledger_path))
+    monkeypatch.setenv("SANCTUM_LEDGER_HMAC_KEY", _secrets.token_hex(32))
+
+    out = server.get_amcache("smoke")
+    inner = out.removeprefix("<evidence-untrusted>").rstrip()
+    inner = inner.removesuffix("</evidence-untrusted>").strip()
+    body = json.loads(inner)
+
+    assert "audit_id" in body, "audit_id missing from response — claim_finding cannot cite"
+    assert body["audit_id"], "audit_id surfaced but empty"
+    assert body["case_id"] == "smoke"
+    assert "rows" in body and isinstance(body["rows"], list)
+
+    # Round-trip: response audit_id matches the most-recently-appended ledger entry.
+    last_line = ledger_path.read_text().strip().splitlines()[-1]
+    assert json.loads(last_line)["audit_id"] == body["audit_id"]
+
+
 def test_validate_evidence_mount_rejects_writable_mount(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
