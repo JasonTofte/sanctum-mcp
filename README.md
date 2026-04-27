@@ -2,7 +2,7 @@
 
 **Status**: P0 skeleton (week 1). Not yet runnable end-to-end.
 **Target**: SANS `FIND EVIL!` Hackathon, submission deadline 2026-06-15.
-**Scope**: **Windows host-based execution-evidence forensics**, not general DFIR. Network artifacts, browser history, cloud logs, email, and cross-platform forensics are **explicit non-goals**. Depth over breadth per the hackathon brief.
+**Scope**: **Windows host-based execution-evidence forensics**, not general DFIR. Network artifacts, browser history, cloud logs, email, and cross-platform forensics are **explicit non-goals**. **Memory-resident artifacts** (live process listings, network connections, code injection markers — `get_pslist`, `get_netscan`, `get_malfind`, `get_cmdline`, `get_dlls`, `get_handles`) are **deferred to v2**: they have no defined family in the current five-family triangulation scheme and would require a separate threat model before they could safely contribute to `claim_finding` corroboration counts. Depth over breadth per the hackathon brief.
 
 ---
 
@@ -82,13 +82,14 @@ protocol-compatibility smoke test.
                          │    • get_mft_timeline              │
                          │    • get_usnjrnl                   │
                          │                                    │
-                         │  Memory set (week 2+):             │
-                         │    • get_pslist                    │
-                         │    • get_netscan                   │
-                         │    • get_malfind                   │
-                         │    • get_cmdline                   │
-                         │    • get_dlls                      │
-                         │    • get_handles                   │
+                         │  Memory set (v2 — out of scope     │
+                         │  for v1; no family defined yet):   │
+                         │    • get_pslist        (deferred)  │
+                         │    • get_netscan       (deferred)  │
+                         │    • get_malfind       (deferred)  │
+                         │    • get_cmdline       (deferred)  │
+                         │    • get_dlls          (deferred)  │
+                         │    • get_handles       (deferred)  │
                          │                                    │
                          │  Finding gates:                    │
                          │    • claim_finding(hypothesis,     │
@@ -119,7 +120,7 @@ protocol-compatibility smoke test.
 |---|---|
 | Autonomous Execution Quality *(co-equal 1/6 weight; first tiebreaker; Stage 1 gating)* | `claim_finding(hypothesis, audit_ids[])` is an **external-signal self-correction primitive** in the sense of Kamoi (TACL 2024): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection. A single-family claim returns DRAFT, forcing the agent to gather a second-family corroborator before promoting to CORROBORATED. This is the form of self-correction Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows empirically helps; intrinsic "reflect on mistakes" loops are not used because Huang shows they degrade reasoning on average. |
 | IR Accuracy | Measured against DFIR-Metric ([arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). Regression table in `docs/ACCURACY.md`. |
-| Breadth & Depth | Complete Windows execution-evidence triangulation set + core memory volatility; depth over breadth per brief |
+| Breadth & Depth | Complete Windows execution-evidence triangulation set across five artifact families (AppCompat, Explorer/NTUSER, Background-service, Kernel-ETW, SysMain); depth over breadth per brief. Memory-resident artifacts are explicit v2 scope — see [Scope](#) above and [Status / roadmap](#status--roadmap) below. |
 | Constraint Implementation | **Architectural** at the server (typed-tool boundary, hash-anchored I/O, no shell passthrough); client-side hooks are defense-in-depth, not the real guarantee — see [§Limits of structural defenses](#limits-of-structural-defenses). Sanitization residuals (curated-allowlist limits, novel-vector exposure) named explicitly in [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md). Bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
 | Audit Trail Quality | Every finding traces to ≥2 `audit_id` entries; `audit_ids[]` cross-links to input hashes + tool outputs |
 | Usability / Documentation | Pinned SIFT commit SHA; Docker reproduction path; single-command install |
@@ -216,7 +217,7 @@ followups for each are tracked in the relevant threat-model docs.
 - **Week 2 (current — parser *layer* landed)**: typed parser layer + frozen `ExecutionEvent` contract under `src/sanctum/parsers/` (Amcache, ShimCache, Prefetch, Sysmon, BAM, UserAssist) consuming `<artifact>.sanctum-fixture.json` ingestion via `SANCTUM_USE_FIXTURE_SIDECAR=1`. The discriminator map in `sanctum.families.TOOL_TO_FAMILY` is the contract this layer writes against. Sanitization layer integrated. Real registry/EVTX/Prefetch decoders ship in week 3.
 - **Week 3**: replace fixture path with real parser bodies (`regipy` for hives, `python-evtx` for Sysmon, `libscca`/native-Python for Prefetch).
 - **Week 4**: triangulation gate (`claim_finding`) — wires the existing `FindingConfidence` enum into a typed function; the DRAFT→CORROBORATED transition is the demo's self-correction beat.
-- **Week 5**: `sanctum.deception` reason-code layer (forensic-deception detection — see [`docs/THREAT_MODEL_DECEPTION.md`](docs/THREAT_MODEL_DECEPTION.md)) + memory tool set. Reflexion `<reflect>` loop **dropped** — Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic self-correction degrades reasoning; the family gate is the empirically-supported external-signal alternative.
+- **Week 5**: `sanctum.deception` reason-code layer (forensic-deception detection — see [`docs/THREAT_MODEL_DECEPTION.md`](docs/THREAT_MODEL_DECEPTION.md)). Reflexion `<reflect>` loop **dropped** — Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic self-correction degrades reasoning; the family gate is the empirically-supported external-signal alternative. **Memory tool set deferred to v2** — `get_pslist` / `get_netscan` / `get_malfind` / `get_cmdline` / `get_dlls` / `get_handles` were originally planned here but require a separate threat model (no defined artifact family in the current scheme; `claim_finding` corroboration semantics undefined for memory-resident vs. on-disk evidence). Descope was a deliberate v1 scope decision, not a slip — see [Scope](#) above.
 - **Week 6**: poisoned-evidence defense tests + adversarial benchmark (~10 synthetic tampered cases under `tests/adversarial/`) measuring **refusal-under-tampering** — i.e., whether Sanctum correctly emits `DRAFT_TAMPER_SUSPECTED` rather than a confident wrong answer.
 - **Week 7** *(partially delivered week 1)*: bypass test suite
   [`tests/test_bypass.py`](tests/test_bypass.py) — 16 tests mapping to
