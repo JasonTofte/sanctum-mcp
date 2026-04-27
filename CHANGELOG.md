@@ -555,6 +555,44 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Changed
 
+- **Phase A design-claim narrowing across README + threat-model docs.**
+  Pre-submission audit surfaced ~22 design weaknesses; Phase A addresses
+  the subset that is claim-overreach (vs. missing capability) by
+  narrowing each claim to its defensible scope. Specifically:
+  (1) `docs/THREAT_MODEL_TRIANGULATION.md` gains §"Scope and threat-model
+  boundary" — family-count gate is a *pre-compromise* corroboration
+  primitive; kernel-mode multi-family forgery is OOS for v1, defense
+  shifts to deception layer + HMAC ledger.
+  (2) `docs/THREAT_MODEL_DECEPTION.md` gains §"Constructive vs.
+  destructive forgery" — v1 detects destructive anti-forensics
+  signatures only; coherent constructive forgery is OOS, bounded by
+  family count.
+  (3) `CLAUDE.md` renames "self-correction demo" → "gate-firing demo";
+  hook proves gate fires deterministically, not that LLM learned
+  self-correction.
+  (4) `README.md` gains §"Limits of structural defenses" — names
+  interpretation hallucination, sanitization-allowlist residual,
+  kernel-rootkit equivalence, hooks-as-defense-in-depth (vs. server-
+  side typed boundary as the real guarantee).
+  (5) `docs/THREAT_MODEL_SANITIZATION.md` gains §"Test-coverage scope" —
+  bypass tests verify server-side stripping invariants; LLM
+  end-to-end behavioral robustness is v2 followup.
+  (6) `README.md` lead surfaces an explicit **Scope** line: Windows
+  host-based execution-evidence forensics, not general DFIR.
+  (7) `docs/REPRODUCTION.md` gains a top-of-file ⚠️ operator-discipline
+  callout for ext-family `noload,norecovery` mount flags.
+  (8) `README.md` Constraint Implementation row in scoring alignment
+  table sharpens the server-side-vs-client-hook tier distinction.
+  (9) `docs/THREAT_MODEL_LEDGER.md` gains §"Ledger field roles" —
+  separates HMAC-keyed chain-integrity hashes (security boundary)
+  from plain-SHA-256 content fingerprints (auditing aids).
+  (10) `docs/LLM_AGNOSTIC.md` promotes the "tested-with vs.
+  compliant-with" caveat to a top-of-file callout — architecturally
+  agnostic, behaviorally validated on Opus 4.7 only for v1.
+  No code, math, or test changes. `scripts/validate_threat_model_math.py`
+  passes unchanged. Plan tracked at `private/plans/sanctum_v1_design_hardening.md`
+  (gitignored).
+
 - **`.gitignore`** — adds globbed disk/memory-image extension hard-denies
   (`**/*.raw`, `e01`, `dd`, `img`, `mem`, `vmem`, `vmsn`) so a smuggled
   evidence-image under any future re-include path is still ignored.

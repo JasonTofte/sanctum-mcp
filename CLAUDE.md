@@ -51,4 +51,4 @@ The local Claude Code settings (`.claude/settings.json`, any local skills) are g
 
 - **No cute prompt-engineering.** Architectural enforcement first; prompt instructions are defense-in-depth, not primary.
 - **Every README claim must be traceable to a source file, a cited paper, or a test.**
-- **Demo determinism.** Self-correction is demonstrated via hook-induced tool blocks that always fire — never via sampling retries, because Opus 4.7 rejects non-default temperature.
+- **Demo determinism — gate-firing, not learned self-correction.** The demo proves that the family-corroboration gate *fires deterministically* on a single-family claim and that the LLM's downstream behavior is bounded by that fire. It does **not** claim the LLM learned to self-correct; that distinction is load-bearing. Hook-induced tool blocks make the gate observable to judges in a reproducible way (Opus 4.7 rejects non-default temperature, so sampling-retry demos are unavailable). The gate's correctness is a typed-function property and is independent of agent cognition — see [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md) §"Scope and threat-model boundary".

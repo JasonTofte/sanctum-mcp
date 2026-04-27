@@ -61,6 +61,46 @@ Each predicate is deterministic — no thresholds tuned on a held-out
 set, no statistical scoring. A judge can hand-verify the predicate
 against the case's raw artifacts.
 
+## Constructive vs. destructive forgery (v1 boundary)
+
+The three signatures above all detect *destructive* anti-forensics:
+the attacker removes, suppresses, or zeroes evidence. Detection is
+possible because destruction leaves its own trace — an empty
+ShimCache plus a SYSTEM hive write timestamp; SysMain `Disabled`
+plus surviving Amcache rows; MFT `$SI` lying about creation while
+`$FN` does not.
+
+**Constructive forgery — the attacker plants coherent records across
+multiple families to fabricate a finding rather than hide one — is
+out of scope for v1, by design.** This is the threat where, e.g.,
+the attacker writes a fake Amcache row for `evil.exe` plus a matching
+BAM entry plus a matching UserAssist entry, all internally consistent
+in timestamps and identifiers.
+
+v1 defense against constructive forgery is the **family-count gate**,
+not the deception layer:
+
+- An attacker who can write to ≤1 family is bounded by `claim_finding`
+  returning `DRAFT` (single-source, sub-`k` count).
+- An attacker who can write to ≥2 families with full forensic
+  consistency (matching SHA-1 hashes, plausible timestamps under MFT
+  cross-reference, no destructive signatures elsewhere) is at the
+  threat tier marked out-of-scope for v1 by
+  [THREAT_MODEL_TRIANGULATION.md §"Scope and threat-model boundary"](THREAT_MODEL_TRIANGULATION.md#scope-and-threat-model-boundary)
+  — kernel-mode rootkit equivalence.
+
+The deception layer is **necessary but not sufficient** against
+multi-family constructive forgery. v2 followup work (cross-family
+timestamp-coherence checks, SHA-1 anomaly detection on synthesised
+Amcache rows, statistical novelty over expected per-family
+record-rate) is captured in §"Followups" below rather than shipped
+in v1.
+
+The §"Fail-closed asymmetry" contract below holds for what this layer
+*does* detect — a positive destructive signature downgrades; absence
+of any signature does not upgrade. That contract does not extend to
+coverage of constructive attacks.
+
 ## Ambiguity codes
 
 Anti-forensic detection is a high-false-positive domain (Garfinkel
@@ -134,3 +174,20 @@ ledger entry preserves the reason code so the analyst downstream sees
 - Sygnia. *When Your Logs Lie to You — LLM-MDR Prompt Injection PoC.*
   Aug 2025. (Used as the threat anchor for sanitization, but the
   structural-deception attacks here are out of its scope.)
+
+## Followups (v2)
+
+- **Cross-family timestamp coherence.** Constructive forgery requires
+  the attacker to plant timestamps that survive cross-artifact
+  consistency checks (Amcache install_time vs Prefetch first-run vs
+  MFT `$FN` btime vs Sysmon EventID 1 process creation time). A
+  family-spanning coherence predicate could detect coarse forgeries.
+  Research project; not in v1 scope.
+- **Per-family record-rate novelty.** Sustained anomaly in expected
+  record cadence (e.g., 200 Amcache rows in a 30-second window when
+  baseline is <5/min) is a constructive-forgery tell. Requires a
+  baseline-rate model not currently shipped.
+- **Amcache SHA-1 plausibility.** A planted Amcache row with a SHA-1
+  that doesn't match any file actually present on disk (or any known
+  hash in NSRL/VirusTotal) is suspicious. Out of scope until the
+  hash-cross-reference pathway is implemented.

@@ -31,6 +31,38 @@ Sanctum currently ships rung 2. Before this document landed the code was
 at rung 0 despite the README claiming rung 1 — the single biggest
 inaccuracy found by the internal architecture audit.
 
+## Ledger field roles — chain integrity vs content fingerprint
+
+A ledger entry contains **two distinct classes of hash**: chain-integrity
+hashes (HMAC-keyed, the security boundary) and content fingerprints
+(plain SHA-256, auditing aids). Conflating them produces wrong threat
+assumptions, so the distinction is named here explicitly.
+
+| Field                         | Algorithm    | Role                                              | Provides tamper-evidence? |
+|-------------------------------|--------------|---------------------------------------------------|---------------------------|
+| `prev_hash`                   | HMAC-SHA-256 | Chain link to previous entry's `line_hash`        | **Yes** — under HMAC key secrecy |
+| `line_hash`                   | HMAC-SHA-256 | This entry's keyed digest (excludes `line_hash`)  | **Yes** — under HMAC key secrecy |
+| `args_hash`                   | plain SHA-256 | Tool-call argument content fingerprint           | No — auditing aid only |
+| `input_ref.sha256`            | plain SHA-256 | Source-file content fingerprint at call time     | No — auditing aid only |
+| `pre_sanitization_sha256`     | plain SHA-256 | Tool-output content fingerprint, pre-sanitize    | No — auditing aid only |
+| `post_sanitization_sha256`    | plain SHA-256 | Tool-output content fingerprint, post-sanitize   | No — auditing aid only |
+
+The HMAC-keyed `line_hash`/`prev_hash` pair is the **security
+boundary**. The four plain-SHA-256 content fields are
+**forensic-traceability aids**: they let an analyst verify what bytes
+were sanitized into what, and detect downstream substitution of the
+input file — but an attacker who holds the HMAC key can rewrite a
+content hash freely (and rewriting the line_hash to match). Treating
+content fingerprints as if they were integrity primitives understates
+the trust placed in the HMAC key and overstates the trust placed in
+the content fields. The two roles are complementary, not redundant.
+
+This mirrors the in-code clarification at the top of
+[`src/sanctum/audit.py`](../src/sanctum/audit.py): *"The non-chain
+hashes (`args_hash`, `input_ref.sha256`, `pre_sanitization_sha256`,
+`post_sanitization_sha256`) remain plain SHA-256 — they are content
+fingerprints, not integrity links."*
+
 ## Attack model — rung 1 (HMAC chain)
 
 - **Attacker capability.** Write access to the ledger file

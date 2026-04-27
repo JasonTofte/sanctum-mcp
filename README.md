@@ -2,12 +2,13 @@
 
 **Status**: P0 skeleton (week 1). Not yet runnable end-to-end.
 **Target**: SANS `FIND EVIL!` Hackathon, submission deadline 2026-06-15.
+**Scope**: **Windows host-based execution-evidence forensics**, not general DFIR. Network artifacts, browser history, cloud logs, email, and cross-platform forensics are **explicit non-goals**. Depth over breadth per the hackathon brief.
 
 ---
 
 ## What this is
 
-A purpose-built **Model Context Protocol (MCP) server** that exposes a narrow, typed set of Windows forensic tools to an agentic LLM — with architectural guarantees against the two most dangerous failure modes of autonomous AI-assisted incident response:
+A purpose-built **Model Context Protocol (MCP) server** that exposes a narrow, typed set of **Windows host-based execution-evidence** forensic tools to an agentic LLM — with architectural guarantees against the two most dangerous failure modes of autonomous AI-assisted incident response:
 
 1. **Evidence spoliation.** The server physically cannot execute destructive commands because the destructive tool surface is not exposed. There is no `execute_shell` tool. Evidence is mounted read-only at the OS level; every tool invocation's input and output is hash-anchored and written to an append-only audit ledger.
 
@@ -119,7 +120,7 @@ protocol-compatibility smoke test.
 | Autonomous Execution Quality *(co-equal 1/6 weight; first tiebreaker; Stage 1 gating)* | `claim_finding(hypothesis, audit_ids[])` is an **external-signal self-correction primitive** in the sense of Kamoi (TACL 2024): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection. A single-family claim returns DRAFT, forcing the agent to gather a second-family corroborator before promoting to CORROBORATED. This is the form of self-correction Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows empirically helps; intrinsic "reflect on mistakes" loops are not used because Huang shows they degrade reasoning on average. |
 | IR Accuracy | Measured against DFIR-Metric ([arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). Regression table in `docs/ACCURACY.md`. |
 | Breadth & Depth | Complete Windows execution-evidence triangulation set + core memory volatility; depth over breadth per brief |
-| Constraint Implementation | **Architectural** — typed tools, hash-anchored I/O, no shell passthrough; bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
+| Constraint Implementation | **Architectural** at the server (typed-tool boundary, hash-anchored I/O, no shell passthrough); client-side hooks are defense-in-depth, not the real guarantee — see [§Limits of structural defenses](#limits-of-structural-defenses). Sanitization residuals (curated-allowlist limits, novel-vector exposure) named explicitly in [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md). Bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
 | Audit Trail Quality | Every finding traces to ≥2 `audit_id` entries; `audit_ids[]` cross-links to input hashes + tool outputs |
 | Usability / Documentation | Pinned SIFT commit SHA; Docker reproduction path; single-command install |
 
@@ -150,6 +151,64 @@ Unit-level coverage also lives in
 [`test_audit.py`](tests/test_audit.py), and
 [`test_sanitize.py`](tests/test_sanitize.py). The `test_bypass.py` suite is the
 consolidated adversarial-scenario view.
+
+The bypass suite tests **server-side stripping and rejection invariants**.
+End-to-end LLM behavioural robustness against novel injection (whether
+Opus 4.7 still misinterprets evidence after sanitization passes) is
+out of scope for v1 and tracked as a v2 followup —
+see [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md)
+§"Residual obligations" and §"Limits of structural defenses" below.
+
+## Limits of structural defenses
+
+The architectural guarantees above bound a specific class of failures.
+They do not bound everything; calling the limits out explicitly so
+judges and operators can assess applicability.
+
+- **Interpretation hallucination is not bounded.** Parsers return
+  structurally-correct evidence (`cmd.exe`, `2026-04-12T18:30:00Z`,
+  `family=AppCompat`); the LLM may still narrate that data
+  incorrectly ("`cmd.exe` is Mimikatz"). Sanctum's structural
+  boundaries constrain the extraction surface and the citation
+  surface, not the LLM's interpretation of validly extracted
+  evidence. IR-Accuracy is bounded by the underlying model
+  (Opus 4.7) and is benchmarked separately —
+  see [`docs/ACCURACY.md`](docs/ACCURACY.md) for methodology.
+
+- **Sanitization is a curated allowlist of known injection
+  patterns.** [`sanctum.sanitize.strip_known_injection_patterns()`](src/sanctum/sanitize.py)
+  covers the Sygnia 2025 catalogue, Unicode Tag block, variation
+  selectors, bidi/zero-width, and emoji-smuggling vectors
+  ([arXiv:2510.05025](https://arxiv.org/abs/2510.05025)); it cannot
+  cover patterns not yet known. Defense-in-depth, not exhaustive
+  defense — see
+  [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md)
+  §"Residual obligations".
+
+- **Kernel-mode rootkit equivalence is out of scope for v1.** The
+  family-count gate's threat model assumes per-family compromise
+  events are independent. A rootkit able to forge multiple
+  families with one privileged operation defeats the gate by
+  construction. v1 defense at this tier shifts to the deception
+  layer (destruction signatures leave traces even when forgery
+  does not) and the HMAC-chained ledger (post-hoc tamper detection
+  across the entire tool-call sequence). See
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md#scope-and-threat-model-boundary)
+  §"Scope and threat-model boundary".
+
+- **Hooks are defense-in-depth, not the real guarantee.** The
+  PreToolUse and PostToolUse hooks in the recommended
+  `.claude/settings.json` raise the cost of bypass attempts but can
+  be disabled at the framework level (cc#33106 covers a known
+  PreToolUse-on-`mcp__*` gap). The **real** guarantee is the
+  server-side typed-tool boundary — destructive verbs are not
+  exposed as MCP tools, period. Switch the client (Cline, Claude
+  Desktop, OpenAI MCP shim) and the server-side guarantee is
+  unchanged; switch off the hook and the server-side guarantee is
+  unchanged.
+
+These limits aren't oversights; they are the v1 scope claim. v2
+followups for each are tracked in the relevant threat-model docs.
 
 ## Status / roadmap
 

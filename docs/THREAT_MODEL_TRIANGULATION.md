@@ -27,6 +27,43 @@ depends on this gate.
   `X = |{compromised subsystems}|`, subject to tolerable false-negative
   cost.
 
+## Scope and threat-model boundary
+
+The Bernoulli/Poisson-binomial analysis below assumes per-subsystem
+compromises are *independent events*. That assumption holds against
+the attacker class this gate is designed for; it breaks against the
+attacker class this gate explicitly does not defend against. Calling
+that out here so the model is not over-applied.
+
+**In scope (v1).** Pre-compromise corroboration of *user-mode* artifact
+forgery: typo-squatted binaries clearing their own AppCompat trace,
+malware deleting its own Prefetch entry, EVTX log clearing via
+`wevtutil cl`, registry hive edits via standard SYSTEM-level tooling.
+Each per-subsystem `p_i` in §4 is calibrated for this attacker class.
+
+**Out of scope (v1, by design).** A kernel-mode rootkit able to forge
+multiple families with a single privileged operation. The
+independence assumption fails at this tier — an attacker who lifts
+`p_AppCompat` and `p_BAM` jointly defeats the family count by
+construction. Defense at this tier shifts to two other Sanctum
+mechanisms, neither of which depends on the independence assumption:
+
+- the **deception layer** (`sanctum.deception`, see
+  [THREAT_MODEL_DECEPTION.md](THREAT_MODEL_DECEPTION.md)) — destructive
+  anti-forensics signatures (`BaseFlushAppcompatCache`, SysMain
+  service disable, MFT timestomp) leave traces even when forgery does
+  not, demoting confidence tier asymmetrically; and
+- the **HMAC-chained ledger** (see
+  [THREAT_MODEL_LEDGER.md](THREAT_MODEL_LEDGER.md)) — post-hoc
+  tamper detection across the entire tool-call sequence, independent
+  of any per-finding count.
+
+The family-count gate is **necessary but not sufficient** against
+kernel-mode adversaries. The §7 "Load-bearing assumptions" #1 below
+restates this in formal terms; this section is the operator-facing
+summary and the scope claim that judges should evaluate the gate
+against.
+
 ## Uniform baseline — Binomial(5, p)
 
 For identical per-subsystem compromise probability `p`,
@@ -232,10 +269,12 @@ alongside the original non-uniform table.
    model *understates* forgery probability; the real defence is that
    **tampering leaves distinct trace artifacts in each subsystem** —
    a live kernel module touching AppCompat, Prefetch, and Sysmon
-   makes forensically distinguishable writes. Quantifying the joint
-   distribution properly requires a correlation model (copula or
-   shared-latent-factor); that is out of scope here and flagged as
-   an open item.
+   makes forensically distinguishable writes. The §2 "Scope and
+   threat-model boundary" section above resolves this for v1 by
+   making kernel-mode multi-family forgery explicit OOS and shifting
+   defense to the deception layer + HMAC-chained ledger. Quantifying
+   the joint distribution properly (copula or shared-latent-factor
+   correlation model) is a v2 followup, not a v1 dependency.
 2. **Symmetric attacker capability.** The model treats "compromised"
    as binary — attacker can forge freely. In practice attackers differ
    at forging content that passes downstream consistency checks
