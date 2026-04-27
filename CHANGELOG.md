@@ -6,6 +6,48 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/parsers/userassist.py` — real-mode `parse_userassist`
+  body (week-3 milestone, Explorer/NTUSER family).** Replaces the stub
+  with a `regipy`-backed walk of
+  `\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\<GUID>\Count`
+  on a per-user `NTUSER.DAT` hive. Field wiring: value names are ROT-13
+  decoded, `UEME_RUNPATH:` / `UEME_RUNPIDL:` prefixes stripped,
+  session/UI counters (`UEME_CTLSESSION`, `UEME_CTLCUACOUNT`,
+  `UEME_UI*`) dropped as non-execution rows; `program_path` ← decoded
+  remainder; `timestamp` ← FILETIME at byte offset 60 of the 72-byte
+  v5 binary blob (the canonical "when did Explorer last observe this
+  binary launched" value); `extras` carries `run_count`, `focus_count`,
+  `focus_time_ms`, and the originating `userassist_guid` so analysts
+  can distinguish RUNPATH-launched (CEBFF5CD-…) from shortcut-launched
+  (F4E57C4B-…) executions. Non-72-byte values (XP-era format-3,
+  truncated, or padded blobs) are dropped per the per-row leniency
+  rule. Same `_safe_field` exception-message scrubbing as
+  `parse_amcache` to seal the FastMCP `isError` channel against
+  attacker-influenced bytes from `regipy`. UserAssist exists in
+  `sanctum.families.TOOL_TO_FAMILY` as `Explorer/NTUSER`, giving
+  `claim_finding` a non-AppCompat corroboration partner against
+  Amcache for the first time on real registry data.
+
+- **`tests/test_parsers.py` — 11 new tests covering the real-mode
+  UserAssist path** (AC-ua-real-1..10 + AC-ua-real-int). Adds a
+  `_FakeUACountKey` / `_FakeUAGuidSubkey` / `_FakeUserassistRoot`
+  harness for the extra UserAssist→GUID→Count nesting, with `_rot13`
+  and `_ua_v5_value` helpers so tests stage cleartext + structured
+  binary blobs rather than opaque hex. Coverage: happy-path field
+  wiring; multi-GUID row_index flattening; session-counter drop;
+  wrong-size-blob drop; control-char path defense; missing-Count GUID
+  skip; missing UserAssist key → `[]`; unparseable hive →
+  `ArtifactMalformedError` with scrubbed message; corrupt-Count
+  iter_values → drop only that GUID; `UEME_RUNPIDL:` shortcut-launch
+  prefix accepted. Integration test
+  (`test_real_mode_userassist_integration_against_rig_baseline`)
+  auto-skips with a clear reason until a real `NTUSER.DAT` is
+  vendored at `tests/fixtures/case_temp_exec_001/artifacts/NTUSER.DAT`
+  (same `regf` magic + size sniff as the Amcache integration test).
+  AC-14 / AC-15a parametrized lists narrowed: `parse_userassist`
+  removed since it now has a real-mode body — only
+  `shimcache/prefetch/sysmon/bam` remain stubs.
+
 - **`src/sanctum/parsers/amcache.py` — real-mode `parse_amcache` body
   (week-3 milestone, AppCompat family).** Replaces the
   `PartialImplementationError` stub with a `regipy`-backed walk of
