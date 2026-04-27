@@ -6,6 +6,31 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Documentation
 
+- **`docs/THREAT_MODEL_DEPENDENCIES.md` — vendored-library trust
+  boundary (Phase 8 fix-up sweep, PR 7 — closes the `(forthcoming)`
+  forward references in PR #38 and PR #39).** New threat-model
+  document framing the supply-chain attack surface the rung-2 defense
+  (exact-pin + hash-locked `requirements.txt`, shipped in PR #38)
+  defends against. Names the four attacker classes (mirror operator,
+  account-takeover, successor-maintainer, transitive-smuggling), the
+  asset hierarchy (ledger key > evidence integrity > host pivot), and
+  the five-rung posture ladder modeled on the ledger threat model
+  (rung 0 `>=` no lockfile → rung 4 `third_party/` vendoring). Names
+  what's explicitly out of scope: operator host compromise, index-
+  level metadata attacks, compromised CI/CD, pre-import malicious
+  behavior, hardware supply chain. Cross-references `CLAUDE.md`
+  Pinning policy, ADR-PL-006, the per-dep `pyproject.toml` comments,
+  and the existing `THREAT_MODEL_*.md` family.
+
+  Forward-reference cleanup as part of the same PR:
+  - `CLAUDE.md` Pinning policy section: `(forthcoming)` →
+    `[link] §"Posture ladder" rung 4`.
+  - `pyproject.toml` `windowsprefetch` comment: `(forthcoming)` →
+    `§"Posture ladder" rung 4`.
+  - `docs/ADR_PARSER_LAYER.md` Cross-references: replaced "future
+    `THREAT_MODEL_DEPENDENCIES.md` is the right home" placeholder
+    with a link to the new doc.
+
 - **ADR-PL-006 — Vendored-library delegation, real-mode parser layer
   (week 3) (Phase 8 fix-up sweep, PR 6 — closes the deferred-Lead-docs
   MED follow-up).** Appended to `docs/ADR_PARSER_LAYER.md`. Captures the

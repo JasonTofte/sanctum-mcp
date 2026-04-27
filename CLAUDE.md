@@ -54,7 +54,7 @@ Sanctum is an operator-deployed MCP server, not a library — runtime deps are e
   pip-compile pyproject.toml --generate-hashes -o requirements.txt
   ```
   Commit `pyproject.toml` and `requirements.txt` together. A PR that bumps one without the other will surface as a `--require-hashes` install failure in CI.
-- **Vendoring contingency**: if `windowsprefetch` ships a CVE with no upstream patch, vendor under `third_party/windowsprefetch/` (license-text preserved) and remove from `dependencies`. The threat model already names this as the documented contingency — see `docs/THREAT_MODEL_DEPENDENCIES.md` (forthcoming).
+- **Vendoring contingency**: if `windowsprefetch` ships a CVE with no upstream patch, vendor under `third_party/windowsprefetch/` (license-text preserved) and remove from `dependencies`. The threat model already names this as the documented contingency — see [`docs/THREAT_MODEL_DEPENDENCIES.md`](docs/THREAT_MODEL_DEPENDENCIES.md) §"Posture ladder" rung 4.
 
 ## Testing invariants (enforced by `pytest` in CI)
 

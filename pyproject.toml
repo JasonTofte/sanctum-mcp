@@ -49,7 +49,7 @@ dependencies = [
   # 4.0.3 on 2021-04-29; the exact pin + hash-locked install path is the
   # supply-chain mitigation for that abandonment risk. If a CVE drops and no
   # upstream patch lands, the contingency is to vendor under `third_party/`
-  # — see `docs/THREAT_MODEL_DEPENDENCIES.md` (forthcoming).
+  # — see `docs/THREAT_MODEL_DEPENDENCIES.md` §"Posture ladder" rung 4.
   # NOTE: MAM decompression is Windows-only — non-Windows hosts surface
   # MAM-compressed `.pf` files as `ArtifactMalformedError`, which is the right
   # answer (the analyst is expected to run Sanctum on Windows when triaging
