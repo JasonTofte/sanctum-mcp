@@ -6,6 +6,36 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`stamp_head_or_log()` graceful-degradation TSA wrapper + quickstart
+  Step 7 (Phase B6 pre-submission hardening).** Closes residual obligation
+  #2 in `docs/THREAT_MODEL_LEDGER.md` operationally — the demo path no
+  longer depends on network-reachable TSA. New artifacts:
+
+  - `src/sanctum/notary.py` — new `StampOutcome` frozen dataclass and
+    `stamp_head_or_log()` wrapper. Catches the three documented TSA
+    failure classes (`urllib.error.URLError`, `RuntimeError` for
+    openssl-missing, `RuntimeError` for non-Granted reply) and returns
+    a structured rung-1 sentinel instead of raising. Other exception
+    classes still propagate — no blanket `except Exception`. Existing
+    `stamp_head()` is unchanged: production callers that drive retry/
+    queue logic on exceptions still get the rung-2 raise contract.
+
+  - `tests/test_notary.py` — 6 new tests covering happy path, network
+    failure, TSA rejection, openssl missing, unexpected-error
+    propagation, and the structured WARN-line schema. The wrapper
+    emits exactly one WARN record per fallback carrying
+    `event=tsa_stamp_fallback`, `cause`, `tsa_url`, and `head_hash` as
+    structured `extra` fields — the "no silent demotion" gate.
+
+  - `scripts/quickstart.py` — Step 7 between Step 6 (HMAC chain verify)
+    and final pass/fail. Calls the wrapper, prints `rung_reached=2`
+    and the `.tsr` path on success, or `rung_reached=1` and the cause
+    on fallback. **Quickstart exits 0 on fallback by design** — the
+    structured WARN on stderr is the visibility primitive; failing
+    the demo for a TSA-network reason would reverse the wrapper's
+    purpose. CI strictness is opt-in via
+    `grep -q tsa_stamp_fallback stderr && exit 1`.
+
 - **LLM injection eval — driver + methodology + 3 novel patterns
   (Phase B5 pre-submission hardening).** Closes the residual the
   README "Limits of structural defenses" §1 flags as v2 followup

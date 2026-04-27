@@ -168,10 +168,21 @@ TSA cert chain is stale — investigate in that order.
    Operators must decide where `SANCTUM_LEDGER_HMAC_KEY` lives and how it
    is rotated.
 2. **TSA availability.** A stamp failure means rung 2 is temporarily
-   absent — the ledger is still rung-1 tamper-evident, but a hackathon
-   demo should not depend on network-reachable TSA. `notary.stamp_head`
-   raises on network errors so the operator sees them; a production
-   deployment would queue the stamp for retry.
+   absent — the ledger is still rung-1 tamper-evident. Two surfaces
+   handle the failure differently by design:
+   - **Demo path** (`scripts/quickstart.py`) calls
+     `notary.stamp_head_or_log()`, which catches the three documented
+     failure classes (network unreachable, TSA non-Granted, openssl
+     missing) and returns a structured `StampOutcome` sentinel with
+     `rung_reached=1`. A single WARN log record carrying
+     `event=tsa_stamp_fallback` plus `cause`, `tsa_url`, and `head_hash`
+     surfaces the demotion to stderr. Quickstart exits 0 on fallback —
+     the WARN is the visibility primitive; a hackathon demo should not
+     fail for a TSA-network reason unrelated to Sanctum's architecture.
+   - **Production path** continues to call `notary.stamp_head()`
+     directly so retry/queue logic can hook the exception. The
+     wrapper exists specifically for the demo's robustness needs and
+     does not weaken the rung-2 contract for production callers.
 3. **Multi-TSA fanout.** Not yet implemented. A simple extension would be
    a list of TSA URLs in a wrapper around `stamp_head` — flagged here so
    the upgrade path is explicit.
