@@ -210,6 +210,10 @@ def test_claim_finding_output_is_evidence_wrapped(
     assert body["tier"] == "CORROBORATED"
     assert body["n_distinct_families"] == 2
     assert sorted(body["families"]) == ["AppCompat", "SysMain"]
+    # confirmation_basis surfaces in the LLM-visible payload — a downstream
+    # consumer can distinguish "the gate just barely fired" from
+    # "two genuinely independent trust roots agree".
+    assert body["confirmation_basis"] == "independent_artifacts"
 
 
 def test_claim_finding_refuses_empty_audit_ids(

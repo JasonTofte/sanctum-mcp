@@ -397,6 +397,30 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   echoing `"CONFIRMED"`/`"CONFIRMED-positive case"` updated to
   `CORROBORATED` to match.
 
+- **Typed `confirmation_basis` field on `Finding` (Phase B1
+  pre-submission hardening).** The `Finding` schema now carries a
+  `Literal["single_family", "independent_artifacts",
+  "coupled_artifacts", "single_family_strong_signal"]` field that
+  records *how* corroboration was achieved. v1 emits exactly two of
+  the four values: `single_family` for DRAFT findings (one family
+  voted) and `independent_artifacts` for CORROBORATED / FINAL
+  findings (≥2 families voted; the v1 families are by-construction
+  trust-root-disjoint). The other two values are reserved on the
+  wire so a v2 producer can introduce sub-family splits
+  (`coupled_artifacts`) or a single-family strong-signal escape
+  hatch (`single_family_strong_signal`) without a breaking schema
+  change. The field is recorded in both the in-memory `Finding`
+  returned to the agent and the `claim_finding` ledger entry's
+  `input_ref.finding` payload, and surfaces in the MCP wrapper's
+  evidence-wrapped JSON response. Documented in
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md)
+  §"Confirmation basis (v1 vs v2)". Four new tests in
+  `test_finding.py` pin the v1 emission contract; one extension to
+  `test_finding_ledger_entry_has_finding_metadata` pins the ledger
+  payload; one extension to
+  `test_claim_finding_output_is_evidence_wrapped` pins the MCP
+  response.
+
 - **`claim_finding` exposed as an MCP tool in `src/sanctum/server.py`.**
   The agent can now invoke the family-corroboration gate over the wire:
   `claim_finding(case_id, hypothesis, audit_ids)` is `@mcp.tool()`-decorated,
