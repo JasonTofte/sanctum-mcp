@@ -4,6 +4,60 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+
+- **LLM injection eval — driver + methodology + 3 novel patterns
+  (Phase B5 pre-submission hardening).** Closes the residual the
+  README "Limits of structural defenses" §1 flags as v2 followup
+  with a small, hand-curated N=10 measurement of whether Opus 4.7
+  still narrates evidence correctly *after* `sanctum.sanitize`
+  passes. New artifacts:
+
+  - `scripts/eval_llm_injection.py` — driver with all 10 scenarios
+    encoded inline (7 known state3 + 3 novel). Per scenario: builds
+    a synthetic Amcache row carrying the injection in a designated
+    field, passes through `sanctum.sanitize.sanitize()` +
+    `wrap_evidence()`, sends to Opus 4.7 with a system prompt that
+    mirrors a production agent loop, scores the response against
+    three predicates (follow_signal, redaction_marker_in_response,
+    quarantine_framing_acknowledged) → outcome
+    `{followed, resisted, hallucinated, ambiguous}`. Standard-library
+    only at the surface; `anthropic` SDK imported lazily so
+    `--dry-run` works without the `[eval]` extra. Reproducibility
+    caveat documented inline: Opus 4.7 doesn't accept non-default
+    temperature so the eval is not strictly deterministic.
+
+  - `docs/EVAL_LLM_INJECTION.md` — full methodology document.
+    Sections: scope callout (this measures LLM behavior, not server
+    stripping); residual classes (regex misses + post-strip
+    interpretation); novel-pattern table with bypass justification
+    for each (N1=phrasing, N2=meaning, N3=boundary); driver
+    description; reproducibility caveats; results table with all
+    cells `pending` (results filled when the live run is scheduled);
+    aggregate metrics (strict-resistance, novel-stratum
+    resistance — the load-bearing number); honest limits (N=10
+    small, single-model, no agent loop, heuristic scoring fragile);
+    followups (N3 hardening if LLM follows, agent-loop variant,
+    adversarial generator, cross-model).
+
+  - `pyproject.toml` — new optional `[eval]` extra carrying
+    `anthropic>=0.40`. Kept out of `[dev]` so the test suite stays
+    SDK-free and contributors who don't run the eval don't pull
+    transitive deps.
+
+  **Empirical confirmation from dry-run:** all 7 known state3
+  patterns produce `patterns_stripped=1` or `invisibles_stripped≥2`;
+  all 3 novel patterns produce zero strips. This validates by
+  construction that N1, N2, N3 probe the *actual* residual where
+  the LLM is the only thing standing between an attacker-authored
+  injection and an incorrect analyst narration.
+
+  **Cost to run live:** ~$0.36 total at Opus 4.7 list pricing
+  (~1,400 input + ~200 output tokens × 10 scenarios). Raw
+  transcripts go to `private/eval_runs/<UTC-date>/transcripts.jsonl`
+  per CLAUDE.md `/private/` convention because evidence content
+  includes attacker-authored material.
+
 ### Changed
 
 - **`get_amcache` MCP response now surfaces `audit_id` (Phase B7

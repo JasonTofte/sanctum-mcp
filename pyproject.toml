@@ -67,6 +67,13 @@ dev = [
   "black>=24.0",
   "mypy>=1.10",
 ]
+# Optional extra for the LLM-injection eval driver (scripts/eval_llm_injection.py).
+# Kept out of [dev] so the test suite stays SDK-free and contributors who don't
+# need to re-run the eval don't pull the anthropic SDK + transitive deps.
+# Install via: pip install -e '.[eval]'
+eval = [
+  "anthropic>=0.40",
+]
 
 [project.scripts]
 sanctum-mcp = "sanctum.server:main"
