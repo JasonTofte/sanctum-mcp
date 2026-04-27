@@ -243,6 +243,37 @@ followups for each are tracked in the relevant threat-model docs.
 - **Kamoi et al.**, *When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs* ([arXiv:2406.01297](https://arxiv.org/abs/2406.01297), TACL 2024) — the survey that defines the intrinsic-vs-external-signal taxonomy Sanctum cites.
 - **Conlan, Baggili, Breitinger**, *Anti-Forensics: Furthering Digital Forensic Science Through a New Extended, Granular Taxonomy* (DFRWS 2016) — taxonomic foundation for the `sanctum.deception` reason codes.
 
+## Try Sanctum in 5 minutes
+
+For reviewers who want to *see* the family-corroboration gate fire
+without setting up a SIFT VM or downloading a CFReDS image:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+python3 scripts/quickstart.py
+```
+
+The quickstart drives the MCP stdio server end-to-end against a
+synthetic public-domain fixture (`tests/fixtures/case_temp_exec_001_synthetic`).
+It launches the server, performs the MCP `initialize` handshake, lists
+the advertised typed tools (verifying *no* shell-passthrough surface),
+calls `get_amcache`, and then calls `claim_finding` with that single
+`audit_id`. The expected verdict is `DRAFT` with
+`confirmation_basis = single_family` — the gate refusing to promote a
+single-family claim, which is the architectural primitive in
+[CLAUDE.md](CLAUDE.md) invariant 5. Run completes in seconds; if it
+ends in `PASS — gate fired correctly.` the install is healthy.
+
+What the quickstart proves: the typed-function gate is deterministic
+and observable without an LLM in the loop. What it does **not** prove:
+end-to-end agent behavioural quality, real `regipy`/`python-evtx`
+parsing (the fixture uses sidecar mode — week 3), or the
+`CORROBORATED` / `FINAL` tiers (a second-family `get_*` tool body is
+required and ships in week 3 — see
+[`docs/REPRODUCTION.md`](docs/REPRODUCTION.md) §"Known limitations").
+
 ## Local development
 
 ```bash

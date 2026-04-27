@@ -397,6 +397,31 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   echoing `"CONFIRMED"`/`"CONFIRMED-positive case"` updated to
   `CORROBORATED` to match.
 
+- **`scripts/quickstart.py` — five-minute reviewer entry point (Phase
+  B3 pre-submission hardening).** End-to-end driver for the gate-firing
+  demo against a synthetic public-domain fixture, with no SIFT VM, no
+  CFReDS download, and no API key required. Launches the MCP stdio
+  server, performs the `initialize` handshake, runs `tools/list` to
+  confirm the typed-tool surface (`get_amcache`, `claim_finding`),
+  calls `get_amcache` against `tests/fixtures/case_temp_exec_001_synthetic`,
+  then calls `claim_finding` with the resulting `audit_id` and asserts
+  `tier=DRAFT` + `confirmation_basis=single_family` — the gate refusing
+  to promote a single-family claim per CLAUDE.md invariant 5. Final
+  step verifies the HMAC-chained ledger via `verify_chain()`. Standard-
+  library only (no extra deps); ~5-second runtime; PASS/FAIL exit code
+  for CI integration. Sets `SANCTUM_USE_FIXTURE_SIDECAR=1` and
+  `SANCTUM_SKIP_MOUNT_CHECK=1` (with the documented WARN-log bypass)
+  because the synthetic fixture lives on a writable repo path. README
+  gains a "Try Sanctum in 5 minutes" section pointing to the script.
+  **Known v1 hardening followup surfaced by this work:** `get_amcache`
+  does not return its `audit_id` in the MCP response payload — the
+  ledger entry is appended server-side but the id is not surfaced to
+  the caller, so an agent can't cite it in a subsequent
+  `claim_finding` call. The quickstart works around this by reading
+  the ledger file directly for the most-recent audit_id; a production
+  agent flow needs the id in the tool response. Tracked separately
+  from B3.
+
 - **`docs/ACCURACY.md` — IR-accuracy methodology (Phase B2
   pre-submission hardening).** Fills in the methodology behind
   the IR-Accuracy claim that the README has been making since
