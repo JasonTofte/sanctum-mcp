@@ -397,6 +397,37 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   echoing `"CONFIRMED"`/`"CONFIRMED-positive case"` updated to
   `CORROBORATED` to match.
 
+- **`docs/ACCURACY.md` — IR-accuracy methodology (Phase B2
+  pre-submission hardening).** Fills in the methodology behind
+  the IR-Accuracy claim that the README has been making since
+  v0.2.0 (DFIR-Metric arXiv:2505.19973, GPT-4.1 38.52% TUS@4
+  Module III baseline) without yet shipping the doc the README
+  links to. Methodology lands now; numbers fill when parser
+  bodies ship in week 3. Sections: §"Why DFIR-Metric"
+  (domain-match, baseline availability, adversarial-aware
+  metric design); §"What TUS@k means" (strict-consistency
+  variant of pass@k, why this is the right yardstick for an
+  abstention-capable system); §"Module III scope and what we
+  measure" (filter list — Windows-only, no-memory,
+  five-family-coverable — to be committed alongside the eval
+  driver); §"Sanctum's verdict-tier adaptation" (mapping
+  `FINAL`/`CORROBORATED` → committed answer,
+  `DRAFT`/`DRAFT_TAMPER_SUSPECTED` → abstention, dual scoring
+  as TUS@k strict + TUS@k coverage-adjusted with explicit
+  precision/coverage decomposition); §"Reproducing the
+  evaluation" (planned eval-driver path, expected runtime
+  estimate, report JSON shape so a third party can spot-check
+  per-task `audit_ids` against the HMAC-chained ledger);
+  §"Numbers" (placeholder table, every cell flagged
+  `pending`); §"Honest limits" (parser blocker, model coupling
+  to Opus 4.7, subset-filter bias, TUS@k consistency
+  assumption with `temperature=0`, distributional gap between
+  benchmark and in-the-wild). Also adds a top-of-doc
+  "scope-of-this-document" callout: the methodology measures
+  server-side bytes-out, not end-to-end agent cognition. No
+  other files changed; no code, no tests, no math claims —
+  pure methodology.
+
 - **Typed `confirmation_basis` field on `Finding` (Phase B1
   pre-submission hardening).** The `Finding` schema now carries a
   `Literal["single_family", "independent_artifacts",
