@@ -39,6 +39,7 @@ from regipy.registry import RegistryHive
 from regipy.utils import convert_wintime
 
 from sanctum.events import ExecutionEvent
+from sanctum.families import FAMILY_APPCOMPAT
 from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
@@ -50,7 +51,7 @@ from sanctum.parsers._fixture_io import (
 )
 
 _TOOL = "get_amcache"
-_FAMILY = "AppCompat"
+_FAMILY = FAMILY_APPCOMPAT
 
 _INVENTORY_PATH = r"\Root\InventoryApplicationFile"
 

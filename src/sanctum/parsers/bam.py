@@ -66,13 +66,14 @@ from __future__ import annotations
 import struct
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from regipy.exceptions import RegistryKeyNotFoundException, RegistryParsingException
 from regipy.registry import RegistryHive
 from regipy.utils import convert_wintime
 
 from sanctum.events import ExecutionEvent
+from sanctum.families import FAMILY_BACKGROUND_SERVICE
 from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
@@ -83,7 +84,24 @@ from sanctum.parsers._fixture_io import (
 )
 
 _TOOL = "get_bam"
-_FAMILY = "Background-service"
+_FAMILY = FAMILY_BACKGROUND_SERVICE
+
+# Closed set of SID status labels emitted by `_classify_sid`. Typing the
+# label as a Literal turns "did I spell `orphan_oobe` correctly in
+# `_DROP_STATUSES`?" from a runtime no-op into a mypy/pyright error —
+# load-bearing because a typo here would silently demote the OOBE drop
+# rule to a no-op and let `defaultuser0` events vote into the family
+# gate. Keep this in sync with `_WELLKNOWN_SYSTEM_SIDS` values and
+# `_USER_RID_NAMED` values; the docstring above is the canonical list.
+SidStatus = Literal[
+    "system_account",
+    "builtin_admin",
+    "builtin_guest",
+    "builtin_default",
+    "builtin_wdag",
+    "orphan_oobe",
+    "user_unverified",
+]
 
 _SELECT_CURRENT_PATH = r"\Select"
 _SELECT_CURRENT_VALUE = "Current"
@@ -94,13 +112,13 @@ _BAM_SUBPATH = r"Services\bam\State\UserSettings"
 # SID-to-status classification table. The shape `(prefix, rid_int) → status`
 # captures the cases enumerated in the docstring. Anything not matched
 # routes through `_classify_user_sid` which inspects RID for OOBE detection.
-_WELLKNOWN_SYSTEM_SIDS: dict[str, str] = {
+_WELLKNOWN_SYSTEM_SIDS: dict[str, SidStatus] = {
     "S-1-5-18": "system_account",
     "S-1-5-19": "system_account",
     "S-1-5-20": "system_account",
 }
 
-_USER_RID_NAMED: dict[int, str] = {
+_USER_RID_NAMED: dict[int, SidStatus] = {
     500: "builtin_admin",
     501: "builtin_guest",
     503: "builtin_default",
@@ -112,7 +130,7 @@ _USER_RID_NAMED: dict[int, str] = {
 
 # Statuses that contribute zero ExecutionEvents to the output stream.
 # Currently only orphan_oobe — see docstring on conservative-include policy.
-_DROP_STATUSES = frozenset({"orphan_oobe"})
+_DROP_STATUSES: frozenset[SidStatus] = frozenset({"orphan_oobe"})
 
 
 def parse_bam(hive_path: Path) -> list[ExecutionEvent]:
@@ -187,7 +205,7 @@ def _resolve_active_controlset(hive: Any) -> int:
     return _DEFAULT_CONTROLSET
 
 
-def _classify_sid(sid: str) -> str:
+def _classify_sid(sid: str) -> SidStatus:
     """Map a SID string to a status label per the docstring table."""
     if not sid:
         return "user_unverified"
@@ -219,7 +237,7 @@ def _events_from_sid_subkey(
     sid_subkey: Any,
     *,
     sid: str,
-    sid_status: str,
+    sid_status: SidStatus,
     hive_path: Path,
     row_index_base: int,
 ) -> list[ExecutionEvent]:
@@ -254,7 +272,7 @@ def _build_event_from_value(
     value_name: str,
     value_bytes: Any,
     sid: str,
-    sid_status: str,
+    sid_status: SidStatus,
     hive_path: Path,
     row_index: int,
 ) -> ExecutionEvent | None:

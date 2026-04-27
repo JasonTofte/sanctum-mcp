@@ -85,6 +85,7 @@ from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 from Evtx.Evtx import Evtx
 
 from sanctum.events import ExecutionEvent
+from sanctum.families import FAMILY_KERNEL_ETW
 from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
@@ -95,7 +96,7 @@ from sanctum.parsers._fixture_io import (
 )
 
 _TOOL = "get_sysmon_4688"
-_FAMILY = "Kernel-ETW"
+_FAMILY = FAMILY_KERNEL_ETW
 
 # EVTX records emit XML in this default namespace. ElementTree exposes
 # children as `{ns}localname`, so we either pre-strip the namespace or

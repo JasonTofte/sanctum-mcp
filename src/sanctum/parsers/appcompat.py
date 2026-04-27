@@ -68,6 +68,7 @@ from regipy.plugins.system.external.ShimCacheParser import get_shimcache_entries
 from regipy.registry import RegistryHive
 
 from sanctum.events import ExecutionEvent
+from sanctum.families import FAMILY_APPCOMPAT
 from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
@@ -79,7 +80,7 @@ from sanctum.parsers._fixture_io import (
 )
 
 _TOOL = "get_shimcache"
-_FAMILY = "AppCompat"
+_FAMILY = FAMILY_APPCOMPAT
 
 _SELECT_CURRENT_PATH = r"\Select"
 _SELECT_CURRENT_VALUE = "Current"
