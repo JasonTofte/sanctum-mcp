@@ -2357,16 +2357,29 @@ def test_real_mode_shimcache_raises_when_get_entries_blows_up_on_bad_magic(
     assert "SYSTEM" in msg
 
 
-def test_real_mode_shimcache_keeps_pre_failure_events_on_midstream_corruption(
+def test_real_mode_shimcache_raises_partial_parse_error_on_midstream_corruption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC-sc-real-12 — if `get_shimcache_entries` yields N good entries and
-    then raises (corrupt entry mid-blob), the parser keeps the N already-
-    emitted events instead of losing the whole hive. Per per-row leniency
-    policy: aggregate tamper detection at the family-gate, not strict
-    per-row rejection that would amplify a single-row corruption into a
-    whole-artifact loss."""
+    then raises (corrupt entry mid-blob), the parser raises
+    :class:`PartialParseError` carrying the N already-extracted events
+    instead of silently truncating the result list.
+
+    The earlier behaviour returned the partial list and let the cross-
+    family deception layer detect truncation downstream. That fallback
+    still works, but a typed exception at the parser boundary lets the
+    audit ledger record "stopped at row N because the next row was
+    malformed" — distinct from "clean EOF with N events" — which is
+    forensic evidence that selective truncation tampering may have
+    been performed (a documented anti-forensic technique).
+
+    `PartialParseError` subclasses `ArtifactMalformedError`, so callers
+    that don't want partial events catch the parent and proceed as
+    before; callers that do, opt in via `except PartialParseError as e:`
+    and read `e.events` / `e.cause`.
+    """
     from sanctum import parsers
+    from sanctum.parsers import PartialParseError
 
     monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
     artifact = _make_artifact(tmp_path, "SYSTEM")
@@ -2386,9 +2399,16 @@ def test_real_mode_shimcache_keeps_pre_failure_events_on_midstream_corruption(
         entries_raise_at=2,
     )
 
-    events = parsers.parse_shimcache(artifact)
+    with pytest.raises(PartialParseError) as exc_info:
+        parsers.parse_shimcache(artifact)
 
-    assert [e.program_path for e in events] == ["C:\\one.exe", "C:\\two.exe"]
+    err = exc_info.value
+    assert [e.program_path for e in err.events] == ["C:\\one.exe", "C:\\two.exe"]
+    assert err.cause is not None
+    assert "synthetic mid-stream entry corruption" in str(err.cause)
+    # Subclass relationship: existing `except ArtifactMalformedError`
+    # callers still catch this without modification.
+    assert isinstance(err, parsers.ArtifactMalformedError)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3360,10 +3380,20 @@ def test_real_mode_sysmon_record_xml_failure_dropped_per_row(
 # AC-sm-real-11 — records()-iterator failure preserves already-yielded events
 
 
-def test_real_mode_sysmon_records_iter_failure_preserves_yielded(
+def test_real_mode_sysmon_records_iter_failure_raises_partial_parse_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Mid-stream EVTX corruption raises :class:`PartialParseError`
+    carrying the records already extracted, mirroring the ShimCache
+    contract. Earlier behaviour silently truncated the result list.
+
+    The typed exception lets the audit ledger distinguish "EVTX hit
+    EOF after N records" from "EVTX iterator raised at record N+1" —
+    the latter is forensically meaningful (selective record-truncation
+    is a documented log-tampering technique).
+    """
     from sanctum import parsers
+    from sanctum.parsers import PartialParseError
 
     monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
     artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
@@ -3372,11 +3402,16 @@ def test_real_mode_sysmon_records_iter_failure_preserves_yielded(
         records=[_FakeRecord(_sysmon_eid1_xml())],
         records_exception=RuntimeError("chunk magic invalid"),
     )
-    events = parsers.parse_sysmon(artifact)
-    # The previously-yielded record is preserved despite the iterator
-    # raising mid-stream — same per-row leniency as ShimCache.
-    assert len(events) == 1
-    assert events[0].program_path == r"C:\Windows\System32\notepad.exe"
+
+    with pytest.raises(PartialParseError) as exc_info:
+        parsers.parse_sysmon(artifact)
+
+    err = exc_info.value
+    assert len(err.events) == 1
+    assert err.events[0].program_path == r"C:\Windows\System32\notepad.exe"
+    assert err.cause is not None
+    assert "chunk magic invalid" in str(err.cause)
+    assert isinstance(err, parsers.ArtifactMalformedError)
 
 
 # AC-sm-real-12 — empty EVTX (no records) → []

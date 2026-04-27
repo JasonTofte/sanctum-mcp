@@ -12,9 +12,25 @@ tool-execution errors. FastMCP serializes any `NotImplementedError` (and
 subclasses) into a JSON-RPC error with `isError: true`; the human-readable
 message must contain enough information to debug without re-deriving
 context from logs.
+
+`PartialParseError` makes mid-stream truncation an *observable* event
+rather than a silent return-shorter-list. AC-4 requires that already-
+yielded events survive a partial failure — it does not require, but
+this layer chooses, that callers can distinguish "clean EOF with N
+events" from "stopped at row N because the next row was malformed".
+The latter is forensic evidence in its own right (selective truncation
+of one family's rows is a documented anti-forensic technique); a typed
+exception carrying the partial events forces the caller to make an
+explicit choice rather than letting tampering masquerade as a short
+artifact.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sanctum.events import ExecutionEvent
 
 
 class ArtifactNotFoundError(FileNotFoundError):
@@ -23,6 +39,44 @@ class ArtifactNotFoundError(FileNotFoundError):
 
 class ArtifactMalformedError(ValueError):
     """Raised when artifact bytes (or a sidecar) cannot be parsed."""
+
+
+class PartialParseError(ArtifactMalformedError):
+    """Raised when row-level corruption truncates iteration mid-stream.
+
+    Carries the events that were successfully parsed before the failure
+    so callers can opt into recovery (``except PartialParseError as e:
+    use(e.events)``) or treat it as a fatal error like any other
+    :class:`ArtifactMalformedError` (existing ``except`` clauses still
+    catch it via the subclass relationship — no migration cost).
+
+    The ``cause`` attribute holds the underlying exception (typically a
+    library-specific error like ``regipy.exceptions.RegistryParsingException``
+    or ``Evtx`` decoder failure). It is also chained via
+    ``raise PartialParseError(...) from cause`` so ``__cause__`` is set
+    for tracebacks; the explicit attribute is kept so audit-ledger code
+    can record ``type(e.cause).__name__`` without traceback parsing.
+
+    NOTE on safety: the message string passed to ``__init__`` flows
+    through FastMCP's error-channel serializer and is therefore visible
+    to the LLM. Callers must scrub attacker-controlled fields with
+    :func:`sanctum.parsers._fixture_io._safe_field` before constructing
+    the message — same rule as the rest of this hierarchy. The
+    ``events`` and ``cause`` attributes are NOT serialized into the
+    message and stay on the Python object, so they can carry untrusted
+    bytes without bypassing the quarantine.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        events: list[ExecutionEvent],
+        cause: Exception | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.events = events
+        self.cause = cause
 
 
 class ArtifactEmptyError(ValueError):
