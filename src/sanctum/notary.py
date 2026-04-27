@@ -47,8 +47,10 @@ References:
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -61,6 +63,8 @@ TSA_REQUEST_CONTENT_TYPE = "application/timestamp-query"
 TSA_RESPONSE_CONTENT_TYPE = "application/timestamp-reply"
 _OPENSSL_TIMEOUT_SECONDS = 30
 
+_log = logging.getLogger("sanctum.notary")
+
 
 @dataclass(frozen=True)
 class StampResult:
@@ -72,6 +76,32 @@ class StampResult:
     tsq_path: Path
     tsr_path: Path
     status_text: str
+
+
+@dataclass(frozen=True)
+class StampOutcome:
+    """Demo-side result wrapper for :func:`stamp_head_or_log`.
+
+    ``stamp_head`` itself raises on failure — that contract is preserved
+    for production callers that want exception-driven retry/queue logic.
+    The graceful-degradation wrapper used by ``scripts/quickstart.py``
+    needs a structured success-vs-fallback signal it can route on without
+    parsing logs, hence this separate type.
+
+    ``rung_reached`` is the single dispatch field: ``2`` means the TSA
+    granted a stamp (``result`` is populated); ``1`` means the call fell
+    back to the HMAC-only chain. ``cause`` names the failure class for
+    operator triage; ``reachable`` distinguishes "POST succeeded but the
+    payload was rejected" (TSA-side issue) from "POST never completed"
+    (network/local-tooling issue).
+    """
+
+    rung_reached: int
+    reachable: bool
+    cause: str | None
+    result: StampResult | None
+    head_hash: str
+    tsa_url: str
 
 
 def stamp_head(
@@ -145,6 +175,138 @@ def stamp_head(
         tsq_path=tsq_path,
         tsr_path=tsr_path,
         status_text=status_text,
+    )
+
+
+def stamp_head_or_log(
+    ledger_path: Path | None = None,
+    tsa_url: str = DEFAULT_TSA_URL,
+    *,
+    archive_dir: Path | None = None,
+    timeout: int = _OPENSSL_TIMEOUT_SECONDS,
+    logger: logging.Logger | None = None,
+) -> StampOutcome:
+    """Try :func:`stamp_head`; on documented failure, log a structured WARN
+    and return a rung-1 :class:`StampOutcome` instead of raising.
+
+    The three failure classes the wrapper catches are exactly the ones
+    documented as residuals in ``docs/THREAT_MODEL_LEDGER.md``:
+
+    - ``urllib.error.URLError`` (and subclasses) — network unreachable, DNS
+      failure, TLS handshake failure → ``cause="network"``, ``reachable=False``.
+    - ``RuntimeError`` raised by :func:`stamp_head` for ``openssl`` missing →
+      ``cause="openssl_missing"``, ``reachable=False``. The POST never starts.
+    - ``RuntimeError`` raised by :func:`stamp_head` for a non-Granted TSA
+      reply → ``cause="tsa_reject"``, ``reachable=True``. The POST completed;
+      the TSA returned a structured rejection.
+
+    Any other exception (``MemoryError``, ``CalledProcessError`` from a
+    crashing openssl, etc.) is *not* caught — those are programming or
+    environment errors that should not be silently demoted to rung-1.
+
+    Args:
+        ledger_path: Forwarded to :func:`stamp_head`.
+        tsa_url: Forwarded to :func:`stamp_head`.
+        archive_dir: Forwarded to :func:`stamp_head`.
+        timeout: Forwarded to :func:`stamp_head`.
+        logger: Optional override for the module logger; tests use this to
+            scope ``caplog`` capture. Defaults to ``sanctum.notary``.
+
+    Returns:
+        :class:`StampOutcome` with ``rung_reached`` set to ``2`` on success
+        or ``1`` on documented fallback. ``head_hash`` and ``tsa_url`` are
+        always populated so a fallback log line still pins which state
+        the demo was at when rung-2 became unreachable.
+    """
+
+    use_log = logger or _log
+
+    # Resolve the head hash up front so it is available for the WARN line
+    # even when the underlying stamp_head call fails before reading it
+    # (e.g., openssl-missing path raises before _last_line_hash runs).
+    path = ledger_path or _ledger_path()
+    head_hash = _last_line_hash(path)
+
+    try:
+        result = stamp_head(
+            ledger_path=ledger_path,
+            tsa_url=tsa_url,
+            archive_dir=archive_dir,
+            timeout=timeout,
+        )
+    except urllib.error.URLError as exc:
+        _emit_fallback_warning(use_log, "network", tsa_url, head_hash, str(exc))
+        return StampOutcome(
+            rung_reached=1,
+            reachable=False,
+            cause="network",
+            result=None,
+            head_hash=head_hash,
+            tsa_url=tsa_url,
+        )
+    except RuntimeError as exc:
+        # stamp_head raises RuntimeError for two distinct conditions; we
+        # disambiguate by message because the underlying function does not
+        # use a typed error hierarchy and changing that is out of B6 scope.
+        message = str(exc)
+        if "openssl is required" in message:
+            cause = "openssl_missing"
+            reachable = False
+        elif "did not grant" in message:
+            cause = "tsa_reject"
+            reachable = True
+        else:
+            # Unexpected RuntimeError shape — propagate, do not silently
+            # demote. The wrapper's contract is to handle the documented
+            # classes only.
+            raise
+        _emit_fallback_warning(use_log, cause, tsa_url, head_hash, message)
+        return StampOutcome(
+            rung_reached=1,
+            reachable=reachable,
+            cause=cause,
+            result=None,
+            head_hash=head_hash,
+            tsa_url=tsa_url,
+        )
+
+    return StampOutcome(
+        rung_reached=2,
+        reachable=True,
+        cause=None,
+        result=result,
+        head_hash=result.head_hash,
+        tsa_url=result.tsa_url,
+    )
+
+
+def _emit_fallback_warning(
+    logger: logging.Logger,
+    cause: str,
+    tsa_url: str,
+    head_hash: str,
+    detail: str,
+) -> None:
+    """Single emission point for the rung-1 demotion log line.
+
+    Stable token ``event=tsa_stamp_fallback`` is the soft-alarm signal CI
+    can grep for even when ``quickstart.py`` exits 0 on fallback. The
+    ``extra`` dict surfaces the same fields as structured attributes so
+    log pipelines that parse JSON-formatted records get them as columns.
+    """
+    logger.warning(
+        "event=tsa_stamp_fallback cause=%s tsa_url=%s head_hash=%s detail=%s",
+        cause,
+        tsa_url,
+        head_hash,
+        detail,
+        extra={
+            "event": "tsa_stamp_fallback",
+            "cause": cause,
+            "tsa_url": tsa_url,
+            "head_hash": head_hash,
+            "detail": detail,
+        },
     )
 
 

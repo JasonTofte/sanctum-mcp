@@ -37,6 +37,7 @@ Prerequisite: ``pip install -e '.[dev]'`` from the repo root.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -295,6 +296,40 @@ def main() -> int:
                 else:
                     _print_kv("verify_chain", line)
             _print_kv("ledger lines", str(sum(1 for _ in ledger_path.open())))
+
+            _print_step(7, "Attempt RFC 3161 TSA stamp (rung-2 → rung-1 fallback)")
+            # Configure logging so the wrapper's structured WARN line appears
+            # on stderr where a reviewer can see it. ``basicConfig`` is
+            # idempotent — if the host process already configured logging
+            # this is a no-op.
+            logging.basicConfig(
+                level=logging.WARNING,
+                format="%(levelname)s %(name)s: %(message)s",
+            )
+            # Imported lazily to keep the import-time surface of the script
+            # independent of the notary's openssl/urllib code paths until
+            # we actually need them.
+            from sanctum.notary import stamp_head_or_log
+
+            tsa_outcome = stamp_head_or_log(
+                ledger_path=ledger_path,
+                archive_dir=Path(tmp),
+            )
+            if tsa_outcome.rung_reached == 2:
+                _print_kv("rung_reached", "2 (rfc3161 granted)")
+                _print_kv("tsa_url", tsa_outcome.tsa_url)
+                _print_kv("head_hash", f"{tsa_outcome.head_hash[:16]}...")
+                if tsa_outcome.result is not None:
+                    _print_kv("tsr_path", str(tsa_outcome.result.tsr_path))
+            else:
+                # Fallback path is non-fatal by design — see
+                # docs/THREAT_MODEL_LEDGER.md §"Residual obligations" #2.
+                # The structured WARN above is the visibility primitive;
+                # exit code stays 0 so a hackathon demo doesn't fail for
+                # network reasons unrelated to Sanctum's architecture.
+                _print_kv("rung_reached", "1 (fallback — rung-1 only)")
+                _print_kv("cause", str(tsa_outcome.cause))
+                _print_kv("note", "WARN on stderr; HMAC chain still tamper-evident")
 
             print()
             print("━" * 60)

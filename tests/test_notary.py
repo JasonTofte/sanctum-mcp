@@ -44,8 +44,15 @@ def _mock_openssl_and_http(
     *,
     granted: bool = True,
     openssl_missing: bool = False,
+    network_error: BaseException | None = None,
 ) -> None:
-    """Patch openssl subprocess + urllib.urlopen used by notary.stamp_head."""
+    """Patch openssl subprocess + urllib.urlopen used by notary.stamp_head.
+
+    ``network_error`` simulates a transport-layer failure: when set,
+    ``urllib.request.urlopen`` raises the given exception instead of
+    returning a response. Used by stamp_head_or_log fallback tests to
+    drive the rung-1 demotion path.
+    """
     if openssl_missing:
         monkeypatch.setattr(notary.shutil, "which", lambda _name: None)
         return
@@ -80,6 +87,8 @@ def _mock_openssl_and_http(
             return self._body
 
     def _fake_urlopen(req: Any, timeout: int = 30) -> _FakeResp:
+        if network_error is not None:
+            raise network_error
         # Verify the caller attached the RFC 3161 Content-Type.
         assert (
             req.get_header("Content-type") == notary.TSA_REQUEST_CONTENT_TYPE
@@ -170,3 +179,153 @@ def test_stamp_head_works_on_empty_ledger(
     _mock_openssl_and_http(monkeypatch)
     result = notary.stamp_head()
     assert result.head_hash == "0" * 64
+
+
+# --------- stamp_head_or_log — graceful-degradation wrapper (Phase B6) ---------
+#
+# These tests pin the demo-side wrapper that catches the three documented TSA
+# failure classes (network, TSA reject, openssl missing) and returns a
+# StampOutcome sentinel instead of raising. The wrapper makes quickstart.py
+# robust to TSA outages without weakening the rung-2 stamp_head() contract
+# above. See docs/THREAT_MODEL_LEDGER.md §"Residual obligations" #2.
+
+
+def test_stamp_head_or_log_happy_path_returns_rung_2(
+    ledger_with_entry: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AC-1: TSA reachable + Granted → outcome.rung_reached == 2, no WARN."""
+    _mock_openssl_and_http(monkeypatch)
+    caplog.set_level("WARNING", logger="sanctum.notary")
+    outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
+    assert outcome.rung_reached == 2
+    assert outcome.reachable is True
+    assert outcome.cause is None
+    assert outcome.result is not None
+    assert outcome.result.tsr_path.exists()
+    assert outcome.head_hash == outcome.result.head_hash
+    # Happy path must not pollute the log with a fallback line.
+    fallback_records = [r for r in caplog.records if "tsa_stamp_fallback" in r.getMessage()]
+    assert fallback_records == []
+
+
+def test_stamp_head_or_log_falls_back_on_network_error(
+    ledger_with_entry: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AC-2: URLError from urlopen → rung-1 sentinel + structured WARN."""
+    import urllib.error
+
+    _mock_openssl_and_http(
+        monkeypatch, network_error=urllib.error.URLError("connection refused")
+    )
+    caplog.set_level("WARNING", logger="sanctum.notary")
+    outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
+    assert outcome.rung_reached == 1
+    assert outcome.reachable is False
+    assert outcome.cause == "network"
+    assert outcome.result is None
+    # No exception propagated; that's the point of the wrapper.
+
+
+def test_stamp_head_or_log_falls_back_on_tsa_rejection(
+    ledger_with_entry: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AC-3: TSA returns non-Granted → rung-1 sentinel; reachable=True.
+
+    The reachable=True flag matters for ops triage: the POST succeeded and
+    the TSA returned a structured rejection, so the network path works but
+    the request was refused (e.g., malformed query, policy violation).
+    Distinguishing this from network failure lets an operator know which
+    knob to turn.
+    """
+    _mock_openssl_and_http(monkeypatch, granted=False)
+    caplog.set_level("WARNING", logger="sanctum.notary")
+    outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
+    assert outcome.rung_reached == 1
+    assert outcome.reachable is True
+    assert outcome.cause == "tsa_reject"
+    assert outcome.result is None
+
+
+def test_stamp_head_or_log_falls_back_when_openssl_missing(
+    ledger_with_entry: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AC-4: openssl missing → rung-1 sentinel; no .tsq/.tsr written."""
+    _mock_openssl_and_http(monkeypatch, openssl_missing=True)
+    caplog.set_level("WARNING", logger="sanctum.notary")
+    outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
+    assert outcome.rung_reached == 1
+    assert outcome.reachable is False
+    assert outcome.cause == "openssl_missing"
+    assert outcome.result is None
+    # The ledger directory should have no archived artifacts.
+    archive_files = list(ledger_with_entry.parent.glob("*.tsq.*")) + list(
+        ledger_with_entry.parent.glob("*.tsr.*")
+    )
+    assert archive_files == []
+
+
+def test_stamp_head_or_log_does_not_swallow_unexpected_errors(
+    ledger_with_entry: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wrapper must NOT blanket-except — only the three documented classes.
+
+    A regression to ``except Exception`` would mask real bugs (e.g., a
+    programming error in the openssl arg construction). MemoryError stands
+    in for the broad class of unexpected failures the wrapper must let
+    propagate.
+    """
+
+    def _explode(*_args: Any, **_kwargs: Any) -> Any:
+        raise MemoryError("simulated unexpected failure")
+
+    _mock_openssl_and_http(monkeypatch)
+    monkeypatch.setattr(notary.urllib.request, "urlopen", _explode)
+    with pytest.raises(MemoryError, match="simulated"):
+        notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
+
+
+def test_stamp_head_or_log_warn_line_is_structured(
+    ledger_with_entry: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The "no silent demotion" gate: WARN must carry structured fields.
+
+    On any rung-1 fallback, the wrapper MUST emit exactly one WARN log
+    record carrying ``event=tsa_stamp_fallback``, ``cause``, ``tsa_url``,
+    and ``head_hash`` so downstream observers (CI grep, log pipelines)
+    can detect the demotion without parsing free-form prose. If this
+    schema regresses, the demo can silently demote to rung-1 and an
+    operator may not notice.
+    """
+    import urllib.error
+
+    _mock_openssl_and_http(
+        monkeypatch, network_error=urllib.error.URLError("offline")
+    )
+    caplog.set_level("WARNING", logger="sanctum.notary")
+    outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
+
+    fallback_records = [
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "tsa_stamp_fallback" in r.getMessage()
+    ]
+    assert len(fallback_records) == 1, (
+        "expected exactly one WARN record carrying event=tsa_stamp_fallback"
+    )
+    record = fallback_records[0]
+    # Structured fields surfaced via logger.warning(..., extra={...})
+    assert getattr(record, "event", None) == "tsa_stamp_fallback"
+    assert getattr(record, "cause", None) == "network"
+    assert getattr(record, "tsa_url", None) == "https://tsa.example/fake"
+    assert getattr(record, "head_hash", None) == outcome.head_hash
+    assert len(getattr(record, "head_hash", "")) == 64
