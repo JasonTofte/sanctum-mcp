@@ -62,6 +62,7 @@ from regipy.utils import convert_wintime
 from windowsprefetch import Prefetch
 
 from sanctum.events import ExecutionEvent
+from sanctum.families import FAMILY_SYSMAIN
 from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
@@ -72,7 +73,7 @@ from sanctum.parsers._fixture_io import (
 )
 
 _TOOL = "get_prefetch"
-_FAMILY = "SysMain"
+_FAMILY = FAMILY_SYSMAIN
 
 # Maximum executableName length we accept. Prefetch executable names are
 # UTF-16 60-byte strings → 30 chars max in practice. 64 is generous; longer
