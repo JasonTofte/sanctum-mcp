@@ -4,6 +4,30 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Documentation
+
+- **ADR-PL-006 — Vendored-library delegation, real-mode parser layer
+  (week 3) (Phase 8 fix-up sweep, PR 6 — closes the deferred-Lead-docs
+  MED follow-up).** Appended to `docs/ADR_PARSER_LAYER.md`. Captures the
+  load-bearing decision behind week 3's real-mode parser bodies:
+  delegate binary parsing to vendored libraries (regipy / python-evtx /
+  windowsprefetch), own the trust-boundary wrapper. Documents the
+  three-option weighing (Minimal / Clean / Pragmatic), the supply-chain
+  reasoning (vendoring would not have prevented the attack we actually
+  care about — the lockfile + `--require-hashes` install path does),
+  and the per-row-leniency / mid-stream-truncation / family-tagging
+  consequences. Cross-references the `pyproject.toml` per-dep
+  justifications and the `CLAUDE.md` "Pinning policy" section as the
+  two operational surfaces that keep the ADR live.
+
+  Also amends ADR-PL-003's Status to *"Accepted (2026-04-25); partially
+  superseded by ADR-PL-006 (2026-04-26)"* — the original "parser layer
+  is dead code in production for one week" consequence is no longer
+  true once week 3's real-mode bodies shipped, and the AC-15c "inverse
+  pin" was retired when `server.py` swapped its stub call for the real
+  parser. The original Status line is preserved verbatim so the
+  decision trail stays readable.
+
 ### Changed
 
 - **Supply-chain hardening: exact-pin runtime deps + hash-locked lockfile
