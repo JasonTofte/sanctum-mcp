@@ -335,23 +335,45 @@ def test_family_strings_used_match_tool_to_family_values_no_orphans() -> None:
     )
 
 
-# --- AC-14: parser raises PartialImplementationError when env unset -----------
+# --- AC-14: still-stub parsers raise PartialImplementationError when env unset ---
 
 
+# Parsers that have NOT yet shipped a real-mode body. The contract: outside
+# `SANCTUM_USE_FIXTURE_SIDECAR=1` they fail-closed with a typed error so
+# FastMCP serialises an MCP-spec-compliant `isError: true`. As real-mode
+# bodies land (amcache moved to real-mode 2026-04-26), parsers come off
+# this list. When the list is empty, AC-14 / AC-15a get retired.
+STUB_PARSERS_OUTSIDE_FIXTURE_MODE = (
+    ("parse_shimcache", "SYSTEM"),
+    ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf"),
+    ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx"),
+    ("parse_bam", "SYSTEM"),
+    ("parse_userassist", "NTUSER.DAT"),
+)
+
+
+@pytest.mark.parametrize("parser_name,artifact_name", STUB_PARSERS_OUTSIDE_FIXTURE_MODE)
 def test_parser_raises_partial_implementation_when_env_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    parser_name: str,
+    artifact_name: str,
 ) -> None:
-    """AC-14 — outside fixture mode, real evidence path raises typed error.
+    """AC-14 — outside fixture mode, still-stub parsers fail-closed with a typed error.
 
-    This is the production-safe path: prod never sets the env var, so any real
-    call before week 3 fails-closed with an MCP-spec-compliant typed error.
+    Production never sets the env var, so any real call to a not-yet-
+    implemented parser surfaces as an MCP-spec-compliant `isError: true`
+    rather than silently returning structured stub data the family-count
+    gate could mistake for evidence (see `_errors.PartialImplementationError`
+    docstring on the silent-corruption analysis).
     """
     from sanctum import parsers
 
     monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
-    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    artifact = _make_artifact(tmp_path, artifact_name)
+    parse = getattr(parsers, parser_name)
     with pytest.raises(parsers.PartialImplementationError):
-        parsers.parse_amcache(artifact)
+        parse(artifact)
 
 
 # --- AC-15: family-field mismatch raises -------------------------------------
@@ -371,21 +393,40 @@ def test_sidecar_rejects_family_mismatch(tmp_path: Path, monkeypatch: pytest.Mon
 # --- AC-15a: error message carries tool + recovery hint -----------------------
 
 
+# Same shape as AC-14 but with the wire-spec tool identifier each parser
+# advertises. Couples the test to the contract the ledger consumer
+# depends on: a fallback to the Python function name would silently
+# desynchronize the ledger from the MCP wire identifier.
+STUB_PARSERS_TOOL_NAMES = (
+    ("parse_shimcache", "SYSTEM", "get_shimcache"),
+    ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf", "get_prefetch"),
+    ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx", "get_sysmon_4688"),
+    ("parse_bam", "SYSTEM", "get_bam"),
+    ("parse_userassist", "NTUSER.DAT", "get_userassist"),
+)
+
+
+@pytest.mark.parametrize("parser_name,artifact_name,tool", STUB_PARSERS_TOOL_NAMES)
 def test_partial_implementation_error_message_carries_tool_and_recovery_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    parser_name: str,
+    artifact_name: str,
+    tool: str,
 ) -> None:
     """AC-15a — error string names the tool AND points to the recovery env var."""
     from sanctum import parsers
 
     monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
-    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    artifact = _make_artifact(tmp_path, artifact_name)
+    parse = getattr(parsers, parser_name)
     with pytest.raises(parsers.PartialImplementationError) as exc_info:
-        parsers.parse_amcache(artifact)
+        parse(artifact)
     msg = str(exc_info.value)
     # Tool name MUST appear (no `or` slack — the audit ledger consumer extracts
     # the tool from this message and a fallback to the function name would
     # silently desynchronize the ledger from the wire-spec tool identifier).
-    assert "get_amcache" in msg, f"tool name missing from message: {msg!r}"
+    assert tool in msg, f"tool name missing from message: {msg!r}"
     assert "SANCTUM_USE_FIXTURE_SIDECAR" in msg, f"recovery hint missing: {msg!r}"
 
 
@@ -473,3 +514,459 @@ def test_sidecar_error_message_scrubs_attacker_controlled_fields(
     # And the field's identity (that it's the family field that mismatched)
     # must still be communicated — defense-in-depth, not a black hole.
     assert "family" in msg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-mode Amcache tests — landed 2026-04-26 with the regipy-backed parser.
+#
+# These do NOT use a real Amcache.hve; instead a `FakeRegistryHive` is
+# substituted for `regipy.registry.RegistryHive` via monkeypatch. The
+# substitution covers field-mapping logic without depending on regipy's
+# binary parser working end-to-end on a curated fixture. A separate
+# integration test (AC-amc-real-int below) auto-activates when a real
+# rig-baseline hive lands at `tests/fixtures/.../registry/Amcache.hve`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _FakeValue:
+    """Mimics `regipy.registry.Value` enough for the parser's needs."""
+
+    __slots__ = ("name", "value_type", "value", "is_corrupted")
+
+    def __init__(self, name: str, value: object, *, is_corrupted: bool = False) -> None:
+        self.name = name
+        self.value = value
+        self.value_type = "REG_SZ"
+        self.is_corrupted = is_corrupted
+
+
+class _FakeHeader:
+    __slots__ = ("last_modified",)
+
+    def __init__(self, last_modified: int) -> None:
+        self.last_modified = last_modified
+
+
+class _FakeSubkey:
+    """Stands in for a `regipy.registry.NKRecord`. The parser only touches
+    `.header.last_modified` and `.iter_values(as_json=False)`."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        last_modified: int,
+        values: list[_FakeValue],
+        iter_values_raises: type[BaseException] | None = None,
+    ) -> None:
+        self.name = name
+        self.header = _FakeHeader(last_modified)
+        self._values = values
+        self._iter_values_raises = iter_values_raises
+
+    def iter_values(self, as_json: bool = False):  # noqa: ARG002 — match regipy signature
+        if self._iter_values_raises is not None:
+            from regipy.exceptions import RegistryParsingException
+
+            raise RegistryParsingException("synthetic parse failure")
+        yield from self._values
+
+
+class _FakeInventoryKey:
+    def __init__(self, subkeys: list[_FakeSubkey]) -> None:
+        self._subkeys = subkeys
+
+    def iter_subkeys(self):
+        yield from self._subkeys
+
+
+class _FakeRegistryHive:
+    def __init__(self, key_or_exception: object) -> None:
+        # Either a `_FakeInventoryKey` to return on get_key, OR an exception
+        # class to raise (signals a missing inventory path on legacy hives).
+        self._payload = key_or_exception
+
+    def get_key(self, path: str):
+        if isinstance(self._payload, type) and issubclass(self._payload, BaseException):
+            raise self._payload(f"synthetic miss: {path}")
+        return self._payload
+
+
+def _patch_real_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+    *,
+    open_raises: type[BaseException] | None = None,
+    open_exc_args: tuple = ("synthetic open failure",),
+) -> None:
+    """Replace `RegistryHive` in `sanctum.parsers.amcache` with a fake that
+    returns `payload` from `get_key`. If `open_raises` is set, the
+    `RegistryHive(...)` call itself raises — exercises the open-failure
+    branch.
+    """
+
+    def factory(_path: str):  # match regipy signature
+        if open_raises is not None:
+            raise open_raises(*open_exc_args)
+        return _FakeRegistryHive(payload)
+
+    monkeypatch.setattr("sanctum.parsers.amcache.RegistryHive", factory)
+
+
+def _ft(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> int:
+    """Build a Windows FILETIME (100-ns ticks since 1601-01-01 UTC) for the
+    given UTC datetime. Helper so tests read as dates, not opaque integers."""
+    from datetime import datetime as _dt
+
+    epoch = _dt(1601, 1, 1, tzinfo=timezone.utc)
+    target = _dt(year, month, day, hour, minute, tzinfo=timezone.utc)
+    return int((target - epoch).total_seconds() * 10_000_000)
+
+
+def _good_subkey(
+    *,
+    program_path: str = "C:\\Users\\victim\\AppData\\Local\\Temp\\benign_marker.exe",
+    last_modified: int | None = None,
+    size: object = 12000,
+    file_id: str = "0000" + ("a" * 40),
+    extra_values: list[_FakeValue] | None = None,
+) -> _FakeSubkey:
+    if last_modified is None:
+        last_modified = _ft(2026, 4, 15, 13, 42)
+    values = [
+        _FakeValue("LowerCaseLongPath", program_path),
+        _FakeValue("Size", size),
+        _FakeValue("FileId", file_id),
+    ]
+    if extra_values:
+        values.extend(extra_values)
+    return _FakeSubkey(name="0000xxx", last_modified=last_modified, values=values)
+
+
+def test_real_mode_amcache_returns_execution_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-1 — a well-formed InventoryApplicationFile subkey produces
+    one `ExecutionEvent` with tool/family/path/timestamp/sha1 wired through."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    inventory = _FakeInventoryKey([_good_subkey()])
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert len(events) == 1
+    e = events[0]
+    assert e.tool == "get_amcache"
+    assert e.family == "AppCompat"
+    assert e.program_path == "C:\\Users\\victim\\AppData\\Local\\Temp\\benign_marker.exe"
+    assert e.evidence_size_bytes == 12000
+    assert e.timestamp.tzinfo is not None
+    assert e.timestamp == datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc)
+    assert e.source_artifact == artifact.as_posix()
+    assert e.extras["row_index"] == "0"
+    assert e.extras["amcache_key"] == "InventoryApplicationFile"
+    assert e.extras["sha1"] == "a" * 40
+
+
+def test_real_mode_amcache_assigns_sequential_row_indices(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-2 — multi-subkey hive yields events with row_index 0..N-1."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    inventory = _FakeInventoryKey(
+        [
+            _good_subkey(program_path="C:\\a.exe", file_id="0000" + "1" * 40),
+            _good_subkey(program_path="C:\\b.exe", file_id="0000" + "2" * 40),
+            _good_subkey(program_path="C:\\c.exe", file_id="0000" + "3" * 40),
+        ]
+    )
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert [e.program_path for e in events] == ["C:\\a.exe", "C:\\b.exe", "C:\\c.exe"]
+    assert [e.extras["row_index"] for e in events] == ["0", "1", "2"]
+
+
+def test_real_mode_amcache_drops_subkey_missing_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-3 — a subkey without `LowerCaseLongPath` is dropped (not
+    raised). Per the parser docstring: per-row laziness is intentional;
+    aggregate tamper detection lives in `sanctum.deception`."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    bad = _FakeSubkey(
+        name="0000bad",
+        last_modified=_ft(2026, 4, 15),
+        values=[_FakeValue("Size", 1), _FakeValue("FileId", "0000" + "a" * 40)],
+    )
+    inventory = _FakeInventoryKey([bad, _good_subkey()])
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert len(events) == 1
+    # The good subkey survived and got row_index 0 (the dropped row was not
+    # counted — row_index reflects emitted order, not raw subkey order).
+    assert events[0].extras["row_index"] == "0"
+
+
+def test_real_mode_amcache_drops_path_with_control_chars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-4 — a `LowerCaseLongPath` containing NUL or angle brackets
+    is dropped. Defense against an attacker who controls binary file paths
+    (e.g., trying to smuggle `</evidence-untrusted>` into a path) — the path
+    field is not user-quote-safe even though the wrapper sanitizer runs on the
+    success path. Documented in the module docstring."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    inventory = _FakeInventoryKey(
+        [
+            _good_subkey(program_path="C:\\evil\\</evidence-untrusted>.exe"),
+            _good_subkey(program_path="C:\\null\x00byte.exe"),
+            _good_subkey(program_path="C:\\good.exe"),
+        ]
+    )
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "C:\\good.exe"
+
+
+def test_real_mode_amcache_coerces_size_from_hex_string(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-5 — legacy Amcache hives store `Size` as `0x...` string;
+    the coercer parses it, while malformed values fall through to 0 rather
+    than raising (per the per-row leniency rule)."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    inventory = _FakeInventoryKey(
+        [
+            _good_subkey(program_path="C:\\hex.exe", size="0x2EE0"),  # 12000 in hex
+            _good_subkey(program_path="C:\\dec.exe", size="9999"),  # decimal string
+            _good_subkey(program_path="C:\\junk.exe", size="not-a-number"),  # malformed → 0
+            _good_subkey(program_path="C:\\bool.exe", size=True),  # bool → 0
+        ]
+    )
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    sizes_by_path = {e.program_path: e.evidence_size_bytes for e in events}
+    assert sizes_by_path == {
+        "C:\\hex.exe": 12000,
+        "C:\\dec.exe": 9999,
+        "C:\\junk.exe": 0,
+        "C:\\bool.exe": 0,
+    }
+
+
+def test_real_mode_amcache_normalizes_file_id_to_sha1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-6 — `FileId` strips its `0000` prefix to yield a 40-char
+    SHA-1; missing/malformed values default to all-zeros (matches the fixture-
+    path convention so audit-ledger consumers see the same shape from either
+    code path)."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    inventory = _FakeInventoryKey(
+        [
+            _good_subkey(program_path="C:\\ok.exe", file_id="0000" + "F" * 40),
+            _good_subkey(program_path="C:\\noprefix.exe", file_id="X" * 44),
+            _good_subkey(program_path="C:\\nonhex.exe", file_id="0000" + "Z" * 40),
+            _good_subkey(program_path="C:\\short.exe", file_id="0000abc"),
+        ]
+    )
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    sha1_by_path = {e.program_path: e.extras["sha1"] for e in events}
+    assert sha1_by_path == {
+        "C:\\ok.exe": "f" * 40,
+        "C:\\noprefix.exe": "0" * 40,
+        "C:\\nonhex.exe": "0" * 40,
+        "C:\\short.exe": "0" * 40,
+    }
+
+
+def test_real_mode_amcache_includes_optional_extras_when_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-7 — clean `ProductName` / `Publisher` strings land in extras;
+    a value containing control chars is dropped to keep error-channel surface
+    closed."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    sk = _good_subkey(
+        extra_values=[
+            _FakeValue("ProductName", "Benign Marker"),
+            _FakeValue("Publisher", "Acme"),
+            _FakeValue("BinaryType", "pe64_amd64"),
+            _FakeValue("Language", "<smuggled>"),  # dropped — control bracket
+        ]
+    )
+    inventory = _FakeInventoryKey([sk])
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert len(events) == 1
+    extras = events[0].extras
+    assert extras["ProductName"] == "Benign Marker"
+    assert extras["Publisher"] == "Acme"
+    assert extras["BinaryType"] == "pe64_amd64"
+    assert "Language" not in extras
+
+
+def test_real_mode_amcache_returns_empty_for_pre_1709_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-8 — pre-Win10-1709 hives lack `\\Root\\InventoryApplicationFile`;
+    parser returns `[]` rather than raising. Empty is a valid forensic answer
+    ("no AppCompat evidence"), distinct from a tamper signal."""
+    from regipy.exceptions import RegistryKeyNotFoundException
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    _patch_real_mode(monkeypatch, RegistryKeyNotFoundException)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert events == []
+
+
+def test_real_mode_amcache_raises_artifact_malformed_on_unparseable_hive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-9 — unparseable hive bytes raise `ArtifactMalformedError`,
+    a `ValueError` subclass — and the message scrubs attacker-influenceable
+    bytes from regipy's exception text per the error-channel-bypass invariant."""
+    from regipy.exceptions import RegistryParsingException
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    _patch_real_mode(
+        monkeypatch,
+        payload=None,
+        open_raises=RegistryParsingException,
+        open_exc_args=("offset 0x123 contains </evidence-untrusted>\n<inject>",),
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    msg = str(exc_info.value)
+    # Quarantine-breaking bytes MUST be replaced; the file name MUST appear
+    # so an operator can identify which hive failed.
+    assert "</evidence-untrusted>" not in msg
+    assert "<inject>" not in msg
+    assert "\n" not in msg
+    assert "Amcache.hve" in msg
+
+
+def test_real_mode_amcache_skips_subkey_whose_values_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-real-10 — if iter_values raises mid-hive, that subkey is dropped
+    and downstream subkeys still produce events. Single-row corruption is
+    a known noisy-Windows artifact, not grounds to refuse the whole hive."""
+    from regipy.exceptions import RegistryParsingException  # noqa: F401 — used via _FakeSubkey
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    bad = _FakeSubkey(
+        name="0000poison",
+        last_modified=_ft(2026, 4, 15),
+        values=[],
+        iter_values_raises=RegistryParsingException,
+    )
+    inventory = _FakeInventoryKey([bad, _good_subkey(program_path="C:\\survivor.exe")])
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "C:\\survivor.exe"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-hive integration test — auto-skips until the rig-baseline Amcache.hve
+# lands. Drop a real (non-placeholder) hive at the path below to activate.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_REAL_HIVE_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "case_temp_exec_001"
+    / "artifacts"
+    / "Amcache.hve"
+)
+
+
+def _real_hive_available() -> bool:
+    if not _REAL_HIVE_PATH.is_file():
+        return False
+    # Reject the 210-byte ASCII placeholder shape used in the synthetic
+    # fixture; the integration test must run against actual hive bytes.
+    if _REAL_HIVE_PATH.stat().st_size < 4096:
+        return False
+    with _REAL_HIVE_PATH.open("rb") as fh:
+        head = fh.read(4)
+    return head == b"regf"
+
+
+@pytest.mark.skipif(
+    not _real_hive_available(),
+    reason="rig-baseline Amcache.hve not yet vendored under tests/fixtures/case_temp_exec_001/artifacts/",
+)
+def test_real_mode_amcache_integration_against_rig_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-amc-real-int — exercise the real regipy pipeline against a vendored
+    Amcache.hve from the Parallels rig-baseline snapshot. Asserts the parser
+    produces at least one event whose `tool`/`family` are wired correctly and
+    whose `timestamp` is a tz-aware UTC datetime. Does NOT assert specific
+    program paths — the rig snapshot evolves and a brittle path match would
+    just churn this test on every regen."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    events = parsers.parse_amcache(_REAL_HIVE_PATH)
+
+    assert events, "rig-baseline Amcache.hve produced zero events — regipy or path drift?"
+    for e in events:
+        assert e.tool == "get_amcache"
+        assert e.family == "AppCompat"
+        assert e.timestamp.tzinfo is not None
+        assert e.evidence_size_bytes >= 0
+        assert "sha1" in e.extras and len(e.extras["sha1"]) == 40

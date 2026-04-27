@@ -26,6 +26,14 @@ classifiers = [
 dependencies = [
   # Official MCP Python SDK — provides FastMCP decorator API and stdio transport.
   "mcp>=1.0",
+  # Pure-Python Windows registry hive reader. Used by `sanctum.parsers.amcache`
+  # (and forthcoming AppCompat/UserAssist/BAM real-mode bodies) to walk hive
+  # binary structures without shelling out to a native tool. Pure-Python keeps
+  # the dependency surface small and lets the parser run on the same operator
+  # host as the MCP server (no kernel/OS-version coupling). MIT-licensed.
+  # Pinned to >=6 for the iter_subkeys / get_values(as_json=True) API surface
+  # this layer relies on.
+  "regipy>=6",
 ]
 
 [project.optional-dependencies]

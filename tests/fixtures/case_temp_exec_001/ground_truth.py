@@ -16,38 +16,40 @@ Why a Python module:
   memory: prefer Python module over external config when the data is
   read by code in the same project.
 
-Schema discipline: ExpectedFinding is intentionally not imported from
-sanctum.types because that module does not yet exist. Once it does,
-this module should switch to the canonical type and delete the local
-dataclass — that migration is the moment the fixture format becomes
-project-wide rather than case-local.
+Schema discipline: ``ExpectedFinding`` is intentionally not imported
+from ``sanctum.types`` because that module does not yet exist. Once it
+does, this module should switch to the canonical type and delete the
+local dataclass — that migration is the moment the fixture format
+becomes project-wide rather than case-local.
+
+Family / status vocabulary, however, IS already canonical: family
+strings come from :mod:`sanctum.families` and the claim-finding tier
+from :class:`sanctum.audit.FindingConfidence`. Importing rather than
+re-declaring closes the drift surface that bit PR #15 (local
+``FAMILY_BAM = "BAM"`` vs canonical ``"Background-service"``;
+``"CONFIRMED"`` vs canonical ``"CORROBORATED"``) — see
+``project_followups_threat_model.md`` item 5.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sanctum.audit import FindingConfidence
+from sanctum.families import FAMILY_APPCOMPAT, FAMILY_SYSMAIN
+
 CASE_ID = "case_temp_exec_001"
 DESCRIPTION = (
-    "benign signed binary executed from %TEMP% — exercises AppCompat ↔ SysMain "
-    "triangulation"
+    "benign signed binary executed from %TEMP% — exercises AppCompat ↔ SysMain " "triangulation"
 )
-
-# Five families per CLAUDE.md invariant #5. Treat as an enum-by-string until
-# sanctum.types lands.
-FAMILY_APPCOMPAT = "AppCompat"
-FAMILY_EXPLORER_NTUSER = "Explorer/NTUSER"
-FAMILY_BAM = "BAM"
-FAMILY_KERNEL_ETW = "Kernel-ETW"
-FAMILY_SYSMAIN = "SysMain"
 
 
 @dataclass(frozen=True)
 class ExpectedFinding:
     family: str
-    artifact: str            # path under ./artifacts/, glob-allowed
-    needle: dict[str, str]   # parser-specific assertion key/value
-    rationale: str           # why this needle proves the parser worked
+    artifact: str  # path under ./artifacts/, glob-allowed
+    needle: dict[str, str]  # parser-specific assertion key/value
+    rationale: str  # why this needle proves the parser worked
 
 
 EXPECTED: list[ExpectedFinding] = [
@@ -76,11 +78,11 @@ EXPECTED: list[ExpectedFinding] = [
 ]
 
 # Triangulation invariant: the case MUST exercise ≥2 distinct families,
-# otherwise claim_finding(...) is required to return DRAFT, not CONFIRMED,
-# and this fixture would be testing the wrong thing.
+# otherwise claim_finding(...) is required to return DRAFT, not
+# CORROBORATED, and this fixture would be testing the wrong thing.
 EXPECTED_FAMILIES = {f.family for f in EXPECTED}
 assert len(EXPECTED_FAMILIES) >= 2, (
-    f"{CASE_ID}: must exercise >=2 families to be a CONFIRMED-positive case; "
+    f"{CASE_ID}: must exercise >=2 families to be a CORROBORATED-positive case; "
     f"currently exercises only {EXPECTED_FAMILIES}"
 )
 
@@ -91,11 +93,11 @@ assert len(EXPECTED_FAMILIES) >= 2, (
 # the test expects from claim_finding(...).
 @dataclass(frozen=True)
 class ExpectedClaimFindingResult:
-    status: str                 # "CONFIRMED" for this case
-    families: frozenset[str]    # must equal EXPECTED_FAMILIES
+    status: str  # FindingConfidence.CORROBORATED.value for this case
+    families: frozenset[str]  # must equal EXPECTED_FAMILIES
 
 
 EXPECTED_CLAIM_RESULT = ExpectedClaimFindingResult(
-    status="CONFIRMED",
+    status=FindingConfidence.CORROBORATED.value,
     families=frozenset(EXPECTED_FAMILIES),
 )

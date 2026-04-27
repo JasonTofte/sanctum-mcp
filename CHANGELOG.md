@@ -6,6 +6,87 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/parsers/amcache.py` — real-mode `parse_amcache` body
+  (week-3 milestone, AppCompat family).** Replaces the
+  `PartialImplementationError` stub with a `regipy`-backed walk of
+  `\Root\InventoryApplicationFile`, mapping each subkey to an
+  `ExecutionEvent`. Field wiring: `program_path` ← `LowerCaseLongPath`;
+  `timestamp` ← subkey last-write FILETIME (the canonical "when did the
+  Application Experience Service observe this binary" signal — harder
+  for an attacker to forge from userland than the per-value `LinkDate`
+  PE-linker date, which is preserved in `extras` instead);
+  `evidence_size_bytes` ← `Size` (REG_QWORD on modern hives, hex-string
+  legacy fallback handled); `extras.sha1` ← `FileId` with the canonical
+  `0000` prefix stripped to a 40-char lowercase SHA-1; optional
+  `ProductName` / `Publisher` / `BinaryType` / `Language` carried into
+  `extras` only when control-char-clean. Pre-Win10-1709 hives (no
+  InventoryApplicationFile) return `[]` rather than raising — empty is
+  a valid forensic answer ("no AppCompat evidence"), distinct from the
+  tamper-suspected refusal that aggregate-pattern detection in
+  `sanctum.deception` will surface. Per-row corruption (missing
+  `LowerCaseLongPath`, control chars in path, `iter_values`
+  `RegistryParsingException`) is silently dropped from the row stream
+  rather than failing the whole hive — matches the per-row leniency
+  rule documented in `_build_event_from_subkey`'s docstring. The
+  fixture-mode entry (`SANCTUM_USE_FIXTURE_SIDECAR=1` →
+  `load_sidecar()`) is preserved as the fast unit-test path; real-mode
+  is the new default.
+
+- **`pyproject.toml` — `regipy>=6` runtime dependency.** Pure-Python,
+  MIT-licensed Windows registry hive reader. Pinned `>=6` for the
+  `iter_subkeys` / `get_values(as_json=True)` API surface the parser
+  layer relies on. Justification comment placed near the dependency
+  entry per the project's no-stealth-deps convention.
+
+- **`tests/test_parsers.py` — 11 new tests covering the real-mode
+  Amcache path** (AC-amc-real-1..10 + AC-amc-real-int). The unit tests
+  use a `_FakeRegistryHive` harness substituted via monkeypatch so the
+  field-mapping logic is exercised without depending on a vendored
+  `.hve` on disk. Coverage: happy-path event construction; sequential
+  `row_index` assignment across multi-subkey hives; per-row drop of
+  missing-path / control-char-path / overlong-path / values-raise rows;
+  `Size` coercion from REG_QWORD, hex-string, decimal-string, and
+  malformed inputs; `FileId` → SHA-1 normalisation including
+  malformed-prefix and non-hex fallback to all-zeros; optional-extras
+  inclusion with control-char rejection; pre-1709 empty-result branch
+  (`RegistryKeyNotFoundException`); unparseable-hive
+  `ArtifactMalformedError` with attacker-byte scrubbing in the message.
+  An additional integration test
+  (`test_real_mode_amcache_integration_against_rig_baseline`)
+  auto-skips with a clear reason until a real Amcache.hve is vendored
+  at `tests/fixtures/case_temp_exec_001/artifacts/Amcache.hve` — file
+  is sniffed for the `regf` magic and a >=4 KiB size before the test
+  activates so the synthetic 210-byte ASCII placeholder cannot
+  accidentally trigger it.
+
+- **`tests/test_parsers.py` — AC-14 / AC-15a parametrized across
+  still-stub parsers.** Previously these asserted the
+  `PartialImplementationError` contract using `parse_amcache` as the
+  canonical example, which is no longer correct now that Amcache is
+  real-mode. The tests now parametrize across `parse_shimcache /
+  parse_prefetch / parse_sysmon / parse_bam / parse_userassist`
+  (with each parser's wire-spec tool name pinned in the message
+  assertion). When that list empties as more parsers ship real-mode
+  bodies, the AC-14 / AC-15a tests retire naturally.
+
+### Changed
+
+- **`tests/fixtures/case_temp_exec_001/ground_truth.py` — fixture vocab
+  realigned with canonical `sanctum.families` + `sanctum.audit`.** Local
+  `FAMILY_BAM = "BAM"` and `EXPECTED_CLAIM_RESULT.status = "CONFIRMED"`
+  literals were silent vocabulary drift relative to the canonical
+  `FAMILY_BACKGROUND_SERVICE = "Background-service"` and
+  `FindingConfidence.CORROBORATED.value = "CORROBORATED"`. The drift
+  was latent (no test consumed the fixture yet) but would have
+  immediately broken the first parser test that compared `EXPECTED`
+  family strings against `ALL_FAMILIES`. Now imports `FAMILY_APPCOMPAT`,
+  `FAMILY_SYSMAIN`, and `FindingConfidence` directly; the local
+  `FAMILY_*` constants are deleted entirely (the rationale that
+  justified them — "until `sanctum.types` lands" — does not apply,
+  since `sanctum.families` is already the canonical source). Comments
+  echoing `"CONFIRMED"`/`"CONFIRMED-positive case"` updated to
+  `CORROBORATED` to match.
+
 - **`claim_finding` exposed as an MCP tool in `src/sanctum/server.py`.**
   The agent can now invoke the family-corroboration gate over the wire:
   `claim_finding(case_id, hypothesis, audit_ids)` is `@mcp.tool()`-decorated,
