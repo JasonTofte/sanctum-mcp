@@ -579,6 +579,33 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Changed
 
+- **Memory tool set descoped to v2 (Phase B4 pre-submission
+  hardening).** `get_pslist`, `get_netscan`, `get_malfind`,
+  `get_cmdline`, `get_dlls`, `get_handles` were previously listed
+  in the README architecture diagram (under "Memory set (week 2+)")
+  and in the Week 5 roadmap entry as v1 deliverables. They are now
+  explicitly deferred to v2 in four places: the **Scope** line at
+  the top of `README.md`, the architecture diagram (relabelled "v2
+  — out of scope for v1; no family defined yet"), the Scoring
+  Alignment table's "Breadth & Depth" row (rewritten to enumerate
+  the five existing families and call out memory as v2), and the
+  Week 5 roadmap entry. **No code change** — these tools were
+  README/roadmap bullets only; zero implementation existed in
+  `src/sanctum/`, no tests existed in `tests/`, no MCP `@mcp.tool()`
+  decorators existed for them. The descope is a documentation /
+  scope-claim correction, not an implementation removal. Rationale:
+  memory-resident artifacts have no defined family in the current
+  five-family triangulation scheme — admitting them as v1 inputs to
+  `claim_finding` corroboration counts requires a separate threat
+  model defining (a) which trust roots they share with the on-disk
+  families, (b) per-family compromise priors `p_i` for the
+  Poisson-binomial model in `docs/THREAT_MODEL_TRIANGULATION.md`,
+  and (c) deception signals analogous to those in
+  `docs/THREAT_MODEL_DECEPTION.md`. None of that exists yet, and
+  shipping the tools without it would either inflate corroboration
+  counts dishonestly or create a non-corroborating tool surface
+  the agent would have to reason about specially. v2 followup.
+
 - **Phase A design-claim narrowing across README + threat-model docs.**
   Pre-submission audit surfaced ~22 design weaknesses; Phase A addresses
   the subset that is claim-overreach (vs. missing capability) by
