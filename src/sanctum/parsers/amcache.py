@@ -88,6 +88,15 @@ def parse_amcache(hive_path: Path) -> list[ExecutionEvent]:
 
 
 def _parse_amcache_real(hive_path: Path) -> list[ExecutionEvent]:
+    # No try/finally around `hive` lifetime: regipy reads the entire hive into
+    # a `BytesIO` buffer inside `RegistryHive.__init__` (see regipy
+    # ``registry.py``: ``with open(hive_path, "rb") as f: self._stream =
+    # BytesIO(f.read())``) and closes the underlying OS handle on exit of
+    # that with-block. The `RegistryHive` instance holds no post-construction
+    # OS resource — only the in-memory buffer, which CPython refcounts
+    # release on function return or exception unwind. If a future regipy
+    # version changes this (e.g. mmap-backed hives for multi-GB files),
+    # re-verify and add explicit cleanup.
     try:
         hive = RegistryHive(str(hive_path))
     except (RegistryParsingException, OSError) as exc:

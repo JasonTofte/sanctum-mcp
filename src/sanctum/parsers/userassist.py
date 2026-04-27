@@ -107,6 +107,9 @@ def parse_userassist(hive_path: Path) -> list[ExecutionEvent]:
 
 
 def _parse_userassist_real(hive_path: Path) -> list[ExecutionEvent]:
+    # No try/finally around `hive` lifetime — regipy holds no OS resource
+    # post-construction. See `amcache._parse_amcache_real` for the
+    # canonical verification.
     try:
         hive = RegistryHive(str(hive_path))
     except (RegistryParsingException, OSError) as exc:
