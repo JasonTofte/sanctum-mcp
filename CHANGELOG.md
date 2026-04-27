@@ -4,6 +4,44 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Highlights — Phase 8 fix-up sweep (PRs #34–#40, commits b4c8eba..1478d0e)
+
+Seven independent PRs against `main` resolving the eight High findings + three
+deferred Medium follow-ups from the week-3 real-mode parser layer's Final
+Review Gate. The sweep targets durable property changes a 0.3.0 reader
+should know about, not per-PR mechanics:
+
+- **The family-corroboration gate is now type-checked.** All six parsers
+  derive `_FAMILY` from the `Final[Family]` constants in `sanctum.families`
+  (PR #35), so `claim_finding`'s ≥2-family requirement cannot be silently
+  defeated by a typoed string literal. The BAM SID-classification path
+  gains a `SidStatus = Literal[...]` so the orphan/well-known/user split
+  is enforced at the type layer, not by string compare.
+
+- **Mid-stream truncation is now observable, not a silent drop.** A new
+  `PartialParseError(ArtifactMalformedError)` typed signal (PRs #34, #36)
+  surfaces from AppCompat and Sysmon when they stop mid-record on a
+  malformed tail. Operators see "we got N events and then hit X at
+  offset Y", not "we got N events." Deferred-Lead-docs comments on
+  `amcache._parse_amcache_real`'s `RegistryHive` lifecycle (PR #37)
+  document why the absence of a `try/finally` is correct under regipy's
+  in-memory model — the kind of claim that drifts to "looks broken,
+  let me add a finally" without the load-bearing comment.
+
+- **The install path is now hash-anchored with a documented threat model.**
+  `pyproject.toml` runtime deps move from `>=` to `==X.Y.Z`, paired with a
+  539-line hash-locked `requirements.txt` (PR #38) — the operator install
+  is `pip install -r requirements.txt --require-hashes`, and a swapped
+  wheel from a compromised mirror cannot pass hash validation. ADR-PL-006
+  (PR #39) captures *why* delegate-to-vendored-libraries was the right
+  parser-layer call, and `docs/THREAT_MODEL_DEPENDENCIES.md` (PR #40)
+  names the four attacker classes the rung-2 defense covers, the asset
+  hierarchy it protects (ledger key > evidence integrity > host pivot),
+  and the rung-4 vendoring contingency if `windowsprefetch` (single-
+  maintainer, last released 2021-04-29) ever needs a fork.
+
+These are the 0.3.0 invariant changes. Per-PR detail follows below.
+
 ### Documentation
 
 - **`docs/THREAT_MODEL_DEPENDENCIES.md` — vendored-library trust
