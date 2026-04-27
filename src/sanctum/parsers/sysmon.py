@@ -86,7 +86,11 @@ from Evtx.Evtx import Evtx
 
 from sanctum.events import ExecutionEvent
 from sanctum.families import FAMILY_KERNEL_ETW
-from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
+from sanctum.parsers._errors import (
+    ArtifactMalformedError,
+    ArtifactNotFoundError,
+    PartialParseError,
+)
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
     PROGRAM_PATH_MAX_LEN,
@@ -145,11 +149,32 @@ def _parse_sysmon_real(evtx_path: Path) -> list[ExecutionEvent]:
 
     try:
         with evtx_ctx as evtx:
-            for record in _safe_records(evtx):
+            iterator = iter(evtx.records())
+            while True:
+                try:
+                    record = next(iterator)
+                except StopIteration:
+                    break
+                except Exception as exc:
+                    # Mid-stream EVTX corruption (e.g. InvalidRecordException
+                    # on a chunk with corrupt magic). Preserve already-
+                    # extracted events but raise a typed signal so callers
+                    # can distinguish this from a clean EOF — matches the
+                    # ShimCache policy in appcompat._events_from_blob.
+                    # Without this, selective record-truncation tampering
+                    # is indistinguishable from a short log file.
+                    raise PartialParseError(
+                        f"EVTX file {_safe_field(evtx_path.name)} truncated "
+                        f"after {len(events)} events: "
+                        f"{_safe_field(type(exc).__name__)}: {_safe_field(str(exc))}",
+                        events=events,
+                        cause=exc,
+                    ) from exc
                 event = _record_to_event(record, evtx_path=evtx_path, row_index=len(events))
                 if event is not None:
                     events.append(event)
     except ArtifactMalformedError:
+        # PartialParseError is a subclass — re-raised here as well.
         raise
     except Exception as exc:
         raise ArtifactMalformedError(
@@ -157,23 +182,6 @@ def _parse_sysmon_real(evtx_path: Path) -> list[ExecutionEvent]:
             f"{_safe_field(type(exc).__name__)}: {_safe_field(str(exc))}"
         ) from exc
     return events
-
-
-def _safe_records(evtx: Any):
-    """Iterate ``evtx.records()``, swallowing per-record exceptions per
-    per-row leniency. ``python-evtx`` raises ``InvalidRecordException`` on
-    a chunk with a corrupt magic — abort iteration but preserve already-
-    yielded records (matches the ShimCache mid-stream policy)."""
-
-    iterator = iter(evtx.records())
-    while True:
-        try:
-            record = next(iterator)
-        except StopIteration:
-            return
-        except Exception:
-            return
-        yield record
 
 
 def _record_to_event(

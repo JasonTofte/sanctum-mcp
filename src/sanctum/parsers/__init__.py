@@ -20,7 +20,9 @@ load-bearing decisions that shaped this layer:
 
 - ADR-PL-001 — `ExecutionEvent` is a frozen dataclass with structured `family`
 - ADR-PL-002 — sidecar loader validates BOTH `family` AND `tool` (silent-corruption defense)
-- ADR-PL-003 — fail-loud `PartialImplementationError` (week-2 invariant; week-3 added real-mode bodies as the default path, so the exception now fires only when both real-mode and fixture-mode are unavailable)
+- ADR-PL-003 — fail-loud `PartialImplementationError` (week-2 invariant;
+  week-3 added real-mode bodies as the default path, so the exception now
+  fires only when both real-mode and fixture-mode are unavailable)
 - ADR-PL-004 — fixture mode env-gated; production never sets `SANCTUM_USE_FIXTURE_SIDECAR=1`
 - ADR-PL-005 — `_safe_field()` scrubs attacker-controlled fields in exception messages
 """
@@ -32,6 +34,7 @@ from sanctum.parsers._errors import (
     ArtifactMalformedError,
     ArtifactNotFoundError,
     PartialImplementationError,
+    PartialParseError,
 )
 from sanctum.parsers.amcache import parse_amcache
 from sanctum.parsers.appcompat import parse_shimcache
@@ -51,4 +54,5 @@ __all__ = [
     "ArtifactMalformedError",
     "ArtifactEmptyError",
     "PartialImplementationError",
+    "PartialParseError",
 ]

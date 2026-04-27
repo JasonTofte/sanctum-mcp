@@ -69,7 +69,11 @@ from regipy.registry import RegistryHive
 
 from sanctum.events import ExecutionEvent
 from sanctum.families import FAMILY_APPCOMPAT
-from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundError
+from sanctum.parsers._errors import (
+    ArtifactMalformedError,
+    ArtifactNotFoundError,
+    PartialParseError,
+)
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
     EVIDENCE_SIZE_MAX,
@@ -122,7 +126,7 @@ def _parse_shimcache_real(hive_path: Path) -> list[ExecutionEvent]:
         # the tamper signal lives at the family-gate / aggregate layer.
         return []
 
-    return list(_iter_events_from_blob(blob, hive_path=hive_path))
+    return _events_from_blob(blob, hive_path=hive_path)
 
 
 def _resolve_active_controlset(hive: Any) -> int:
@@ -176,13 +180,23 @@ def _load_shimcache_blob(
     return None
 
 
-def _iter_events_from_blob(blob: bytes, *, hive_path: Path):
-    """Walk regipy's generator output, yielding sanitized ExecutionEvents.
+def _events_from_blob(blob: bytes, *, hive_path: Path) -> list[ExecutionEvent]:
+    """Walk regipy's generator output, returning sanitized ExecutionEvents.
 
     ``get_shimcache_entries`` returns ``None`` for too-short blobs and may
-    raise ``Exception`` mid-iteration on a corrupt entry. Both are
-    recoverable per per-row leniency policy — we yield what we can and stop
-    when the generator yells.
+    raise mid-iteration on a corrupt entry. Two distinct truncation
+    signals matter here:
+
+    - **Blob-level**: the call to ``get_shimcache_entries`` itself raises.
+      No events have been parsed; surface as :class:`ArtifactMalformedError`
+      with no partial-events attached.
+    - **Row-level mid-stream**: iteration succeeds for some entries, then
+      the underlying generator raises on a corrupt row. Surface as
+      :class:`PartialParseError` carrying the rows we already extracted.
+      This makes selective-truncation tampering observable at the parser
+      boundary instead of being indistinguishable from a clean short
+      cache (cross-family row-count compare in ``sanctum.deception``
+      remains the aggregate fallback signal).
     """
 
     try:
@@ -194,22 +208,29 @@ def _iter_events_from_blob(blob: bytes, *, hive_path: Path):
         ) from exc
 
     if raw_entries is None:
-        return
+        return []
 
+    events: list[ExecutionEvent] = []
     row_index = 0
     iterator = iter(raw_entries)
     while True:
         try:
             entry = next(iterator)
         except StopIteration:
-            return
-        except Exception:
-            # A single malformed entry mid-blob shouldn't lose every event
-            # downstream of it. The rest of the cache is still evidence —
-            # bail out of iteration but keep what we already have. Aggregate
-            # tamper detection at sanctum.deception spots truncation by
-            # comparing AppCompat row-counts to UserAssist / Prefetch.
-            return
+            return events
+        except Exception as exc:
+            # Mid-stream corruption. Preserve already-parsed events but
+            # raise a typed signal so callers can distinguish this from
+            # a clean EOF — selective ShimCache truncation is a known
+            # anti-forensic technique, and a silent return here would
+            # let it look identical to a freshly-provisioned cache.
+            raise PartialParseError(
+                f"SYSTEM hive {_safe_field(hive_path.name)} ShimCache truncated "
+                f"after row {row_index}: "
+                f"{_safe_field(type(exc).__name__)}: {_safe_field(str(exc))}",
+                events=events,
+                cause=exc,
+            ) from exc
 
         event = _build_event_from_entry(
             entry,
@@ -217,7 +238,7 @@ def _iter_events_from_blob(blob: bytes, *, hive_path: Path):
             row_index=row_index,
         )
         if event is not None:
-            yield event
+            events.append(event)
             row_index += 1
 
 
