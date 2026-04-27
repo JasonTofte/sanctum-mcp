@@ -344,7 +344,6 @@ def test_family_strings_used_match_tool_to_family_values_no_orphans() -> None:
 # bodies land (amcache moved to real-mode 2026-04-26), parsers come off
 # this list. When the list is empty, AC-14 / AC-15a get retired.
 STUB_PARSERS_OUTSIDE_FIXTURE_MODE = (
-    ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf"),
     ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx"),
 )
 
@@ -395,7 +394,6 @@ def test_sidecar_rejects_family_mismatch(tmp_path: Path, monkeypatch: pytest.Mon
 # depends on: a fallback to the Python function name would silently
 # desynchronize the ledger from the MCP wire identifier.
 STUB_PARSERS_TOOL_NAMES = (
-    ("parse_prefetch", "RUNTIMEBROKER.EXE-A1B2C3D4.pf", "get_prefetch"),
     ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx", "get_sysmon_4688"),
 )
 
@@ -2486,3 +2484,479 @@ def test_real_mode_shimcache_integration_against_rig_baseline(
         assert e.timestamp.tzinfo is not None
         assert e.evidence_size_bytes >= 0
         assert e.extras.get("appcompat_key") == "AppCompatCache"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-mode Prefetch (.pf) parser tests — AC-pf-real-1..12
+#
+# Prefetch files are MAM-compressed on Win 10/11 and the windowsprefetch
+# library shells out to ntdll.RtlDecompressBufferEx — Windows-only, so we
+# can't construct synthetic .pf files for unit tests cross-platform. We
+# monkeypatch `windowsprefetch.Prefetch` with a fake object exposing the
+# attributes the parser reads (`executableName`, `lastRunTime`, `runCount`,
+# `hash`, `fileSize`, `resources`). The integration test against a real
+# vendored .pf gates on file existence + size and skips on Mac dev hosts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _FakePrefetch:
+    """Mimics `windowsprefetch.Prefetch` for the attributes the parser reads.
+    Constructor accepts `infile` to match the real library signature; the
+    arg is captured (not opened) so tests can pass `tmp_path` artifacts.
+
+    `_raises` lets a test stage a constructor-time failure to exercise the
+    `ArtifactMalformedError` branch — mirrors how the real library raises
+    on truncated headers / non-Windows MAM decompression.
+    """
+
+    _raises: type[BaseException] | None = None
+    _raises_args: tuple = ("synthetic prefetch failure",)
+
+    @classmethod
+    def configure(
+        cls,
+        *,
+        executable_name: object = "NOTEPAD.EXE",
+        last_run_time: object = b"",
+        run_count: object = 1,
+        hash_str: object = "a1b2c3d4",
+        file_size: object = 24576,
+        resources: object = None,
+        raises: type[BaseException] | None = None,
+        raises_args: tuple = ("synthetic prefetch failure",),
+    ) -> None:
+        cls._executable_name = executable_name
+        cls._last_run_time = last_run_time
+        cls._run_count = run_count
+        cls._hash_str = hash_str
+        cls._file_size = file_size
+        cls._resources = resources if resources is not None else []
+        cls._raises = raises
+        cls._raises_args = raises_args
+
+    def __init__(self, infile):  # noqa: ARG002 — match windowsprefetch.Prefetch
+        if type(self)._raises is not None:
+            raise type(self)._raises(*type(self)._raises_args)
+        self.executableName = type(self)._executable_name
+        self.lastRunTime = type(self)._last_run_time
+        self.runCount = type(self)._run_count
+        self.hash = type(self)._hash_str
+        self.fileSize = type(self)._file_size
+        self.resources = type(self)._resources
+
+
+def _patch_prefetch_real_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    **kwargs,
+) -> None:
+    _FakePrefetch.configure(**kwargs)
+    monkeypatch.setattr("sanctum.parsers.prefetch.Prefetch", _FakePrefetch)
+
+
+def _last_run_buffer(*filetimes: int, slot_count: int = 8) -> bytes:
+    """Build a Win 10/11 lastRunTime buffer: `slot_count` × 8 bytes LE
+    FILETIME, with `filetimes[i]` written into slot `i` and remaining
+    slots zero-filled. v17/23 prefetch only has slot 0 (8 bytes total) —
+    pass `slot_count=1` to model that layout."""
+    import struct as _struct
+
+    buf = bytearray(slot_count * 8)
+    for i, ft in enumerate(filetimes[:slot_count]):
+        _struct.pack_into("<Q", buf, i * 8, ft)
+    return bytes(buf)
+
+
+def test_real_mode_prefetch_returns_event_for_single_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-1 — a v17/23 single-slot lastRunTime yields one
+    ExecutionEvent with tool/family/timestamp/run_count/hash wired through.
+    program_path falls back to executable basename when no resource match."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        executable_name="NOTEPAD.EXE",
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+        run_count=7,
+        hash_str="a1b2c3d4",
+        file_size=24576,
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 1
+    e = events[0]
+    assert e.tool == "get_prefetch"
+    assert e.family == "SysMain"
+    assert e.program_path == "NOTEPAD.EXE"
+    assert e.timestamp == datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc)
+    assert e.timestamp.tzinfo is not None
+    assert e.source_artifact == artifact.as_posix()
+    assert e.evidence_size_bytes == 24576
+    assert e.extras["row_index"] == "0"
+    assert e.extras["executable_basename"] == "NOTEPAD.EXE"
+    assert e.extras["prefetch_filename"] == "NOTEPAD.EXE-A1B2C3D4.pf"
+    assert e.extras["run_count"] == "7"
+    assert e.extras["prefetch_hash"] == "a1b2c3d4"
+    assert e.extras["run_slot"] == "0"
+
+
+def test_real_mode_prefetch_emits_event_per_historical_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-2 — Win 10/11 lastRunTime carries up to 8 historical
+    runs (most-recent-first). Emit one ExecutionEvent per non-zero slot
+    so timeline reconstruction has the full back-history."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        last_run_time=_last_run_buffer(
+            _ft(2026, 4, 15, 13, 42),
+            _ft(2026, 4, 14, 9, 0),
+            _ft(2026, 4, 13, 8, 0),
+        ),
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 3
+    assert [e.timestamp for e in events] == [
+        datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc),
+        datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc),
+        datetime(2026, 4, 13, 8, 0, tzinfo=timezone.utc),
+    ]
+    assert [e.extras["row_index"] for e in events] == ["0", "1", "2"]
+    assert [e.extras["run_slot"] for e in events] == ["0", "1", "2"]
+
+
+def test_real_mode_prefetch_skips_zero_slots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-3 — sentinel-zero slots in lastRunTime are unused
+    historical entries (Win SysMain pre-zeros the buffer when fewer than 8
+    prior runs are recorded). Skip them; remaining slots still emit."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    # Two real timestamps, then six unused (zero) slots.
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        last_run_time=_last_run_buffer(
+            _ft(2026, 4, 15, 13, 42),
+            _ft(2026, 4, 14, 9, 0),
+        ),
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 2
+
+
+def test_real_mode_prefetch_resolves_full_path_from_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-4 — when the .pf file's loaded-resources list contains
+    the binary's NT path, promote it to program_path. Forensically richer
+    than a basename-only path, and lets analysts triangulate against
+    Amcache's `LowerCaseLongPath` directly."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        executable_name="NOTEPAD.EXE",
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+        resources=[
+            "\\VOLUME{abc}\\WINDOWS\\SYSTEM32\\NTDLL.DLL",
+            "\\VOLUME{abc}\\WINDOWS\\SYSTEM32\\NOTEPAD.EXE",  # the binary
+            "\\VOLUME{abc}\\WINDOWS\\SYSTEM32\\KERNEL32.DLL",
+        ],
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "\\VOLUME{abc}\\WINDOWS\\SYSTEM32\\NOTEPAD.EXE"
+    # Basename still recoverable from extras for analysts.
+    assert events[0].extras["executable_basename"] == "NOTEPAD.EXE"
+
+
+def test_real_mode_prefetch_falls_back_to_basename_when_no_resource_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-5 — a corrupted resources block that doesn't list the
+    binary (or no resources at all) falls back to executableName as
+    program_path. The forensic worth of basename + prefetch_hash is still
+    high — the hash disambiguates which path Windows recorded the
+    binary at on this installation."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        executable_name="NOTEPAD.EXE",
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+        resources=["\\VOLUME{abc}\\WINDOWS\\SYSTEM32\\NTDLL.DLL"],  # binary not listed
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 1
+    assert events[0].program_path == "NOTEPAD.EXE"
+
+
+def test_real_mode_prefetch_drops_executable_with_control_chars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-6 — executableName decodes UTF-16 with backslashreplace,
+    so non-printable bytes can survive. Reject angle brackets or control
+    chars at the parser boundary; defense-in-depth against the FastMCP
+    `isError` channel that bypasses success-path sanitizers."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "BAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        executable_name="BAD\x00.EXE",  # NUL byte
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert events == []
+
+
+def test_real_mode_prefetch_drops_resource_with_injection_chars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-7 — even when the resources list claims to contain the
+    binary, a path with injection chars is rejected and we fall back to
+    executableName. The clean basename survives intact."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        executable_name="NOTEPAD.EXE",
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+        resources=[
+            "\\VOLUME{abc}\\bad</smuggled>\\NOTEPAD.EXE",  # tainted
+        ],
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 1
+    # Tainted resource rejected → fell back to basename.
+    assert events[0].program_path == "NOTEPAD.EXE"
+
+
+def test_real_mode_prefetch_ignores_invalid_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-8 — the library's `self.hash` field is a hex string with
+    `0x` lstripped. Non-hex bytes (corruption, injection) → drop the field
+    silently rather than emit an event with poisoned extras."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+        hash_str="not_a_hex_value",
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert len(events) == 1
+    assert "prefetch_hash" not in events[0].extras
+
+
+def test_real_mode_prefetch_returns_empty_when_executable_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-9 — no executableName → no usable program_path → []
+    (whole-file empty answer; one binary per .pf file means there's no
+    per-row leniency to apply)."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "WEIRD.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        executable_name="",
+        last_run_time=_last_run_buffer(_ft(2026, 4, 15, 13, 42), slot_count=1),
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert events == []
+
+
+def test_real_mode_prefetch_returns_empty_when_all_filetimes_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-10 — a fully-zero lastRunTime buffer (8 unused slots)
+    yields no events. Empty is the right answer; the .pf file existed but
+    SysMain hadn't logged any runs into it."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        last_run_time=_last_run_buffer(),  # all zeros
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert events == []
+
+
+def test_real_mode_prefetch_raises_artifact_malformed_on_library_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-11 — `windowsprefetch.Prefetch` raises a wide variety
+    (struct.error, UnicodeDecodeError, AttributeError on non-Windows MAM
+    decompression). Collapse to ArtifactMalformedError with attacker bytes
+    scrubbed via `_safe_field`. The exception type's name is preserved
+    in the message so analysts can distinguish library failure modes."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "BAD.EXE-A1B2C3D4.pf")
+
+    class SyntheticStructError(Exception):
+        pass
+
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        raises=SyntheticStructError,
+        raises_args=("offset 0x42 has </evidence-untrusted>\n<inject>",),
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_prefetch(artifact)
+
+    msg = str(exc_info.value)
+    assert "</evidence-untrusted>" not in msg
+    assert "<inject>" not in msg
+    assert "\n" not in msg
+    assert "BAD.EXE-A1B2C3D4.pf" in msg
+    # Library exception class name surfaces (scrubbed) so analysts can
+    # distinguish struct.error vs AttributeError vs OSError. Preserved
+    # for forensic context, not security-relevant.
+    assert "SyntheticStructError" in msg
+
+
+def test_real_mode_prefetch_drops_corrupt_filetime_keeps_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-pf-real-12 — a single corrupt FILETIME slot (out-of-range
+    integer that triggers OverflowError in `convert_wintime`) drops
+    that slot but keeps surrounding valid slots. Per-row leniency policy
+    parallels the other parsers; aggregate tamper detection lives at
+    `sanctum.deception`, not here."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, "NOTEPAD.EXE-A1B2C3D4.pf")
+    # Slot 1 carries an obscenely-large FILETIME that overflows `datetime`'s
+    # 9999-12-31 ceiling — convert_wintime raises OverflowError, parser
+    # skips that slot.
+    bad_filetime = 2**63 - 1
+    _patch_prefetch_real_mode(
+        monkeypatch,
+        last_run_time=_last_run_buffer(
+            _ft(2026, 4, 15, 13, 42),
+            bad_filetime,
+            _ft(2026, 4, 13, 8, 0),
+        ),
+    )
+
+    events = parsers.parse_prefetch(artifact)
+
+    assert [e.timestamp for e in events] == [
+        datetime(2026, 4, 15, 13, 42, tzinfo=timezone.utc),
+        datetime(2026, 4, 13, 8, 0, tzinfo=timezone.utc),
+    ]
+    # row_index renumbers — the dropped slot was not pre-counted.
+    assert [e.extras["row_index"] for e in events] == ["0", "1"]
+    # run_slot reflects the ORIGINAL slot index in the lastRunTime buffer
+    # (so analysts can tell "this was the most recent run" vs "this was
+    # 6 runs ago"); it does NOT match row_index when slots are dropped.
+    assert [e.extras["run_slot"] for e in events] == ["0", "2"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-prefetch integration test — auto-skips until the rig-baseline .pf
+# lands. MAM decompression is Windows-only, so on Mac dev hosts this test
+# also auto-skips even if the .pf file is present (the library raises
+# `AttributeError: ctypes has no attribute 'windll'` during decompress).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_REAL_PF_DIR = (
+    Path(__file__).resolve().parent / "fixtures" / "case_temp_exec_001" / "artifacts" / "Prefetch"
+)
+
+
+def _real_prefetch_available() -> Path | None:
+    if not _REAL_PF_DIR.is_dir():
+        return None
+    for candidate in sorted(_REAL_PF_DIR.glob("*.pf")):
+        if candidate.stat().st_size >= 256:
+            return candidate
+    return None
+
+
+@pytest.mark.skipif(
+    _real_prefetch_available() is None,
+    reason="rig-baseline .pf not yet vendored under tests/fixtures/case_temp_exec_001/artifacts/Prefetch/",
+)
+def test_real_mode_prefetch_integration_against_rig_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-pf-real-int — exercise the real windowsprefetch pipeline against
+    a vendored .pf from the Parallels rig baseline. Asserts at least one
+    event with correct tool/family wiring + tz-aware timestamps. On Mac
+    dev hosts this test will surface the Windows-only MAM decompression
+    constraint as ArtifactMalformedError; xfail rather than skip so the
+    failure is visible in CI output."""
+    import sys
+
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    pf_path = _real_prefetch_available()
+    assert pf_path is not None  # gate above
+
+    if sys.platform != "win32":
+        # MAM decompression requires Windows — surface the documented
+        # behaviour rather than fail. The Windows CI run is the authoritative
+        # path for this test.
+        with pytest.raises(parsers.ArtifactMalformedError):
+            parsers.parse_prefetch(pf_path)
+        return
+
+    events = parsers.parse_prefetch(pf_path)
+    assert events, f"rig-baseline {pf_path.name} produced zero events — SysMain disabled?"
+    for e in events:
+        assert e.tool == "get_prefetch"
+        assert e.family == "SysMain"
+        assert e.timestamp.tzinfo is not None
+        assert e.evidence_size_bytes >= 0
+        assert "executable_basename" in e.extras
+        assert e.extras["prefetch_filename"] == pf_path.name
