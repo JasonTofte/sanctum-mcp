@@ -273,6 +273,7 @@ def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> str:
         "audit_ids": list(finding.audit_ids),
         "families": list(finding.families),
         "n_distinct_families": finding.n_distinct_families,
+        "confirmation_basis": finding.confirmation_basis,
         "reason_codes": list(finding.reason_codes),
         "demoted_for_tamper": finding.demoted_for_tamper,
     }

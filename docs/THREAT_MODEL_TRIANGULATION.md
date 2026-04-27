@@ -255,6 +255,37 @@ Regression tests for the new numbers live in
 [`scripts/validate_threat_model_math.py`](../scripts/validate_threat_model_math.py)
 alongside the original non-uniform table.
 
+## Confirmation basis (v1 vs v2)
+
+The `Finding` schema carries a typed `confirmation_basis` field that
+records *how* corroboration was achieved, not just whether it cleared
+the threshold. A judge or downstream tool reading a Finding can
+distinguish "the gate just barely fired" from "two genuinely
+independent trust roots agree" without re-deriving the family list.
+
+The wire schema reserves four values; **v1 emits exactly two**, and the
+other two are placeholders so a v2 producer can populate them without a
+schema break:
+
+| Value | Emitted by v1? | Meaning |
+|---|---|---|
+| `single_family` | Yes — DRAFT path | Only one distinct family voted. The Finding is below the corroboration threshold. |
+| `independent_artifacts` | Yes — CORROBORATED / FINAL paths | ≥2 distinct families voted. The five v1 families are by-construction trust-root-disjoint (see §"Family coupling and the AppCompat correction"), so this is the strong-corroboration case. |
+| `coupled_artifacts` | **No (reserved for v2)** | Reserved for a v2 split that introduces sub-families inside an existing family (e.g., separating ShimCache and Amcache as distinct sub-families that share the AppCompat trust root). A v2 finding citing two such sub-families would correctly de-rate to `coupled_artifacts` rather than be inflated to `independent_artifacts`. |
+| `single_family_strong_signal` | **No (reserved for v2)** | Reserved for a v2 escape hatch: a single-family finding promoted on the strength of a high-confidence intra-family signal (e.g., Amcache SHA-1 cross-check against an external reputation source). v1 has no such signal and so never emits this value. |
+
+Because the field type is a `Literal[...]` of all four values from day
+one, a v2 producer that writes `coupled_artifacts` does not break a v1
+consumer's schema validation — the consumer sees an unfamiliar but
+type-valid value and can choose to treat it conservatively (e.g., as
+`single_family` for tier purposes). The forward-compatibility cost is
+one extra bit of vocabulary on the wire today, paid once.
+
+The field is recorded in **both** the `Finding` returned to the agent
+and the `claim_finding` ledger entry's `input_ref.finding` payload, so
+a downstream verifier walking the ledger sees the basis the gate
+asserted at the time of the claim.
+
 ## Load-bearing assumptions
 
 1. **Independence.** The Bernoulli/Poisson-binomial model assumes

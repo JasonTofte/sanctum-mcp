@@ -90,6 +90,45 @@ def test_duplicate_audit_ids_collapse(ledger: Path) -> None:
     assert f.n_distinct_families == 1
 
 
+# ─── confirmation_basis (v1 emits two of four reserved values) ───────────────
+
+
+def test_single_family_basis_is_single_family(ledger: Path) -> None:
+    """One family voting → ``single_family`` basis, regardless of how many
+    same-family audit_ids are stacked."""
+    aid = _record("get_amcache")
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=[aid])
+    assert f.confirmation_basis == "single_family"
+
+
+def test_two_families_basis_is_independent_artifacts(ledger: Path) -> None:
+    """Two distinct families → ``independent_artifacts``. The five v1
+    families are trust-root-disjoint by construction (see
+    docs/THREAT_MODEL_TRIANGULATION.md §"Family coupling")."""
+    aids = [_record("get_amcache"), _record("get_prefetch")]
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
+    assert f.confirmation_basis == "independent_artifacts"
+
+
+def test_three_families_basis_is_independent_artifacts(ledger: Path) -> None:
+    """≥2 families is the threshold; a third doesn't change the basis."""
+    aids = [
+        _record("get_amcache"),
+        _record("get_prefetch"),
+        _record("get_userassist"),
+    ]
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
+    assert f.confirmation_basis == "independent_artifacts"
+
+
+def test_same_family_collapse_keeps_basis_single_family(ledger: Path) -> None:
+    """Two AppCompat audit_ids still count as one family — and so the
+    basis stays ``single_family`` even though two get_* calls voted."""
+    aids = [_record("get_amcache"), _record("get_shimcache")]
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
+    assert f.confirmation_basis == "single_family"
+
+
 # ─── deception-signal demotion ───────────────────────────────────────────────
 
 
@@ -233,6 +272,10 @@ def test_finding_ledger_entry_has_finding_metadata(ledger: Path) -> None:
     assert entry["input_ref"]["finding"]["hypothesis"] == "X ran"
     assert entry["input_ref"]["finding"]["tier"] == f.tier.value
     assert entry["input_ref"]["finding"]["n_distinct_families"] == 2
+    # confirmation_basis is recorded in the ledger payload, not just the
+    # in-memory Finding — so a downstream verifier walking the ledger
+    # sees what kind of corroboration was claimed.
+    assert entry["input_ref"]["finding"]["confirmation_basis"] == "independent_artifacts"
 
 
 def test_draft_findings_still_appear_in_ledger(ledger: Path) -> None:

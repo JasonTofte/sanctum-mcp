@@ -51,7 +51,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from sanctum.audit import (
     FindingConfidence,
@@ -62,6 +62,20 @@ from sanctum.audit import (
 )
 from sanctum.deception import DeceptionSignal
 from sanctum.families import resolve_family
+
+# Confirmation basis — *how* a finding's corroboration was achieved, surfaced
+# to callers so a downstream consumer can distinguish "the gate just barely
+# fired" from "two genuinely independent trust roots agree". v1 only ever
+# emits ``single_family`` or ``independent_artifacts`` — the other two
+# values are reserved on the wire so a v2 producer can use them without a
+# breaking schema change. See ``docs/THREAT_MODEL_TRIANGULATION.md``
+# §"Confirmation basis (v1 vs v2)" for what each value will mean.
+ConfirmationBasis = Literal[
+    "single_family",
+    "independent_artifacts",
+    "coupled_artifacts",
+    "single_family_strong_signal",
+]
 
 
 class ClaimFindingError(ValueError):
@@ -84,6 +98,7 @@ class Finding:
     audit_ids: tuple[str, ...]
     families: tuple[str, ...]  # ordered set: distinct families that voted
     n_distinct_families: int
+    confirmation_basis: ConfirmationBasis  # v1: single_family | independent_artifacts
     reason_codes: tuple[str, ...]  # TamperReason values from deception_signals
     demoted_for_tamper: bool
 
@@ -135,12 +150,23 @@ def claim_finding(
     tier = classify_confidence(len(families), deception_signal_present=signal_present)
     reason_codes = tuple(s.reason.value for s in deception_signals)
 
+    # The five families in v1 are by-construction trust-root-disjoint
+    # (see ``docs/THREAT_MODEL_TRIANGULATION.md`` §"Family coupling"), so
+    # any finding with ≥2 families has ``independent_artifacts`` basis.
+    # A future v2 split inside a family (e.g., ShimCache vs Amcache as
+    # separate sub-families) is what the ``coupled_artifacts`` reserved
+    # value exists for.
+    confirmation_basis: ConfirmationBasis = (
+        "independent_artifacts" if len(families) >= 2 else "single_family"
+    )
+
     finding_payload: dict[str, Any] = {
         "hypothesis": hypothesis,
         "tier": tier.value,
         "audit_ids": list(deduped_ids),
         "families": families,
         "n_distinct_families": len(families),
+        "confirmation_basis": confirmation_basis,
         "reason_codes": list(reason_codes),
         "demoted_for_tamper": signal_present,
     }
@@ -172,6 +198,7 @@ def claim_finding(
         audit_ids=deduped_ids,
         families=tuple(families),
         n_distinct_families=len(families),
+        confirmation_basis=confirmation_basis,
         reason_codes=reason_codes,
         demoted_for_tamper=signal_present,
     )
