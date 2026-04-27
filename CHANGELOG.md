@@ -4,6 +4,31 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed
+
+- **`get_amcache` MCP response now surfaces `audit_id` (Phase B7
+  pre-submission hardening).** The previous response was
+  `{"case_id", "rows"}`; the ledger entry was appended server-side but
+  its `audit_id` was never returned to the caller, so an agent calling
+  `claim_finding(audit_ids=[...])` over the MCP wire had no cite-able
+  value to pass — the `claim_finding` docstring's promise that
+  `audit_ids` are "previously returned by `get_*` tool calls" was
+  operationally broken. New response shape:
+  `{"audit_id", "case_id", "rows"}`. **Discovered while building the
+  Phase B3 quickstart** — the unit tests for `get_amcache` and
+  `claim_finding` each ran against pre-baked ledger state and never
+  exercised the handoff between them; only the end-to-end driver
+  surfaced the gap. The B3 quickstart's ledger-file workaround is
+  now removed (it reads `inner_obj["audit_id"]` directly). Ledger
+  pre/post hashes continue to fingerprint the *content* (case_id +
+  rows), not the audit_id pointer-back-to-itself — symmetric with
+  how `claim_finding`'s `finding_hash` already separates content from
+  ledger metadata. New boundary test
+  `test_get_amcache_response_surfaces_audit_id` pins the contract,
+  including a round-trip assertion that the response audit_id matches
+  the most-recently-appended ledger entry. No schema change to the
+  ledger; the change is purely additive on the wire.
+
 ### Added
 
 - **`src/sanctum/parsers/sysmon.py` — real-mode `parse_sysmon` body

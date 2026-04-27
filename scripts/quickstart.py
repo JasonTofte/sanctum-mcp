@@ -235,21 +235,11 @@ def main() -> int:
                     str(first.get("source", first.get("program_path", "?"))),
                 )
 
-            # NOTE: The current ``get_amcache`` MCP response does not include
-            # the ``audit_id``; the ledger entry is appended server-side but
-            # the id is not returned to the caller. Workaround for the
-            # quickstart: read the ledger file directly to get the most
-            # recently appended id. This is *quickstart-only* — a production
-            # agent flow needs the id surfaced in the tool response so a
-            # subsequent ``claim_finding`` call can cite it. Tracked as a
-            # v1 hardening followup.
-            ledger_path = Path(env["SANCTUM_LEDGER_PATH"])
-            with ledger_path.open() as fh:
-                last_line = ""
-                for last_line in fh:  # noqa: B007
-                    pass
-            audit_id = json.loads(last_line)["audit_id"]
-            _print_kv("audit_id (from ledger)", audit_id)
+            audit_id = inner_obj.get("audit_id")
+            if not audit_id:
+                print("FAIL — get_amcache response missing audit_id.", file=sys.stderr)
+                return 1
+            _print_kv("audit_id", audit_id)
 
             _print_step(5, "Call claim_finding with that single audit_id")
             _send(
@@ -320,7 +310,10 @@ def main() -> int:
                 print("  docs/REPRODUCTION.md §'Known limitations').")
                 return 0
             else:
-                print(f"FAIL — expected tier=DRAFT basis=single_family, got tier={tier} basis={basis}")
+                print(
+                    f"FAIL — expected tier=DRAFT basis=single_family, "
+                    f"got tier={tier} basis={basis}"
+                )
                 return 1
 
         finally:
