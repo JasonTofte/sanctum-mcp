@@ -6,6 +6,53 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/parsers/bam.py` — real-mode `parse_bam` body
+  (week-3 milestone, Background-service family) with orphan-SID
+  classification.** Replaces the stub with a `regipy`-backed walk of
+  `\<active-control-set>\Services\bam\State\UserSettings\<SID>`. The
+  active control set is resolved dynamically from `\Select\Current`
+  (forensically-acquired hives sometimes have `Current=2` after an OS
+  rollback), falling back to `ControlSet001`. Each value name is an
+  NT-namespace path; the first 8 bytes of each value are FILETIME
+  (Win 11 also packs a sequence DWORD + padding which we ignore). Per
+  `project_followups_threat_model.md` item 4 / Khatri 2020, BAM
+  retains `UserSettings\<SID>` keys after the underlying account is
+  deleted — most notably `defaultuser0` (the OOBE setup account that
+  leaves an unresolvable `RID=1001` SID on every freshly-installed
+  Windows machine). The parser ships a pattern-only SID classifier
+  with statuses `system_account` (S-1-5-18/19/20),
+  `builtin_admin/guest/default/wdag` (RIDs 500/501/503/504),
+  `orphan_oobe` (RID 1001 — **dropped entirely from event output**
+  so OOBE noise contributes zero family corroboration), and
+  `user_unverified` (everything else, conservative-include). The
+  full SAM-cross-referenced four-state classifier from followups #4
+  lands when a SAM parser ships; the test scaffolding for all four
+  states is already in place to receive it. `extras` carries `sid`,
+  `sid_status`, and `sid_resolution: pattern_only` so analysts know
+  SAM cross-ref has not yet been performed. Same `_safe_field`
+  exception scrubbing as the other parsers; placeholder values
+  (`Version`, `SequenceNumber`) are skipped on the leading-backslash
+  test.
+
+- **`tests/test_parsers.py` — 11 new tests covering the real-mode
+  BAM path** (AC-bam-real-1..10 + AC-bam-real-int). Adds a path-
+  routed `_FakeBamHive` dispatcher that answers `\Select` and
+  `\ControlSet00X\Services\bam\...` independently — required because
+  `parse_bam` issues two `get_key()` calls for active-CS resolution.
+  Coverage: happy-path field wiring, multi-SID `row_index`
+  flattening, orphan_oobe drop with surviving-SID passthrough,
+  placeholder-value (`Version`, `SequenceNumber`) skip, parametric
+  SID-status classifier (10 cases incl. system, all 4 builtins, two
+  user RIDs, garbage SID, non-S-1-5-21 authority), active-CS
+  resolution via `\Select\Current=2`, fallback to ControlSet001 when
+  `\Select` is absent, missing UserSettings → `[]`, unparseable hive
+  → `ArtifactMalformedError` with scrubbed message, short/dirty
+  values dropped. Integration test asserts the orphan_oobe filter
+  actually fires on the rig baseline (which has the documented
+  RID-1001 SID). Both AC-14 and AC-15a parametrize lists trimmed —
+  `parse_bam` removed; only `shimcache`/`prefetch`/`sysmon` remain
+  stubs.
+
 - **`src/sanctum/parsers/userassist.py` — real-mode `parse_userassist`
   body (week-3 milestone, Explorer/NTUSER family).** Replaces the stub
   with a `regipy`-backed walk of
