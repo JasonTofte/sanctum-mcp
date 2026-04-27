@@ -42,6 +42,20 @@ The local Claude Code settings (`.claude/settings.json`, any local skills) are g
 - `CHANGELOG.md` updated on every non-trivial commit under `## [Unreleased]`.
 - Pre-commit: run `scripts/check_no_secrets.sh` and `pytest` green before opening a PR.
 
+## Pinning policy
+
+Sanctum is an operator-deployed MCP server, not a library — runtime deps are exact-pinned (`==X.Y.Z`) in `pyproject.toml`, and the resolved tree (with per-wheel SHA256 hashes) is captured in `requirements.txt`. The lockfile is the source of truth for production install.
+
+- **Operator install path**: `pip install -r requirements.txt --require-hashes`. The `--require-hashes` flag rejects any wheel whose hash doesn't match the lockfile, defeating the "compromised mirror swaps a wheel" supply-chain attack on a server that handles attacker-influenced bytes (Prefetch, EVTX, registry hives).
+- **Why `windowsprefetch` is the load-bearing pin**: upstream is single-maintainer and last released `4.0.3` on 2021-04-29 — exact-pin + hash-lock is the mitigation for the abandonment-then-account-takeover risk on a parser that consumes attacker bytes. Same caution applies to `regipy` and `python-evtx` (single-maintainer evidence-path libraries); same exact-pin treatment.
+- **Bumping a dep**: edit `pyproject.toml`, then regenerate the lockfile in one step:
+  ```
+  pip install -e '.[dev]'   # if pip-tools isn't already installed
+  pip-compile pyproject.toml --generate-hashes -o requirements.txt
+  ```
+  Commit `pyproject.toml` and `requirements.txt` together. A PR that bumps one without the other will surface as a `--require-hashes` install failure in CI.
+- **Vendoring contingency**: if `windowsprefetch` ships a CVE with no upstream patch, vendor under `third_party/windowsprefetch/` (license-text preserved) and remove from `dependencies`. The threat model already names this as the documented contingency — see `docs/THREAT_MODEL_DEPENDENCIES.md` (forthcoming).
+
 ## Testing invariants (enforced by `pytest` in CI)
 
 - **No test may read outside `/tests/fixtures/`.** Test evidence is synthetic or derived from CFReDS public-domain samples only.
