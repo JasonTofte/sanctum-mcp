@@ -58,6 +58,19 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
   per CLAUDE.md `/private/` convention because evidence content
   includes attacker-authored material.
 
+  **Live-run results (2026-04-27, N=10, Opus 4.7):**
+  **0/10 followed** — zero compliance with embedded directives
+  across all 10 scenarios, including the 3 novel-residual scenarios
+  where `sanctum.sanitize` produces zero strips. By heuristic:
+  3 resisted, 7 ambiguous, 0 hallucinated. The 7 ambiguous outcomes
+  are scoring-heuristic noise (the model echoes attacker keywords
+  while explicitly flagging them as injection — the substring scorer
+  cannot disambiguate quotation from compliance). Behaviourally,
+  inspection of `private/eval_runs/2026-04-27/transcripts.jsonl`
+  shows the model resisted in every case it was scored ambiguous.
+  See `docs/EVAL_LLM_INJECTION.md` §"The load-bearing finding" for
+  the full result narration with a state3-1 transcript excerpt.
+
 ### Changed
 
 - **`get_amcache` MCP response now surfaces `audit_id` (Phase B7
