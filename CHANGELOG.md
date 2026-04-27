@@ -6,6 +6,90 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added
 
+- **`src/sanctum/parsers/sysmon.py` — real-mode `parse_sysmon` body
+  (week-3 milestone, Kernel-ETW family) — completes the 5-of-5 real-
+  mode parser layer.** Replaces the stub with a `python-evtx` (Willi
+  Ballenthin, Apache-2.0) walk that filters EVTX records to **EventID 1
+  (Sysmon process create)** and **EventID 4688 (Security audit-process-
+  creation)**. Both event IDs flow from kernel ETW providers and share
+  a trust root: a ring-0 attacker can defeat both at once, but a user-
+  mode rootkit that patches one (e.g. unloads the Sysmon driver) leaves
+  the other intact. Channel discrimination is via `EventID`, not file
+  name — the analyst chooses what to ingest and a misnamed file should
+  still parse. `Image` (Sysmon) vs `NewProcessName` (4688) is selected
+  per-event; both go to `program_path`. `extras.event_id` surfaces the
+  source channel. **Timestamp:** prefer `System/TimeCreated@SystemTime`
+  (structurally the same field across both schemas, ISO-8601 + `Z`-
+  suffixed, parsed via `datetime.fromisoformat` with defensive `Z` →
+  `+00:00` rewrite for 3.10 compatibility); `EventData/Data
+  Name="UtcTime"` is preserved verbatim in `extras.utc_time` for
+  analyst clock-skew sanity-checking against the kernel ETW timestamp
+  vs Sysmon's userland write timestamp (a disagreement is a clock-skew
+  or VM-pause fingerprint, not a parser bug). **Hashes:** the Sysmon
+  comma-joined `SHA1=...,MD5=...,SHA256=...,IMPHASH=...` string is
+  split, hex-validated against expected lengths (40/32/64/32), and
+  surfaced as discrete `extras.hash_sha1` / `hash_md5` / `hash_sha256`
+  / `hash_imphash` fields. Hex-only validation prevents an attacker-
+  controlled custom Sysmon configuration from smuggling control bytes
+  into a string the FastMCP `isError` channel might leak. **XML
+  hardening:** every record's rendered XML is fed through
+  `defusedxml.ElementTree.fromstring` (not stdlib `xml.etree`) — even
+  though modern Python's stdlib parser doesn't honour external entities
+  by default, `defusedxml` adds the entity-expansion (billion-laughs)
+  cap that the stdlib lacks. EVTX bytes are attacker-controllable, so
+  the hardening is load-bearing rather than cosmetic. **Per-row
+  leniency:** any single record that fails `record.xml()`,
+  `defusedxml.fromstring`, or any sanity check gets dropped silently;
+  the rest of the EVTX file is still walked. **Mid-stream iterator
+  failure** (e.g. `InvalidRecordException` from a corrupt chunk magic)
+  preserves already-yielded events, mirroring the ShimCache convention.
+  Whole-file open failure / parse failure surfaces as
+  `ArtifactMalformedError` with attacker-influenceable bytes scrubbed
+  via `_safe_field` (FastMCP `isError` channel bypass; see
+  `feedback_error_channel_bypass.md`). **CommandLine cap:** values
+  longer than 4096 chars are truncated with `...` rather than dropped
+  — a long command line is still forensic evidence; we just don't pass
+  the whole blob through to the LLM context window.
+
+- **`tests/test_parsers.py` — 14 new tests covering the real-mode
+  Sysmon path** (AC-sm-real-1..13 + AC-sm-real-int). Adds a `_FakeEvtx`
+  shim with class-level `configure(records=, init_exception=,
+  records_exception=)` staging slots (the parser constructs the library
+  itself, so tests can't pass arguments directly), plus `_FakeRecord`,
+  `_sysmon_eid1_xml(...)`, `_security_eid4688_xml(...)`, and
+  `_other_event_xml(event_id=...)` helpers that produce well-formed
+  XML strings rather than synthesising binary EVTX blobs (the binary
+  layout is python-evtx's contract — pinning tests to it would couple
+  every chunk-format bump to a Sanctum-test churn). Coverage: happy-
+  path Sysmon EID 1 with full extras wiring, Security 4688 path
+  (`NewProcessName` → `program_path`, no hashes), non-process-create
+  events filtered (EID 3 / EID 11), sequential `row_index` across
+  accepted events, invalid-hex hashes dropped, wrong-length hashes
+  dropped, control-character / angle-bracket image path drops the row,
+  oversize image path drops the row, `Evtx()` init failure surfaces as
+  scrubbed `ArtifactMalformedError`, mid-stream `record.xml()` failure
+  is per-row (surrounding records preserved), `records()` iterator
+  failure preserves already-yielded events, empty EVTX → `[]`,
+  malformed XML drops the record without aborting. Integration test at
+  `tests/fixtures/case_temp_exec_001/artifacts/EVTX/` —
+  unlike Prefetch, python-evtx is pure Python so the integration test
+  runs on Linux/Darwin once the fixture lands. **AC-14 / AC-15a
+  retired** (the stub-list parametrize tests are now empty — every
+  parser has shipped a real-mode body). `parse_sysmon` removed from
+  `STUB_PARSERS_*`; the lists themselves are deleted with an in-file
+  comment pointing at the sidecar tests for the
+  `PartialImplementationError` coverage that remains relevant.
+
+- **`pyproject.toml` — added `python-evtx>=0.8` and
+  `defusedxml>=0.7` dependencies.** `python-evtx` (Apache-2.0,
+  Ballenthin) is the EVTX binary parser used exclusively by
+  `sanctum.parsers.sysmon` for the chunked records iterator API; pure
+  Python so it works cross-platform (no ctypes coupling, unlike
+  `windowsprefetch`). `defusedxml` (PSF license) hardens the XML parse
+  against entity-expansion attacks on attacker-controllable EVTX
+  contents. Justification comments in the dep block call out both
+  packages' roles.
+
 - **`src/sanctum/parsers/prefetch.py` — real-mode `parse_prefetch` body
   (week-3 milestone, SysMain family).** Replaces the stub with a
   `windowsprefetch`-backed walk of `\Windows\Prefetch\<EXE>-<hash>.pf`.

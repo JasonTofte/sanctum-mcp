@@ -43,6 +43,20 @@ dependencies = [
   # right answer (the analyst is expected to run Sanctum on Windows when
   # triaging Win 10/11 prefetch).
   "windowsprefetch>=4",
+  # Pure-Python EVTX (.evtx) parser by Willi Ballenthin. Used by
+  # `sanctum.parsers.sysmon` to walk Sysmon-Operational EID 1 and
+  # Security EID 4688 (process-create) records — both Kernel-ETW family.
+  # Apache-2.0; pinned to >=0.8 for the chunked-records iterator API
+  # this layer relies on. Pure-Python keeps the dep cross-platform — no
+  # ctypes/OS coupling, unlike `windowsprefetch`.
+  "python-evtx>=0.8",
+  # XML-hardened parser used by `sanctum.parsers.sysmon` to consume the
+  # XML rendered by `python-evtx`. Modern stdlib `xml.etree` rejects
+  # external entities by default but does NOT cap entity-expansion
+  # (billion-laughs) — `defusedxml` adds that layer. EVTX bytes are
+  # attacker-controllable, so the hardening is load-bearing, not
+  # cosmetic. Python-Software-Foundation license.
+  "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]

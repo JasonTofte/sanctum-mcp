@@ -24,6 +24,7 @@ import dataclasses
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -338,38 +339,10 @@ def test_family_strings_used_match_tool_to_family_values_no_orphans() -> None:
 # --- AC-14: still-stub parsers raise PartialImplementationError when env unset ---
 
 
-# Parsers that have NOT yet shipped a real-mode body. The contract: outside
-# `SANCTUM_USE_FIXTURE_SIDECAR=1` they fail-closed with a typed error so
-# FastMCP serialises an MCP-spec-compliant `isError: true`. As real-mode
-# bodies land (amcache moved to real-mode 2026-04-26), parsers come off
-# this list. When the list is empty, AC-14 / AC-15a get retired.
-STUB_PARSERS_OUTSIDE_FIXTURE_MODE = (
-    ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx"),
-)
-
-
-@pytest.mark.parametrize("parser_name,artifact_name", STUB_PARSERS_OUTSIDE_FIXTURE_MODE)
-def test_parser_raises_partial_implementation_when_env_unset(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    parser_name: str,
-    artifact_name: str,
-) -> None:
-    """AC-14 — outside fixture mode, still-stub parsers fail-closed with a typed error.
-
-    Production never sets the env var, so any real call to a not-yet-
-    implemented parser surfaces as an MCP-spec-compliant `isError: true`
-    rather than silently returning structured stub data the family-count
-    gate could mistake for evidence (see `_errors.PartialImplementationError`
-    docstring on the silent-corruption analysis).
-    """
-    from sanctum import parsers
-
-    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
-    artifact = _make_artifact(tmp_path, artifact_name)
-    parse = getattr(parsers, parser_name)
-    with pytest.raises(parsers.PartialImplementationError):
-        parse(artifact)
+# --- AC-14 / AC-15a retired 2026-04-26: every parser has shipped a real-mode body.
+# `PartialImplementationError` remains an exported type because the sidecar
+# loader still raises it when fixture mode is on but a sidecar is missing —
+# coverage for that path lives in the sidecar tests, not here.
 
 
 # --- AC-15: family-field mismatch raises -------------------------------------
@@ -384,42 +357,6 @@ def test_sidecar_rejects_family_mismatch(tmp_path: Path, monkeypatch: pytest.Mon
     _build_sidecar(artifact, family="BAM", tool="get_amcache")  # wrong family
     with pytest.raises(parsers.ArtifactMalformedError):
         parsers.parse_amcache(artifact)
-
-
-# --- AC-15a: error message carries tool + recovery hint -----------------------
-
-
-# Same shape as AC-14 but with the wire-spec tool identifier each parser
-# advertises. Couples the test to the contract the ledger consumer
-# depends on: a fallback to the Python function name would silently
-# desynchronize the ledger from the MCP wire identifier.
-STUB_PARSERS_TOOL_NAMES = (
-    ("parse_sysmon", "Microsoft-Windows-Sysmon%4Operational.evtx", "get_sysmon_4688"),
-)
-
-
-@pytest.mark.parametrize("parser_name,artifact_name,tool", STUB_PARSERS_TOOL_NAMES)
-def test_partial_implementation_error_message_carries_tool_and_recovery_hint(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    parser_name: str,
-    artifact_name: str,
-    tool: str,
-) -> None:
-    """AC-15a — error string names the tool AND points to the recovery env var."""
-    from sanctum import parsers
-
-    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
-    artifact = _make_artifact(tmp_path, artifact_name)
-    parse = getattr(parsers, parser_name)
-    with pytest.raises(parsers.PartialImplementationError) as exc_info:
-        parse(artifact)
-    msg = str(exc_info.value)
-    # Tool name MUST appear (no `or` slack — the audit ledger consumer extracts
-    # the tool from this message and a fallback to the function name would
-    # silently desynchronize the ledger from the wire-spec tool identifier).
-    assert tool in msg, f"tool name missing from message: {msg!r}"
-    assert "SANCTUM_USE_FIXTURE_SIDECAR" in msg, f"recovery hint missing: {msg!r}"
 
 
 # --- AC-15b: PartialImplementationError is a NotImplementedError --------------
@@ -2960,3 +2897,567 @@ def test_real_mode_prefetch_integration_against_rig_baseline(
         assert e.evidence_size_bytes >= 0
         assert "executable_basename" in e.extras
         assert e.extras["prefetch_filename"] == pf_path.name
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-mode Sysmon / 4688 EVTX tests (AC-sm-real-1..AC-sm-real-13).
+#
+# These tests cover `sanctum.parsers.sysmon._parse_sysmon_real` end-to-end by
+# monkeypatching `Evtx.Evtx.Evtx` with a `_FakeEvtx` shim. The shim accepts
+# the same constructor signature the real library does (one positional path
+# string), implements the context-manager protocol, and yields fake records
+# whose `.xml()` returns a hand-crafted XML string. Tests stage the XML rather
+# than synthesise binary EVTX blobs because the binary layout is python-evtx's
+# contract — pinning tests to it would couple every chunk-format bump to
+# Sanctum-test churn.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_SYSMON_EVTX_NAME = "Microsoft-Windows-Sysmon%4Operational.evtx"
+_SECURITY_EVTX_NAME = "Security.evtx"
+
+
+def _sysmon_eid1_xml(
+    *,
+    image: str = r"C:\Windows\System32\notepad.exe",
+    system_time: str = "2026-04-15T13:42:00.000000Z",
+    process_guid: str = "{abcd1234-0000-0000-0000-000000000001}",
+    command_line: str = '"notepad.exe"',
+    hashes: str = (
+        "SHA1=DA39A3EE5E6B4B0D3255BFEF95601890AFD80709,"
+        "MD5=D41D8CD98F00B204E9800998ECF8427E,"
+        "SHA256=E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855,"
+        "IMPHASH=00000000000000000000000000000000"
+    ),
+    user: str = r"WIN-FOO\\jason",
+    parent_image: str = r"C:\Windows\explorer.exe",
+    utc_time: str = "2026-04-15 13:42:00.000",
+    extra_data: str = "",
+) -> str:
+    """Build a Sysmon EID 1 XML record. `extra_data` is appended verbatim
+    inside <EventData> so tests can stage missing or extra fields."""
+    return (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System>"
+        '<Provider Name="Microsoft-Windows-Sysmon"/>'
+        "<EventID>1</EventID>"
+        f'<TimeCreated SystemTime="{system_time}"/>'
+        "<EventRecordID>42</EventRecordID>"
+        "</System>"
+        "<EventData>"
+        f'<Data Name="UtcTime">{utc_time}</Data>'
+        f'<Data Name="ProcessGuid">{process_guid}</Data>'
+        '<Data Name="ProcessId">1234</Data>'
+        f'<Data Name="Image">{image}</Data>'
+        f'<Data Name="CommandLine">{command_line}</Data>'
+        f'<Data Name="User">{user}</Data>'
+        f'<Data Name="Hashes">{hashes}</Data>'
+        f'<Data Name="ParentImage">{parent_image}</Data>'
+        f"{extra_data}"
+        "</EventData>"
+        "</Event>"
+    )
+
+
+def _security_eid4688_xml(
+    *,
+    new_process_name: str = r"C:\Windows\System32\cmd.exe",
+    system_time: str = "2026-04-16T08:15:30.500000Z",
+    command_line: str = '"cmd.exe" /c whoami',
+    parent_process_name: str = r"C:\Windows\explorer.exe",
+    subject_user_name: str = "jason",
+) -> str:
+    return (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System>"
+        '<Provider Name="Microsoft-Windows-Security-Auditing"/>'
+        "<EventID>4688</EventID>"
+        f'<TimeCreated SystemTime="{system_time}"/>'
+        "<EventRecordID>99</EventRecordID>"
+        "</System>"
+        "<EventData>"
+        f'<Data Name="SubjectUserName">{subject_user_name}</Data>'
+        '<Data Name="SubjectUserSid">S-1-5-21-1-2-3-1001</Data>'
+        f'<Data Name="NewProcessName">{new_process_name}</Data>'
+        '<Data Name="ProcessId">0x4d2</Data>'
+        f'<Data Name="ParentProcessName">{parent_process_name}</Data>'
+        f'<Data Name="CommandLine">{command_line}</Data>'
+        "</EventData>"
+        "</Event>"
+    )
+
+
+def _other_event_xml(event_id: int = 3) -> str:
+    """Build a non-process-create Sysmon event (e.g. EID 3 = network
+    connection). Used to assert the parser filters by event_id."""
+    return (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System>"
+        '<Provider Name="Microsoft-Windows-Sysmon"/>'
+        f"<EventID>{event_id}</EventID>"
+        '<TimeCreated SystemTime="2026-04-15T13:42:00.000000Z"/>'
+        "<EventRecordID>10</EventRecordID>"
+        "</System>"
+        "<EventData>"
+        '<Data Name="UtcTime">2026-04-15 13:42:00.000</Data>'
+        '<Data Name="ProcessGuid">{abcd1234-0000-0000-0000-000000000001}</Data>'
+        '<Data Name="Image">C:\\Windows\\System32\\notepad.exe</Data>'
+        "</EventData>"
+        "</Event>"
+    )
+
+
+class _FakeRecord:
+    """Mimics ``Evtx.Evtx.Record`` insofar as the parser uses it: ``.xml()``
+    method returning a string, and ``.record_num()`` returning an int (the
+    real library uses this attribute for ``EventRecordID``-equivalent;
+    tests can override to assert the parser's defensive type-check)."""
+
+    def __init__(self, xml: str | Exception, record_num: int = 0) -> None:
+        self._xml = xml
+        self._record_num = record_num
+
+    def xml(self) -> str:
+        if isinstance(self._xml, Exception):
+            raise self._xml
+        return self._xml
+
+    def record_num(self) -> int:
+        return self._record_num
+
+
+class _FakeEvtx:
+    """Drop-in for ``Evtx.Evtx.Evtx`` with a class-level test-staging slot.
+    ``configure(...)`` sets the records or initialization-time exception
+    the next instantiation will use; the library is constructed by the
+    parser, so the test cannot pass arguments directly."""
+
+    _next_records: list[Any] = []
+    _next_init_exception: Exception | None = None
+    _next_records_exception: Exception | None = None
+
+    @classmethod
+    def configure(
+        cls,
+        *,
+        records: list[Any] | None = None,
+        init_exception: Exception | None = None,
+        records_exception: Exception | None = None,
+    ) -> None:
+        cls._next_records = records or []
+        cls._next_init_exception = init_exception
+        cls._next_records_exception = records_exception
+
+    def __init__(self, path: str) -> None:
+        if _FakeEvtx._next_init_exception is not None:
+            exc = _FakeEvtx._next_init_exception
+            _FakeEvtx._next_init_exception = None
+            raise exc
+        self._path = path
+        self._records = list(_FakeEvtx._next_records)
+        self._records_exception = _FakeEvtx._next_records_exception
+        _FakeEvtx._next_records = []
+        _FakeEvtx._next_records_exception = None
+
+    def __enter__(self) -> _FakeEvtx:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None
+
+    def records(self):
+        yield from self._records
+        if self._records_exception is not None:
+            raise self._records_exception
+
+
+def _patch_sysmon_real_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    records: list[Any] | None = None,
+    init_exception: Exception | None = None,
+    records_exception: Exception | None = None,
+) -> None:
+    from sanctum.parsers import sysmon as sysmon_mod
+
+    _FakeEvtx.configure(
+        records=records,
+        init_exception=init_exception,
+        records_exception=records_exception,
+    )
+    monkeypatch.setattr(sysmon_mod, "Evtx", _FakeEvtx)
+
+
+# AC-sm-real-1 — happy path Sysmon EID 1 → ExecutionEvent with all extras wired
+
+
+def test_real_mode_sysmon_eid1_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_sysmon_eid1_xml(), record_num=1234)],
+    )
+
+    events = parsers.parse_sysmon(artifact)
+
+    assert len(events) == 1
+    e = events[0]
+    assert e.tool == "get_sysmon_4688"
+    assert e.family == "Kernel-ETW"
+    assert e.program_path == r"C:\Windows\System32\notepad.exe"
+    assert e.timestamp == datetime(2026, 4, 15, 13, 42, 0, tzinfo=timezone.utc)
+    assert e.timestamp.tzinfo is not None
+    assert e.source_artifact == artifact.as_posix()
+    assert e.extras["row_index"] == "0"
+    assert e.extras["event_id"] == "1"
+    assert e.extras["evtx_filename"] == _SYSMON_EVTX_NAME
+    assert e.extras["event_record_id"] == "1234"
+    assert e.extras["process_guid"] == "{abcd1234-0000-0000-0000-000000000001}"
+    assert e.extras["command_line"] == '"notepad.exe"'
+    assert e.extras["parent_image"] == r"C:\Windows\explorer.exe"
+    assert e.extras["hash_sha1"] == "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    assert e.extras["hash_md5"] == "d41d8cd98f00b204e9800998ecf8427e"
+    assert e.extras["hash_sha256"] == (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    assert e.extras["hash_imphash"] == "00000000000000000000000000000000"
+    assert e.extras["utc_time"] == "2026-04-15 13:42:00.000"
+
+
+# AC-sm-real-2 — Security 4688 path: NewProcessName → program_path, no hashes
+
+
+def test_real_mode_sysmon_eid4688_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SECURITY_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_security_eid4688_xml(), record_num=99)],
+    )
+
+    events = parsers.parse_sysmon(artifact)
+
+    assert len(events) == 1
+    e = events[0]
+    assert e.program_path == r"C:\Windows\System32\cmd.exe"
+    assert e.extras["event_id"] == "4688"
+    assert e.timestamp == datetime(2026, 4, 16, 8, 15, 30, 500000, tzinfo=timezone.utc)
+    assert e.extras["command_line"] == '"cmd.exe" /c whoami'
+    assert e.extras["parent_image"] == r"C:\Windows\explorer.exe"
+    assert e.extras["user"] == "jason"
+    # No SHA1/MD5/etc. on 4688 — keys must be absent (vs empty string).
+    assert "hash_sha1" not in e.extras
+    assert "hash_md5" not in e.extras
+    assert "hash_sha256" not in e.extras
+
+
+# AC-sm-real-3 — non-process-create event IDs are silently filtered
+
+
+def test_real_mode_sysmon_filters_non_process_create_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[
+            _FakeRecord(_other_event_xml(event_id=3)),  # network connection
+            _FakeRecord(_sysmon_eid1_xml()),
+            _FakeRecord(_other_event_xml(event_id=11)),  # file create
+        ],
+    )
+
+    events = parsers.parse_sysmon(artifact)
+
+    assert len(events) == 1
+    assert events[0].extras["event_id"] == "1"
+    # row_index is the index AMONG accepted events (0), not the source-record
+    # ordinal — same convention as ShimCache mid-stream filtering.
+    assert events[0].extras["row_index"] == "0"
+
+
+# AC-sm-real-4 — multiple accepted events get sequential row_index
+
+
+def test_real_mode_sysmon_sequential_row_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[
+            _FakeRecord(_sysmon_eid1_xml(image=r"C:\Windows\System32\notepad.exe")),
+            _FakeRecord(
+                _sysmon_eid1_xml(
+                    image=r"C:\Windows\System32\cmd.exe",
+                    system_time="2026-04-15T14:00:00.000000Z",
+                    process_guid="{abcd1234-0000-0000-0000-000000000002}",
+                )
+            ),
+        ],
+    )
+
+    events = parsers.parse_sysmon(artifact)
+    assert [e.extras["row_index"] for e in events] == ["0", "1"]
+    assert [e.program_path for e in events] == [
+        r"C:\Windows\System32\notepad.exe",
+        r"C:\Windows\System32\cmd.exe",
+    ]
+
+
+# AC-sm-real-5 — invalid hex hash values are dropped from extras
+
+
+def test_real_mode_sysmon_drops_invalid_hex_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[
+            _FakeRecord(
+                _sysmon_eid1_xml(
+                    hashes="SHA1=NOTHEX!,MD5=ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ,"
+                    "SHA256=E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+                )
+            )
+        ],
+    )
+
+    events = parsers.parse_sysmon(artifact)
+    assert len(events) == 1
+    assert "hash_sha1" not in events[0].extras  # not hex
+    assert "hash_md5" not in events[0].extras  # not hex
+    assert events[0].extras["hash_sha256"] == (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+
+
+# AC-sm-real-6 — wrong-length hash values are dropped
+
+
+def test_real_mode_sysmon_drops_wrong_length_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    # SHA1 should be 40 chars; we feed 39 (one short) → drop.
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[
+            _FakeRecord(_sysmon_eid1_xml(hashes="SHA1=DA39A3EE5E6B4B0D3255BFEF95601890AFD8070"))
+        ],
+    )
+    events = parsers.parse_sysmon(artifact)
+    assert "hash_sha1" not in events[0].extras
+
+
+# AC-sm-real-7 — control-character / angle-bracket image path drops the row
+
+
+def test_real_mode_sysmon_drops_row_with_angle_bracket_in_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    # The XML escapes `<` to `&lt;` so the parser sees it as a literal character
+    # in the resulting string. The parser's _FIELD_DELIMITER_PATTERN drops it.
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_sysmon_eid1_xml(image=r"C:\Windows\&lt;evil&gt;.exe"))],
+    )
+    assert parsers.parse_sysmon(artifact) == []
+
+
+# AC-sm-real-8 — oversize program path drops the row
+
+
+def test_real_mode_sysmon_drops_oversize_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    long_path = "C:\\\\" + ("a" * 5000) + ".exe"
+    _patch_sysmon_real_mode(monkeypatch, records=[_FakeRecord(_sysmon_eid1_xml(image=long_path))])
+    assert parsers.parse_sysmon(artifact) == []
+
+
+# AC-sm-real-9 — Evtx() init failure surfaces as scrubbed ArtifactMalformedError
+
+
+def test_real_mode_sysmon_init_failure_scrubbed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        init_exception=OSError("bad <header> bytes\x00<inject>"),
+    )
+    with pytest.raises(parsers.ArtifactMalformedError) as exc:
+        parsers.parse_sysmon(artifact)
+    msg = str(exc.value)
+    # Angle brackets and NULs MUST be scrubbed (FastMCP isError bypass).
+    assert "<" not in msg and ">" not in msg
+    assert "\x00" not in msg
+    assert "OSError" in msg
+
+
+# AC-sm-real-10 — record.xml() raise mid-stream is per-row, not whole-file
+
+
+def test_real_mode_sysmon_record_xml_failure_dropped_per_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[
+            _FakeRecord(_sysmon_eid1_xml()),
+            _FakeRecord(RuntimeError("corrupt chunk")),  # mid-stream xml() failure
+            _FakeRecord(
+                _sysmon_eid1_xml(
+                    image=r"C:\Windows\System32\cmd.exe",
+                    system_time="2026-04-15T15:00:00.000000Z",
+                    process_guid="{abcd1234-0000-0000-0000-000000000003}",
+                )
+            ),
+        ],
+    )
+    events = parsers.parse_sysmon(artifact)
+    # The bad record gets dropped silently; the surrounding good records survive.
+    assert [e.program_path for e in events] == [
+        r"C:\Windows\System32\notepad.exe",
+        r"C:\Windows\System32\cmd.exe",
+    ]
+
+
+# AC-sm-real-11 — records()-iterator failure preserves already-yielded events
+
+
+def test_real_mode_sysmon_records_iter_failure_preserves_yielded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_sysmon_eid1_xml())],
+        records_exception=RuntimeError("chunk magic invalid"),
+    )
+    events = parsers.parse_sysmon(artifact)
+    # The previously-yielded record is preserved despite the iterator
+    # raising mid-stream — same per-row leniency as ShimCache.
+    assert len(events) == 1
+    assert events[0].program_path == r"C:\Windows\System32\notepad.exe"
+
+
+# AC-sm-real-12 — empty EVTX (no records) → []
+
+
+def test_real_mode_sysmon_empty_evtx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(monkeypatch, records=[])
+    assert parsers.parse_sysmon(artifact) == []
+
+
+# AC-sm-real-13 — malformed XML drops the record without aborting
+
+
+def test_real_mode_sysmon_malformed_xml_per_row_drop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[
+            _FakeRecord("<not-valid-xml<<"),
+            _FakeRecord(_sysmon_eid1_xml()),
+        ],
+    )
+    events = parsers.parse_sysmon(artifact)
+    assert len(events) == 1
+    assert events[0].program_path == r"C:\Windows\System32\notepad.exe"
+
+
+# Real-EVTX integration test — auto-skips until a real .evtx is vendored.
+# Unlike Prefetch, python-evtx is pure Python and works on any platform,
+# so this test runs on Linux/Darwin too once the fixture lands.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_REAL_EVTX_DIR = (
+    Path(__file__).resolve().parent / "fixtures" / "case_temp_exec_001" / "artifacts" / "EVTX"
+)
+
+
+def _real_sysmon_evtx_available() -> Path | None:
+    if not _REAL_EVTX_DIR.is_dir():
+        return None
+    for candidate in sorted(_REAL_EVTX_DIR.glob("*.evtx")):
+        if candidate.stat().st_size >= 4096:
+            # EVTX header chunk is 4096 bytes — anything smaller is a stub
+            # bytes file from another test, not a real event log.
+            return candidate
+    return None
+
+
+@pytest.mark.skipif(
+    _real_sysmon_evtx_available() is None,
+    reason="rig-baseline EVTX not yet vendored under tests/fixtures/case_temp_exec_001/artifacts/EVTX/",
+)
+def test_real_mode_sysmon_integration_against_rig_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-sm-real-int — exercise the real python-evtx pipeline against a
+    vendored Sysmon Operational EVTX from the Parallels rig baseline.
+    Asserts at least one process-create event with correct tool/family
+    wiring + tz-aware timestamps. Pure-Python EVTX parses on any host."""
+    from sanctum import parsers
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    evtx_path = _real_sysmon_evtx_available()
+    assert evtx_path is not None  # gate above
+
+    events = parsers.parse_sysmon(evtx_path)
+    assert events, f"rig-baseline {evtx_path.name} produced zero process-create events"
+    for e in events:
+        assert e.tool == "get_sysmon_4688"
+        assert e.family == "Kernel-ETW"
+        assert e.timestamp.tzinfo is not None
+        assert e.extras["evtx_filename"] == evtx_path.name
+        assert e.extras["event_id"] in ("1", "4688")
+        assert e.program_path  # non-empty
