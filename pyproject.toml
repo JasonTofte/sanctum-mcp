@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sanctum-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Architecturally-hardened DFIR MCP server for autonomous incident response"
 readme = "README.md"
 license = { file = "LICENSE" }

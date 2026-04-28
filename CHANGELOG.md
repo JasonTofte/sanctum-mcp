@@ -4,6 +4,8 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-27
+
 ### Documentation — external-research citation pass (2026-04-27)
 
 A review of an external research source list (held privately per
