@@ -54,8 +54,15 @@ EVIDENCE_CLOSE = "</evidence-untrusted>"
 # - \ufeff                 BOM / ZWNBSP
 # - \U000E0001-\U000E007F  Unicode Tag block — arXiv 2510.05025 channel, 100% ASR
 # - \U000E0100-\U000E01EF  variation selectors supplement (VS17-VS256)
-_INVISIBLE_CODEPOINTS = re.compile(
-    "["
+#
+# Exported as a public character-class STRING (not the compiled pattern) so
+# downstream modules can compose it into their own combined patterns rather
+# than mirror the inventory. ``sanctum.parsers._fixture_io`` does this — its
+# ``_FIELD_DELIMITER_PATTERN`` builds a single regex covering both the parser-
+# boundary delimiter set and the invisibles set, so a malformed sidecar field
+# whose value contains e.g. U+202E gets rejected at the same boundary as
+# `<` or `\x00`. The compiled regex below stays private to this module.
+INVISIBLE_CODEPOINT_CLASS = (
     "\u200b-\u200f"
     "\u202a-\u202e"
     "\u2060-\u206f"
@@ -63,8 +70,8 @@ _INVISIBLE_CODEPOINTS = re.compile(
     "\ufeff"
     "\U000e0001-\U000e007f"
     "\U000e0100-\U000e01ef"
-    "]"
 )
+_INVISIBLE_CODEPOINTS = re.compile(f"[{INVISIBLE_CODEPOINT_CLASS}]")
 
 # Patterns observed in published prompt-injection research plus common variants.
 # Extend cautiously; every addition needs a test in tests/test_sanitize.py.
@@ -72,11 +79,16 @@ _INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Sygnia 2025-08 pattern (RED TEAM REALITY CHECK).
     re.compile(r"#\s*=+\s*RED\s*TEAM\s*REALITY\s*CHECK\s*=+\s*#?", re.IGNORECASE),
     # Classic "ignore previous / new instructions" frames.
-    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)", re.IGNORECASE),  # noqa: E501
+    re.compile(
+        r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)", re.IGNORECASE
+    ),  # noqa: E501
     re.compile(r"###?\s*(new|updated|corrected)\s+instructions?\s*###?", re.IGNORECASE),
     re.compile(r"system\s*:\s*(you\s+are|override|disregard)", re.IGNORECASE),
     # Role-play frames used in GTG-1002.
-    re.compile(r"(you\s+are\s+now|act\s+as|pretend\s+to\s+be)\s+a\s+(red\s*team|pentest|security)\s*(engineer|researcher|tester)", re.IGNORECASE),  # noqa: E501
+    re.compile(
+        r"(you\s+are\s+now|act\s+as|pretend\s+to\s+be)\s+a\s+(red\s*team|pentest|security)\s*(engineer|researcher|tester)",
+        re.IGNORECASE,
+    ),  # noqa: E501
     # Markdown-style authoritative tags injected into unstructured logs.
     re.compile(r"\[\[(SYSTEM|ADMIN|ROOT|OVERRIDE)\]\]", re.IGNORECASE),
 )

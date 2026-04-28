@@ -446,6 +446,329 @@ def test_sidecar_error_message_scrubs_attacker_controlled_fields(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# AC-2 through AC-5: codepoint-asymmetry widening (T-4 through T-11)
+#
+# GREEN deliverable: _fixture_io._FIELD_DELIMITER_PATTERN is widened to include
+# INVISIBLE_CODEPOINT_CLASS; _safe_field scrubs BMP and supplementary-plane
+# invisible codepoints in exception messages.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# --- AC-2: _FIELD_DELIMITER_PATTERN coverage of invisibles --------------------
+
+
+def test_field_delimiter_pattern_matches_invisible_codepoints() -> None:
+    """T-4 / AC-2 — after widening, _FIELD_DELIMITER_PATTERN must match each
+    of the four representative invisible codepoints: U+202E (RLO bidi), U+200B
+    (ZWSP), U+E0054 (Tag block), U+E0100 (VS17 supplementary).
+
+    RED: will fail until GREEN imports INVISIBLE_CODEPOINT_CLASS and rebuilds
+    the pattern.
+    """
+    from sanctum.parsers._fixture_io import _FIELD_DELIMITER_PATTERN  # type: ignore[import]
+
+    invisible_inputs = [
+        ("‮", "U+202E  RIGHT-TO-LEFT OVERRIDE"),
+        ("​", "U+200B  ZERO WIDTH SPACE"),
+        ("\U000e0054", "U+E0054 TAG LATIN SMALL LETTER T"),
+        ("\U000e0100", "U+E0100 VARIATION SELECTOR-17"),
+    ]
+    for cp, label in invisible_inputs:
+        assert _FIELD_DELIMITER_PATTERN.search(cp) is not None, (
+            f"_FIELD_DELIMITER_PATTERN must match {label} after widening " f"but returned None"
+        )
+
+
+def test_field_delimiter_pattern_still_matches_pre_existing_chars() -> None:
+    """T-5 / AC-2 — widening must not drop the original set: <, >, \\x00, \\x1f.
+
+    Regression guard: the pre-existing structural delimiters that triggered the
+    AC-15e fix must continue to be caught.
+
+    RED: these already pass (pattern exists); remains green through widening.
+    """
+    from sanctum.parsers._fixture_io import _FIELD_DELIMITER_PATTERN  # type: ignore[import]
+
+    pre_existing = [
+        ("<", "less-than"),
+        (">", "greater-than"),
+        ("\x00", "null byte"),
+        ("\x1f", "unit separator (U+001F)"),
+    ]
+    for ch, label in pre_existing:
+        assert _FIELD_DELIMITER_PATTERN.search(ch) is not None, (
+            f"_FIELD_DELIMITER_PATTERN regression: must still match {label!r} "
+            f"but returned None after widening"
+        )
+
+
+def test_field_delimiter_pattern_passes_through_clean_path() -> None:
+    """T-6 / AC-2 — a clean Windows path with no special characters must NOT
+    match _FIELD_DELIMITER_PATTERN (boundary: no false positives on normal data).
+
+    RED: already passes if pattern is ASCII-only; remains green after widening.
+    """
+    from sanctum.parsers._fixture_io import _FIELD_DELIMITER_PATTERN  # type: ignore[import]
+
+    clean = "C:\\Windows\\System32\\cmd.exe"
+    assert (
+        _FIELD_DELIMITER_PATTERN.search(clean) is None
+    ), "_FIELD_DELIMITER_PATTERN must not reject a clean Windows path"
+
+
+# --- AC-3: sidecar with RLO override (U+202E) in program_path is rejected -----
+
+
+def test_amcache_rejects_program_path_with_rlo_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-7 / AC-3 — U+202E (RIGHT-TO-LEFT OVERRIDE) in program_path must cause
+    parse_amcache to raise ArtifactMalformedError; the exception message must
+    contain the word 'program_path' so the analyst can localize the fault.
+
+    RED: will fail until GREEN widens _FIELD_DELIMITER_PATTERN with the
+    invisibles set.
+    """
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # RLO-injected path: attacker reverses filename display via U+202E.
+    _build_sidecar(
+        artifact,
+        family="AppCompat",
+        tool="get_amcache",
+        events=[
+            {
+                "program_path": "C:\\Windows\\‮exe.malicious\\cmd.exe",
+                "timestamp": "2026-04-15T13:42:01+00:00",
+                "evidence_size_bytes": 12000,
+                "extras": {},
+            }
+        ],
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    assert "program_path" in str(exc_info.value), (
+        "ArtifactMalformedError must name 'program_path' so analysts can " "localize the rejection"
+    )
+
+
+def test_amcache_no_events_yielded_for_rlo_in_program_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-8 / AC-3 — absence-assert: parse_amcache must NOT return any value
+    when a sidecar event has U+202E in program_path. The raise must preclude
+    a return; using a sentinel value the parser cannot produce, we prove the
+    function never returned.
+
+    RED: will fail until GREEN widens _FIELD_DELIMITER_PATTERN.
+    """
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    _build_sidecar(
+        artifact,
+        family="AppCompat",
+        tool="get_amcache",
+        events=[
+            {
+                "program_path": "C:\\ProgramData\\‮malicious.exe",
+                "timestamp": "2026-04-15T13:42:01+00:00",
+                "evidence_size_bytes": 8000,
+                "extras": {},
+            }
+        ],
+    )
+
+    sentinel = object()
+    result: object = sentinel
+    with pytest.raises(parsers.ArtifactMalformedError):
+        result = parsers.parse_amcache(artifact)
+    # Sentinel survives only if parse_amcache never returned. If a future
+    # bug let partial events leak via a non-raising path, `result` would
+    # have been overwritten to a list.
+    assert result is sentinel, "parse_amcache must not return a value when the sidecar is malformed"
+
+
+# --- AC-4: sidecar with Tag-block codepoint (U+E0054) in program_path ---------
+
+
+def test_amcache_rejects_program_path_with_tag_block_codepoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-9 / AC-4 — U+E0054 (TAG LATIN SMALL LETTER T, arXiv 2510.05025 channel)
+    in program_path must raise ArtifactMalformedError; exception must name
+    'program_path' for analyst localization (parity with AC-3).
+
+    RED: will fail until GREEN widens _FIELD_DELIMITER_PATTERN with Tag block.
+    """
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # Supplementary-plane Tag block codepoint embedded in path.
+    _build_sidecar(
+        artifact,
+        family="AppCompat",
+        tool="get_amcache",
+        events=[
+            {
+                "program_path": "C:\\Windows\\\U000e0054ag\\payload.exe",
+                "timestamp": "2026-04-15T13:42:01+00:00",
+                "evidence_size_bytes": 12000,
+                "extras": {},
+            }
+        ],
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    assert "program_path" in str(exc_info.value), (
+        "ArtifactMalformedError must name 'program_path' for Tag-block rejection "
+        "(AC-4 inherits AC-3's diagnostic requirement)"
+    )
+
+
+# --- AC-5: exception messages scrub invisible codepoints via _safe_field ------
+
+
+def test_amcache_error_message_scrubs_rlo_override_in_family_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-10 / AC-5 — BMP invisible: U+202E (RLO) in the sidecar 'family' field
+    must NOT appear in str(exc) after _safe_field replaces it with '?'.
+
+    The complementary positive-assert confirms the field localization label
+    'family' survives scrubbing — black-hole replacement would also fail this.
+
+    RED: will fail until GREEN widens _safe_field's substitution pattern to
+    cover invisible codepoints (via INVISIBLE_CODEPOINT_CLASS).
+    """
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # family field carries RLO + attacker text; tool mismatch triggers the error.
+    payload = {
+        "schema_version": "1",
+        "family": "‮EvilFamily",  # U+202E RLO prefix
+        "tool": "get_amcache",
+        "generated_by": "tests",
+        "generated_at": "2026-04-25T14:00:00+00:00",
+        "source_artifact_sha256": "deadbeef" * 8,
+        "events": [],
+    }
+    sidecar = artifact.with_name(artifact.name + ".sanctum-fixture.json")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    msg = str(exc_info.value)
+    # Absence-assert: the raw RLO codepoint must be replaced.
+    assert "‮" not in msg, (  # U+202E must not survive into the error string
+        "_safe_field must scrub U+202E (RLO) from the family field in the " "exception message"
+    )
+    # Positive-assert: field identity must survive.
+    assert "family" in msg, (
+        "ArtifactMalformedError must still name 'family' after scrubbing "
+        "(analyst localization must not be sacrificed)"
+    )
+
+
+def test_amcache_error_message_scrubs_tag_block_codepoint_in_family_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-10 variant / AC-5 — supplementary-plane invisible: U+E0054 (TAG LATIN
+    SMALL LETTER T) in the sidecar 'family' field must NOT appear in str(exc).
+
+    Supplementary-plane codepoints are 2 UTF-16 code units; the regex engine
+    must replace the full codepoint, not just one surrogate.
+
+    RED: will fail until GREEN widens _safe_field to cover the Tag block.
+    """
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    payload = {
+        "schema_version": "1",
+        "family": "\U000e0054EvilFamily",  # U+E0054 Tag block prefix
+        "tool": "get_amcache",
+        "generated_by": "tests",
+        "generated_at": "2026-04-25T14:00:00+00:00",
+        "source_artifact_sha256": "deadbeef" * 8,
+        "events": [],
+    }
+    sidecar = artifact.with_name(artifact.name + ".sanctum-fixture.json")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    msg = str(exc_info.value)
+    # Absence-assert: the Tag-block codepoint must be replaced.
+    assert "\U000e0054" not in msg, (
+        "_safe_field must scrub U+E0054 (Tag block) from the family field; "
+        "the full supplementary codepoint must be replaced, not a surrogate half"
+    )
+    # Positive-assert: field identity survives.
+    assert "family" in msg
+
+
+def test_amcache_error_message_length_bounded_with_invisibles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-11 / AC-5 — _safe_field's 128-char cap must hold even when the
+    attacker's family field is filled entirely with invisible codepoints (a
+    length-extension attempt). The resulting exception message must be ≤ 256
+    chars in total, confirming the cap + surrounding literal text stays bounded.
+
+    RED: will fail until GREEN widens _safe_field (the post-widening substitution
+    uses the same 128-char cap).
+    """
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # 300 invisible codepoints (U+200B zero-width spaces) in family field.
+    invisible_flood = "​" * 300  # U+200B x 300
+    payload = {
+        "schema_version": "1",
+        "family": invisible_flood,
+        "tool": "get_amcache",
+        "generated_by": "tests",
+        "generated_at": "2026-04-25T14:00:00+00:00",
+        "source_artifact_sha256": "deadbeef" * 8,
+        "events": [],
+    }
+    sidecar = artifact.with_name(artifact.name + ".sanctum-fixture.json")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    msg = str(exc_info.value)
+    assert len(msg) <= 256, (
+        f"ArtifactMalformedError message must be ≤ 256 chars with invisible flood; "
+        f"got {len(msg)} chars"
+    )
+    # The 128-char cap is only a real bound if scrub fired before truncation —
+    # otherwise the same length budget would be reached by silently dropping
+    # invisibles, which would defeat the diagnostic. Confirm `?` substitutions
+    # appear in the bounded message: the family value lands in the message via
+    # `_safe_field`, which replaces each invisible with `?`.
+    assert "?" in msg, "scrub must replace invisible codepoints with `?`, not silently drop them"
+    # And the smuggled codepoint itself must NOT appear in the bounded message.
+    assert "​" not in msg, "U+200B must be scrubbed before truncation"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Real-mode Amcache tests — landed 2026-04-26 with the regipy-backed parser.
 #
 # These do NOT use a real Amcache.hve; instead a `FakeRegistryHive` is
