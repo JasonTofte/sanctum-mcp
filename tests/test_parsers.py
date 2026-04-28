@@ -3858,6 +3858,92 @@ def test_real_mode_sysmon_malformed_xml_per_row_drop(
     assert events[0].program_path == r"C:\Windows\System32\notepad.exe"
 
 
+def test_real_mode_sysmon_raises_when_record_count_exceeds_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sm-rowcap-1 — _parse_sysmon_real refuses to parse an EVTX whose
+    record count exceeds SYSMON_MAX_RECORDS.
+
+    Threat model: an attacker who can write EVTX bytes (or a non-attacker
+    machine with a pathologically large log) could otherwise force unbounded
+    memory + CPU on the analyst host. The cap is a DoS bound on attacker-
+    influenced bytes; raising rather than silent-truncating preserves the
+    "what's in the EVTX" signal — silent truncation would deceive the analyst.
+    Mirrors the AMCACHE_MAX_ROWS pattern in amcache.py.
+    """
+    from sanctum import parsers
+    from sanctum.parsers import sysmon as sysmon_mod
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    monkeypatch.setattr(sysmon_mod, "SYSMON_MAX_RECORDS", 3)
+
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_sysmon_eid1_xml()) for _ in range(4)],
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_sysmon(artifact)
+
+    msg = str(exc_info.value)
+    assert _SYSMON_EVTX_NAME in msg, f"cap-exceeded message must name the EVTX; got: {msg}"
+    assert "3" in msg, f"cap-exceeded message must include the cap value; got: {msg}"
+
+
+def test_real_mode_sysmon_succeeds_at_exact_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sm-rowcap-2 — at exactly SYSMON_MAX_RECORDS records (boundary), the
+    parser must NOT raise. Confirms the cap fires on `count > cap`, not
+    `count >= cap`. An EVTX with exactly N records is the realistic case;
+    refusing to parse it would be a false positive.
+    """
+    from sanctum import parsers
+    from sanctum.parsers import sysmon as sysmon_mod
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    monkeypatch.setattr(sysmon_mod, "SYSMON_MAX_RECORDS", 3)
+
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_sysmon_eid1_xml()) for _ in range(3)],
+    )
+
+    events = parsers.parse_sysmon(artifact)
+
+    assert (
+        len(events) == 3
+    ), f"3 well-formed records at the cap must yield 3 events; got {len(events)}"
+
+
+def test_real_mode_sysmon_cap_counts_iterations_not_emitted_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-sm-rowcap-3 — the cap counts record iterations, not emitted events.
+    An attacker who pads an EVTX with millions of *dropped* records (e.g.,
+    non-process-create EIDs) still consumes per-row CPU; capping on emit-count
+    would let that pass while the parser walked the whole file.
+    """
+    from sanctum import parsers
+    from sanctum.parsers import sysmon as sysmon_mod
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    monkeypatch.setattr(sysmon_mod, "SYSMON_MAX_RECORDS", 3)
+
+    artifact = _make_artifact(tmp_path, _SYSMON_EVTX_NAME)
+    # 4 non-process-create records (EID 3 = network connection) against cap=3.
+    # Emitted-event count would be 0; iteration count is 4 → must raise.
+    _patch_sysmon_real_mode(
+        monkeypatch,
+        records=[_FakeRecord(_other_event_xml(event_id=3)) for _ in range(4)],
+    )
+
+    with pytest.raises(parsers.ArtifactMalformedError):
+        parsers.parse_sysmon(artifact)
+
+
 # Real-EVTX integration test — auto-skips until a real .evtx is vendored.
 # Unlike Prefetch, python-evtx is pure Python and works on any platform,
 # so this test runs on Linux/Darwin too once the fixture lands.

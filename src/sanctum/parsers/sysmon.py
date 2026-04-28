@@ -102,6 +102,21 @@ from sanctum.parsers._fixture_io import (
 _TOOL = "get_sysmon_4688"
 _FAMILY = FAMILY_KERNEL_ETW
 
+# Per-call record-iteration cap. A real Win11 host's
+# ``Microsoft-Windows-Sysmon%4Operational.evtx`` (verbose config) typically
+# rolls at ~100 MB / ~100k records before rotation; busy enterprise hosts
+# may carry 300–500k. 1,000,000 clears that tail by ~3–10× while bounding
+# worst-case memory at ~500 MB (≈500 B/event × 1M, 100% emit). The cap
+# counts raw records iterated — an attacker who pads the log with dropped
+# events (non-process-create EIDs, malformed XML rows) still consumes
+# per-row CPU, so a tighter emit-count cap would not close that DoS lane.
+# Raise rather than silent-truncate: silent truncation would deceive the
+# analyst about what's in the EVTX (consistent with how
+# ``sanitize.MAX_INPUT_BYTES`` raises ``InputTooLargeError`` for the same
+# reason on a different surface, and with ``AMCACHE_MAX_ROWS`` in
+# :mod:`sanctum.parsers.amcache`).
+SYSMON_MAX_RECORDS = 1_000_000
+
 # EVTX records emit XML in this default namespace. ElementTree exposes
 # children as `{ns}localname`, so we either pre-strip the namespace or
 # use the full Clark notation. We strip — keeps element lookups readable
@@ -150,6 +165,13 @@ def _parse_sysmon_real(evtx_path: Path) -> list[ExecutionEvent]:
     try:
         with evtx_ctx as evtx:
             iterator = iter(evtx.records())
+            # Two counters: ``iterated`` bounds CPU/memory across the raw
+            # record stream (so attacker-padded dropped records still hit
+            # the cap), while ``len(events)`` remains the public ``row_index``
+            # (emitted order, the documented contract exercised by
+            # ``test_real_mode_sysmon_sequential_row_index``). Mirrors the
+            # AMCACHE_MAX_ROWS pattern in :mod:`sanctum.parsers.amcache`.
+            iterated = 0
             while True:
                 try:
                     record = next(iterator)
@@ -170,6 +192,12 @@ def _parse_sysmon_real(evtx_path: Path) -> list[ExecutionEvent]:
                         events=events,
                         cause=exc,
                     ) from exc
+                if iterated >= SYSMON_MAX_RECORDS:
+                    raise ArtifactMalformedError(
+                        f"EVTX file {_safe_field(evtx_path.name)} exceeds the "
+                        f"{SYSMON_MAX_RECORDS}-record cap; refusing to parse"
+                    )
+                iterated += 1
                 event = _record_to_event(record, evtx_path=evtx_path, row_index=len(events))
                 if event is not None:
                     events.append(event)
