@@ -94,7 +94,7 @@ _OPTIONAL_EXTRAS_FIELDS = (
 
 def parse_amcache(hive_path: Path) -> list[ExecutionEvent]:
     if not hive_path.is_file():
-        raise ArtifactNotFoundError(f"Amcache hive not found: {hive_path}")
+        raise ArtifactNotFoundError(f"Amcache hive not found: {_safe_field(hive_path.name)}")
     if fixture_mode():
         return load_sidecar(hive_path, expected_family=_FAMILY, expected_tool=_TOOL)
     return _parse_amcache_real(hive_path)

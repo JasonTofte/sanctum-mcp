@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from sanctum.audit import append_entry, require_hmac_key
 from sanctum.events import ExecutionEvent
 from sanctum.finding import claim_finding as _claim_finding_impl
+from sanctum.parsers._fixture_io import _safe_field
 from sanctum.parsers.amcache import parse_amcache
 from sanctum.sanitize import sanitize, wrap_evidence
 
@@ -105,7 +106,18 @@ def _validate_case_id_format(case_id: str) -> None:
     untrusted string lands in the audit ledger.
     """
     if not case_id or not _SAFE_CASE_ID.match(case_id) or ".." in case_id:
-        raise ValueError(f"unsafe case_id: {case_id!r}")
+        # ``case_id`` is attacker-influenceable input that has just failed the
+        # allowlist; the exception string lands in the FastMCP ``isError``
+        # channel which serializes raw bytes to the LLM, bypassing the
+        # success-path ``sanitize.sanitize()`` and the ``<evidence-untrusted>``
+        # quarantine wrapper (memory: ``feedback_error_channel_bypass``).
+        # ``repr()`` escapes Cf-category Unicode (RLO, Tag block) but does
+        # NOT escape printable ASCII like ``<`` ``>`` — wrap with
+        # ``_safe_field`` so the parser-boundary delimiter set substitutes
+        # ``?`` before the message is built. ``!r`` retained for analyst
+        # readability (quote-delimited) and to keep the existing test regex
+        # (``match="unsafe case_id"``) identical.
+        raise ValueError(f"unsafe case_id: {_safe_field(case_id)!r}")
 
 
 def _resolve_case(case_id: str) -> CasePaths:
@@ -237,9 +249,7 @@ def get_amcache(case_id: str) -> str:
     # Hash the evidence content first (case_id + rows). The ledger pre/post
     # hashes fingerprint the evidence — not the audit_id, which is the
     # ledger pointer back to itself. Same split claim_finding uses.
-    content_payload = json.dumps(
-        {"case_id": case_id, "rows": rows}, ensure_ascii=False, indent=2
-    )
+    content_payload = json.dumps({"case_id": case_id, "rows": rows}, ensure_ascii=False, indent=2)
     content_result = sanitize(content_payload)
 
     entry = append_entry(

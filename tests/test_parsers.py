@@ -137,6 +137,63 @@ def test_parsers_raise_artifact_not_found_for_missing_path(
         parse(tmp_path / "does-not-exist")
 
 
+# --- AC-eb-3: ArtifactNotFoundError messages scrub attacker-influenceable basenames
+
+# Defense-in-depth pin. Through the production MCP flow ``case_id`` is
+# allowlisted to ``[A-Za-z0-9._-]`` upstream of these parsers, so a path with
+# ``<`` cannot reach the not-found raise via the normal tool surface. The
+# scrub is the uniform invariant — every parser's exception messages are
+# scrubbed before being raised, regardless of caller — so a future tool
+# wired to a parser without `_resolve_case` upstream still cannot leak
+# attacker bytes through the FastMCP ``isError`` channel (which serializes
+# raw exception strings to the LLM, bypassing ``sanitize.sanitize()``;
+# memory: ``feedback_error_channel_bypass``).
+
+
+@pytest.mark.parametrize(
+    "parser_name, attacker_basename, expected_prefix",
+    [
+        ("parse_amcache", "<evil>.hve", "Amcache hive not found"),
+        ("parse_shimcache", "<evil>SYSTEM", "SYSTEM hive not found"),
+        ("parse_prefetch", "<evil>.pf", "prefetch file not found"),
+        ("parse_sysmon", "<evil>.evtx", "EVTX file not found"),
+        ("parse_bam", "<evil>SYSTEM", "SYSTEM hive not found"),
+        ("parse_userassist", "<evil>NTUSER.DAT", "NTUSER.DAT not found"),
+    ],
+)
+def test_parsers_scrub_attacker_basename_in_artifact_not_found_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    parser_name: str,
+    attacker_basename: str,
+    expected_prefix: str,
+) -> None:
+    """AC-eb-3 — every parser scrubs the basename interpolated into its
+    ``ArtifactNotFoundError`` message. ``<`` and ``>`` (printable ASCII,
+    not escaped by ``repr()``) MUST be replaced with ``?`` (the existing
+    ``_safe_field`` substitution character)."""
+    from sanctum import parsers
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    parse = getattr(parsers, parser_name)
+    missing = tmp_path / attacker_basename
+
+    with pytest.raises(parsers.ArtifactNotFoundError) as exc_info:
+        parse(missing)
+
+    msg = str(exc_info.value)
+    assert "<" not in msg, f"angle bracket leaked into {parser_name} message: {msg!r}"
+    assert ">" not in msg, f"angle bracket leaked into {parser_name} message: {msg!r}"
+    assert (
+        expected_prefix in msg
+    ), f"existing message prefix lost; expected to find {expected_prefix!r} in {msg!r}"
+    # The scrub replacement char is documented as ``?``; pin it so a future
+    # change to the substitution character surfaces as a test failure.
+    assert (
+        "?evil?" in msg
+    ), f"expected scrubbed basename ``?evil?`` in {parser_name} message; got {msg!r}"
+
+
 # --- AC-7: malformed sidecar JSON raises ArtifactMalformedError ---------------
 
 
