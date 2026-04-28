@@ -56,6 +56,18 @@ _FAMILY = FAMILY_APPCOMPAT
 
 _INVENTORY_PATH = r"\Root\InventoryApplicationFile"
 
+# Per-call rowcount cap. A real Win11 host's InventoryApplicationFile carries
+# ~1k–3k subkeys; heavy enterprise hosts run 5k–10k. 100,000 clears the
+# realistic tail by an order of magnitude while bounding worst-case memory at
+# ~50 MB (≈500 B/event × 100k). An attacker-influenced hive that crosses this
+# bound is the DoS surface the cap closes; the cap counts subkey *iterations*,
+# not emitted events, so an attacker cannot pad the hive with dropped rows
+# (empty `LowerCaseLongPath`) and still consume per-row CPU. Raise rather
+# than silent-truncate: silent truncation would deceive the analyst about
+# what's in the hive (consistent with how `sanitize.MAX_INPUT_BYTES` raises
+# `InputTooLargeError` for the same reason on a different surface).
+AMCACHE_MAX_ROWS = 100_000
+
 # Bound the per-row extras-string length so an attacker who controls a
 # binary's PE metadata (ProductName, Publisher) cannot smuggle a
 # multi-kilobyte payload into the LLM's context via Sanctum's evidence
@@ -129,7 +141,16 @@ def _parse_amcache_real(hive_path: Path) -> list[ExecutionEvent]:
         ) from exc
 
     events: list[ExecutionEvent] = []
-    for subkey in inventory.iter_subkeys():
+    # Two counters: `iterated` bounds CPU/memory across the raw subkey stream
+    # (so attacker-padded dropped rows still hit the cap), while `len(events)`
+    # remains the public `row_index` (emitted order, the documented contract
+    # exercised by `test_real_mode_amcache_drops_subkey_missing_path`).
+    for iterated, subkey in enumerate(inventory.iter_subkeys()):
+        if iterated >= AMCACHE_MAX_ROWS:
+            raise ArtifactMalformedError(
+                f"Amcache hive {_safe_field(hive_path.name)} exceeds the "
+                f"{AMCACHE_MAX_ROWS}-row cap; refusing to parse"
+            )
         event = _build_event_from_subkey(
             subkey,
             hive_path=hive_path,

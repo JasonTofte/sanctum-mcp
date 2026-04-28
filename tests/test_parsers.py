@@ -1170,6 +1170,93 @@ def test_real_mode_amcache_skips_subkey_whose_values_raise(
     assert events[0].program_path == "C:\\survivor.exe"
 
 
+def test_real_mode_amcache_raises_when_subkey_count_exceeds_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-rowcap-1 — _parse_amcache_real refuses to parse a hive whose
+    InventoryApplicationFile child count exceeds AMCACHE_MAX_ROWS.
+
+    Threat model: an attacker who can write registry bytes (or a non-attacker
+    machine with a pathologically large hive) could otherwise force unbounded
+    memory + CPU on the analyst host. The cap is a DoS bound on attacker-
+    influenced bytes; raising rather than silent-truncating preserves the
+    "what's in the hive" signal — silent truncation would deceive the analyst.
+    """
+    from sanctum import parsers
+    from sanctum.parsers import amcache
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    monkeypatch.setattr(amcache, "AMCACHE_MAX_ROWS", 3)
+
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # Four valid subkeys against a cap of 3 — must raise on the 4th iteration.
+    inventory = _FakeInventoryKey([_good_subkey(program_path=f"C:\\app_{i}.exe") for i in range(4)])
+    _patch_real_mode(monkeypatch, inventory)
+
+    with pytest.raises(parsers.ArtifactMalformedError) as exc_info:
+        parsers.parse_amcache(artifact)
+
+    msg = str(exc_info.value)
+    # The cap value and the hive name (scrubbed via _safe_field) must appear so
+    # an analyst can localize the failure.
+    assert "Amcache.hve" in msg, f"cap-exceeded message must name the hive; got: {msg}"
+    assert "3" in msg, f"cap-exceeded message must include the cap value; got: {msg}"
+
+
+def test_real_mode_amcache_succeeds_at_exact_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-rowcap-2 — at exactly AMCACHE_MAX_ROWS subkeys (boundary), the
+    parser must NOT raise. Confirms the cap fires on `count > cap`, not
+    `count >= cap`. A hive with exactly N rows is the realistic case; refusing
+    to parse it would be a false positive.
+    """
+    from sanctum import parsers
+    from sanctum.parsers import amcache
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    monkeypatch.setattr(amcache, "AMCACHE_MAX_ROWS", 3)
+
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # Exactly 3 subkeys against a cap of 3 — must succeed and emit 3 events.
+    inventory = _FakeInventoryKey([_good_subkey(program_path=f"C:\\app_{i}.exe") for i in range(3)])
+    _patch_real_mode(monkeypatch, inventory)
+
+    events = parsers.parse_amcache(artifact)
+
+    assert (
+        len(events) == 3
+    ), f"3 well-formed subkeys at the cap must yield 3 events; got {len(events)}"
+
+
+def test_real_mode_amcache_cap_counts_iterations_not_emitted_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-amc-rowcap-3 — the cap counts subkey iterations, not emitted events.
+    An attacker who pads a hive with millions of *dropped* rows (e.g., empty
+    LowerCaseLongPath) still consumes per-row CPU; capping on emit-count
+    would let that pass while the parser walked the whole hive.
+    """
+    from sanctum import parsers
+    from sanctum.parsers import amcache
+
+    monkeypatch.delenv("SANCTUM_USE_FIXTURE_SIDECAR", raising=False)
+    monkeypatch.setattr(amcache, "AMCACHE_MAX_ROWS", 3)
+
+    artifact = _make_artifact(tmp_path, "Amcache.hve")
+    # 4 dropped subkeys (no LowerCaseLongPath) against a cap of 3.
+    # Emitted-event count would be 0; iteration count is 4 → must raise.
+    dropped_subkeys = [
+        _FakeSubkey(name=f"0000bad_{i}", last_modified=_ft(2026, 4, 15), values=[])
+        for i in range(4)
+    ]
+    inventory = _FakeInventoryKey(dropped_subkeys)
+    _patch_real_mode(monkeypatch, inventory)
+
+    with pytest.raises(parsers.ArtifactMalformedError):
+        parsers.parse_amcache(artifact)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Real-hive integration test — auto-skips until the rig-baseline Amcache.hve
 # lands. Drop a real (non-placeholder) hive at the path below to activate.
