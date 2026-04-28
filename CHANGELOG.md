@@ -43,6 +43,72 @@ strings to the LLM, **bypassing** `sanitize.sanitize()` and the
   to `_FIELD_REJECT_PATTERN` (5-parser blast); per-call rowcount cap in
   `_parse_amcache_real` (Hudson-tier follow-up).
 
+### Documentation — strategic-positioning + prior-art doc pass (2026-04-27)
+
+A doc-only pass aligning the public surface with `src/sanctum/finding.py`'s
+actual two-layer semantics, fixing three stale week-N roadmap claims, and
+adding a peer-architecture comparison so the academic positioning anchors
+on three sources (Yin et al. risk taxonomy, ProvSEEK peer system, Kamoi
+self-correction theory) rather than one. No source files, parser layer,
+or runtime semantics changed.
+
+- **`README.md`** — three stale week-N claims fixed (`P0 skeleton (week 1).
+  Not yet runnable end-to-end.` → 0.3.0 reality with quickstart + six
+  parsers + `claim_finding` shipped; `claim_finding ... — week 4` →
+  shipped, PR #33; `Week 7 (partially delivered week 1)` → shipped). The
+  in-diagram `(week-1 P0: get_amcache only)` label updated to
+  `(six real-mode parsers shipped)` for internal consistency. The
+  senior-analyst-gate section reframed to the **two-layer gate** that
+  `claim_finding` actually implements: Layer 1 — provenance-integrity
+  refusal (raises `ClaimFindingError`); Layer 2 — four-tier confidence
+  grading (`DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL`).
+  Opener's "refuses single-source claims" reconciled to "refuses
+  provenance-broken claims at the input boundary and grades
+  single-family claims as `DRAFT` rather than `CORROBORATED` or
+  `FINAL`" so the public-doc rhetoric matches the source-of-truth
+  semantics in `src/sanctum/finding.py`.
+
+- **`docs/THREAT_MODEL_TRIANGULATION.md`** — three new sections appended
+  as siblings to the existing "Mapping to published LLM-DFIR risk
+  taxonomy" section:
+
+  1. **"Peer architectures: ProvSEEK comparison"** — comparison table
+     against ProvSEEK (Mukherjee and Kantarcioglu,
+     [arXiv:2508.21323](https://arxiv.org/abs/2508.21323), v1
+     2025-08-29 / v2 2025-11-17) across four axes: gate locus
+     (LLM-Safety-Agent vs typed function), verdict shape (qualitative
+     vs quantitative), anomaly model (autoencoder rarity vs trust-root
+     coupling), and reproducibility of the gate verdict (LLM-sampling
+     dependent vs deterministic). Author and version verified against
+     arXiv primary source on 2026-04-27.
+
+  2. **"Two-layer gate exposition"** — restates the README's layer
+     split with source-of-truth anchors (`src/sanctum/finding.py`,
+     `sanctum.families.TOOL_TO_FAMILY`) for a reader entering through
+     the threat-model doc. Includes pseudocode for the Layer 2 grading
+     decision and ties the design to Kamoi (TACL 2024) external-signal
+     self-correction (already cited in
+     `src/sanctum/finding.py` module docstring) and Huang ICLR 2024
+     ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)).
+
+  3. **"Known limits and future work"** — three load-bearing limits
+     surfaced proactively rather than under hostile-reviewer
+     questioning: (a) copula research for joint family-defeat
+     distributions (deferred to v2); (b) Windows-host scope ceiling
+     (memory/network/cross-platform are explicit non-goals for v1);
+     (c) `k=2` threshold as engineering judgment under the
+     independent-Bernoulli model until copula refinement ships. The
+     gate fails-safe via `DRAFT` in every named limit.
+
+- **`docs/FAILURE_MODES.md`** — three hostile-reviewer concerns added
+  as `State 7` / `State 8` / `State 9`, each with a fail-safe-via-DRAFT
+  classification: Windows-host scope ceiling, `k=2` calibration as
+  engineering judgment, and an attacker corralling evidence to a single
+  family (countered by deception-signal demotion to
+  `DRAFT_TAMPER_SUSPECTED`).
+
+- **`CHANGELOG.md`** — this entry.
+
 ## [0.3.0] — 2026-04-27
 
 ### Documentation — external-research citation pass (2026-04-27)

@@ -1,6 +1,6 @@
 # Sanctum — An architecturally-hardened DFIR MCP server
 
-**Status**: P0 skeleton (week 1). Not yet runnable end-to-end.
+**Status**: 0.3.0 — quickstart runs end-to-end against a synthetic fixture ([`scripts/quickstart.py`](scripts/quickstart.py)); six real-mode parsers shipped (Amcache, ShimCache, BAM, UserAssist, Prefetch, Sysmon-EVTX); two-layer [`claim_finding`](src/sanctum/finding.py) gate live.
 **Target**: SANS `FIND EVIL!` Hackathon, submission deadline 2026-06-15.
 **Scope**: **Windows host-based execution-evidence forensics**, not general DFIR. Network artifacts, browser history, cloud logs, email, and cross-platform forensics are **explicit non-goals**. **Memory-resident artifacts** (live process listings, network connections, code injection markers — `get_pslist`, `get_netscan`, `get_malfind`, `get_cmdline`, `get_dlls`, `get_handles`) are **deferred to v2**: they have no defined family in the current five-family triangulation scheme and would require a separate threat model before they could safely contribute to `claim_finding` corroboration counts. Depth over breadth per the hackathon brief.
 
@@ -12,7 +12,7 @@ A purpose-built **Model Context Protocol (MCP) server** that exposes a narrow, t
 
 1. **Evidence spoliation.** The server physically cannot execute destructive commands because the destructive tool surface is not exposed. There is no `execute_shell` tool. Evidence is mounted read-only at the OS level; every tool invocation's input and output is hash-anchored and written to an append-only audit ledger.
 
-2. **Evidence-driven prompt injection.** Forensic evidence is attacker-authored — malware strings, log entries, filenames, and registry values can contain text crafted to hijack an LLM that reads them. Sygnia demonstrated in August 2025 that a PowerShell script block can make an LLM-MDR summarizer report a Mimikatz credential dump as *"Scheduled WMI maintenance task."* Sanctum quarantines all tool output inside an `<evidence-untrusted>` delimiter, strips known injection patterns before the LLM sees the bytes, and routes findings through a typed `claim_finding(hypothesis, audit_ids[])` function that refuses single-source claims.
+2. **Evidence-driven prompt injection.** Forensic evidence is attacker-authored — malware strings, log entries, filenames, and registry values can contain text crafted to hijack an LLM that reads them. Sygnia demonstrated in August 2025 that a PowerShell script block can make an LLM-MDR summarizer report a Mimikatz credential dump as *"Scheduled WMI maintenance task."* Sanctum quarantines all tool output inside an `<evidence-untrusted>` delimiter, strips known injection patterns before the LLM sees the bytes, and routes findings through a typed `claim_finding(hypothesis, audit_ids[])` function that refuses provenance-broken claims at the input boundary and grades single-family claims as `DRAFT` rather than `CORROBORATED` or `FINAL`.
 
 ## Why this shape
 
@@ -32,7 +32,14 @@ Findings cannot be reported from a single artifact source. A "program X was exec
 
 Why families rather than individual artifacts: ShimCache and Amcache are both written by the AppCompat subsystem, so `BaseFlushAppcompatCache` (one syscall) or `AntiForensic.NET` (one tool) defeats them together. An internal architecture audit flagged this coupling — two audit_ids pointing into the **same** family count as one source for the gate. A `{ShimCache, Amcache}` pair is a single-family finding, not a corroborated one.
 
-The five families listed are produced by **distinct trust roots**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function (`claim_finding(hypothesis, audit_ids[])` — week 4) forces the agent to behave like a senior analyst: single-family finding = hypothesis; multi-family = evidence.
+The five families listed are produced by **distinct trust roots**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function — [`claim_finding(hypothesis, audit_ids[])`](src/sanctum/finding.py) — forces the agent to behave like a senior analyst: **single-family input is a hypothesis; multi-family input is evidence**.
+
+The function operates as a **two-layer gate**:
+
+- **Layer 1 — provenance-integrity refusal.** `claim_finding` raises `ClaimFindingError` when inputs cannot be validated as ledger-grounded: empty `audit_ids[]`, audit_ids whose ledger entries are missing, unknown tool names. These are *refused*, not graded — the call returns no `Finding` at all. Layer 1 is the "refuses" surface in the opener above: provenance-broken claims do not reach the grading layer.
+- **Layer 2 — confidence grading.** When inputs are provenance-clean, Layer 2 emits a four-tier verdict: `DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL`. Single-family inputs return `DRAFT`. ≥2 distinct families return `CORROBORATED`. ≥3 distinct families return `FINAL`. A deception-signal hit on otherwise-clean inputs demotes the verdict to `DRAFT_TAMPER_SUSPECTED` regardless of family count — the gate fails-safe by *graduation*, not suppression. Promotion from `DRAFT` to `CORROBORATED` is a **new ledger entry**, not a mutation of the prior one (see [`docs/THREAT_MODEL_LEDGER.md`](docs/THREAT_MODEL_LEDGER.md)).
+
+This is the **external-signal self-correction primitive** in the sense of Kamoi *et al.* (TACL 2024, [arXiv:2406.01297](https://arxiv.org/abs/2406.01297)): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection (the lineage Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows degrades reasoning on average).
 
 Quantitative justification for the `≥2` threshold — and the stratified
 `CORROBORATED | FINAL` case — lives in
@@ -72,7 +79,7 @@ protocol-compatibility smoke test.
                          │  and wrapped in <evidence-untrusted>│
                          │                                    │
                          │  Windows execution-evidence set    │
-                         │  (week-1 P0: get_amcache only):    │
+                         │  (six real-mode parsers shipped):  │
                          │    • get_amcache                   │
                          │    • get_prefetch                  │
                          │    • get_shimcache                 │
@@ -216,10 +223,10 @@ followups for each are tracked in the relevant threat-model docs.
 - **Week 1 (P0)**: end-to-end skeleton. One typed tool (`get_amcache`), hardened `settings.json`, JSONL audit ledger, one CFReDS case loaded. Prove the architecture closes the loop.
 - **Week 2**: typed parser layer + frozen `ExecutionEvent` contract under `src/sanctum/parsers/` (Amcache, ShimCache, Prefetch, Sysmon, BAM, UserAssist) consuming `<artifact>.sanctum-fixture.json` ingestion via `SANCTUM_USE_FIXTURE_SIDECAR=1`. The discriminator map in `sanctum.families.TOOL_TO_FAMILY` is the contract this layer writes against. Sanitization layer integrated.
 - **Week 3 (parser real-mode landed)**: real parser bodies replace the `PartialImplementationError` fail-loud path — `regipy` for registry hives (Amcache, ShimCache, BAM, UserAssist), `python-evtx` for Sysmon EVTX, `windowsprefetch` for Prefetch. Fixture mode (`SANCTUM_USE_FIXTURE_SIDECAR=1`) remains as the offline-test path.
-- **Week 4**: triangulation gate (`claim_finding`) — wires the existing `FindingConfidence` enum into a typed function; the DRAFT→CORROBORATED transition is the demo's self-correction beat.
+- **Week 4 (shipped, PR #33)**: triangulation gate (`claim_finding`) — wires the `FindingConfidence` enum into a typed two-layer function; the DRAFT→CORROBORATED transition is the demo's self-correction beat. See [§The senior-analyst gate](#the-senior-analyst-gate) above for the Layer-1-refusal / Layer-2-grading split.
 - **Week 5**: `sanctum.deception` reason-code layer (forensic-deception detection — see [`docs/THREAT_MODEL_DECEPTION.md`](docs/THREAT_MODEL_DECEPTION.md)). Reflexion `<reflect>` loop **dropped** — Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic self-correction degrades reasoning; the family gate is the empirically-supported external-signal alternative. **Memory tool set deferred to v2** — `get_pslist` / `get_netscan` / `get_malfind` / `get_cmdline` / `get_dlls` / `get_handles` were originally planned here but require a separate threat model (no defined artifact family in the current scheme; `claim_finding` corroboration semantics undefined for memory-resident vs. on-disk evidence). Descope was a deliberate v1 scope decision, not a slip — see [Scope](#) above.
 - **Week 6**: poisoned-evidence defense tests + adversarial benchmark (~10 synthetic tampered cases under `tests/adversarial/`) measuring **refusal-under-tampering** — i.e., whether Sanctum correctly emits `DRAFT_TAMPER_SUSPECTED` rather than a confident wrong answer.
-- **Week 7** *(partially delivered week 1)*: bypass test suite
+- **Week 7 (shipped)**: bypass test suite
   [`tests/test_bypass.py`](tests/test_bypass.py) — 16 tests mapping to
   documented attack classes; see [Bypass coverage](#bypass-coverage) above.
 - **Week 8**: benchmark on CFReDS + DFRWS ground-truth cases.
