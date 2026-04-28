@@ -41,7 +41,47 @@ strings to the LLM, **bypassing** `sanitize.sanitize()` and the
   proves `_safe_field`'s 128-char cap holds under an invisibles flood.
 - Out of scope (deferred follow-ups): renaming `_FIELD_DELIMITER_PATTERN`
   to `_FIELD_REJECT_PATTERN` (5-parser blast); per-call rowcount cap in
-  `_parse_amcache_real` (Hudson-tier follow-up).
+  `_parse_amcache_real` (Hudson-tier follow-up — landed below).
+
+### Security — per-call rowcount cap on `_parse_amcache_real` (2026-04-27)
+
+The `_parse_amcache_real` loop walked `inventory.iter_subkeys()` without
+a per-call bound. An attacker who can write registry bytes — or a
+pathologically large benign hive — could otherwise force unbounded
+memory + CPU on the analyst host. This is a DoS surface on
+attacker-influenced bytes that the architectural quarantine
+(`<evidence-untrusted>` + `sanitize.sanitize()`) does not bound, since
+the bytes never reach the success-path sanitizer until after the parser
+has already accumulated them.
+
+- **`sanctum.parsers.amcache.AMCACHE_MAX_ROWS = 100_000`** caps
+  per-call subkey iterations. Realistic Win11 hosts run ~1k–3k
+  `InventoryApplicationFile` subkeys; heavy enterprise hosts reach
+  5k–10k. 100,000 clears the realistic tail by an order of magnitude
+  while bounding worst-case memory at ~50 MB.
+- **The cap counts iterations, not emitted events.** An attacker who
+  pads the hive with millions of dropped rows (empty
+  `LowerCaseLongPath`) still consumes per-row CPU; capping on
+  emit-count would let that pass while the parser walked the whole
+  hive.
+- **Refusal, not silent truncation.** Crossing the cap raises
+  `ArtifactMalformedError` with the scrubbed hive name and the cap
+  value. Silent truncation would deceive the analyst about what's in
+  the hive — the cap is a tamper signal, and the project's posture is
+  "fail loud, never silent" (consistent with how
+  `sanitize.MAX_INPUT_BYTES` raises `InputTooLargeError`).
+- **The public `row_index` contract is preserved.** Two counters: the
+  cap counts raw subkey iterations, `row_index` remains `len(events)`
+  so the documented "emitted order" semantics still hold (exercised by
+  `test_real_mode_amcache_drops_subkey_missing_path`).
+- 3 regression tests added: cap-exceeded raises with the cap value in
+  the message; exact-cap boundary does not raise; cap counts iterations
+  even when all rows are dropped.
+- **Scope**: amcache only this iteration. The same pattern applies to
+  the other four parsers (`appcompat`, `bam`, `prefetch`, `sysmon`,
+  `userassist`); each gets its own cap in a follow-up PR with a
+  parser-specific value (BAM is bounded by registered-service count,
+  Prefetch by `.pf` file count, etc.).
 
 ### Documentation — strategic-positioning + prior-art doc pass (2026-04-27)
 
