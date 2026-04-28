@@ -83,6 +83,44 @@ has already accumulated them.
   parser-specific value (BAM is bounded by registered-service count,
   Prefetch by `.pf` file count, etc.).
 
+### Security — per-call rowcount cap on `_parse_sysmon_real` (2026-04-27)
+
+Same DoS bound as the amcache cap above, applied to the EVTX record
+loop. Sysmon / Security-4688 EVTX is the highest-attack-surface
+parser-input under the threat model: an attacker who controls process
+spawn (which is the artifact set we're parsing) directly writes the
+underlying log records. Without a per-call iteration bound, the parser
+walks the file to exhaustion.
+
+- **`sanctum.parsers.sysmon.SYSMON_MAX_RECORDS = 1_000_000`** caps
+  per-call EVTX record iterations. A typical Win11 host's
+  `Microsoft-Windows-Sysmon%4Operational.evtx` (verbose config) rolls
+  at ~100 MB / ~100k records before rotation; busy enterprise hosts
+  may carry 300–500k. 1,000,000 clears that tail by ~3–10× while
+  bounding worst-case memory at ~500 MB (≈500 B/event × 1M, 100% emit
+  rate).
+- **The cap counts iterations, not emitted events.** Most EVTX records
+  are non-process-create (network, registry, file, DNS, …) and get
+  dropped by the EID filter — capping on emit-count would let an
+  attacker pad the file with dropped events and still consume per-row
+  CPU. The cap closes that lane.
+- **Refusal, not silent truncation.** Crossing the cap raises
+  `ArtifactMalformedError` with the scrubbed EVTX filename and the cap
+  value. Distinct from the existing `PartialParseError` path
+  (mid-stream EVTX corruption / `InvalidRecordException`), which
+  preserves already-extracted events and signals truncation tampering;
+  the cap is a separate, deterministic refusal on attacker-bounded
+  size.
+- **The public `row_index` contract is preserved.** Two counters:
+  `iterated` for the cap, `len(events)` for `row_index`, matching the
+  `AMCACHE_MAX_ROWS` pattern.
+- 3 regression tests added in `tests/test_parsers.py`: cap-exceeded
+  raises with the cap value in the message; exact-cap boundary does
+  not raise; cap counts iterations even when all records are dropped
+  by the EID filter.
+- **Scope**: sysmon only this iteration. Follow-ups for `appcompat`,
+  `bam`, `prefetch`, `userassist` remain individual Hudson-tier PRs.
+
 ### Documentation — strategic-positioning + prior-art doc pass (2026-04-27)
 
 A doc-only pass aligning the public surface with `src/sanctum/finding.py`'s
