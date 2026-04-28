@@ -34,6 +34,22 @@ argument an auditor can check without reading the code.
   operation. The Tag-block coverage (stage 1) is the load-bearing defense
   against arXiv 2510.05025-class smuggling; without it the visible-pattern
   regex is structurally bypassable at near-100% ASR.
+- **Secondary error-message channel.** The success-path `sanitize()`
+  pipeline above only covers payloads returned to the LLM through the
+  normal tool-result channel. FastMCP-style `isError` serialization sends
+  raw exception strings to the LLM **without** the
+  `<evidence-untrusted>` wrapper, bypassing the success-path stripper.
+  Stage-1's codepoint inventory is therefore exported as a public
+  character-class string `INVISIBLE_CODEPOINT_CLASS` and composed into
+  `sanctum.parsers._fixture_io._FIELD_DELIMITER_PATTERN` (parser-boundary
+  reject) and into `_safe_field()` (the exception-message scrubber every
+  parser uses before raising). The two surfaces share one inventory: any
+  range added here propagates automatically. Without this composition,
+  a malformed sidecar field carrying U+202E or U+E0054 would land
+  verbatim in `ArtifactMalformedError(...)` and reach the LLM through
+  the error channel. See `tests/test_parsers.py` for the parser-boundary
+  regressions and `tests/test_sanitize.py` for the constant-export
+  contract.
 - **Asset.** The bytes the LLM eventually sees inside
   `<evidence-untrusted>…</evidence-untrusted>` must not contain any
   pattern in the injection set.
@@ -141,12 +157,17 @@ the full security property on its own. Three obligations remain:
    and variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF) are the
    currently-known high-ASR smuggling vectors (arXiv 2510.05025
    reports 100% ASR via Tag block against untrained guardrails).
-   `_INVISIBLE_CODEPOINTS` covers them plus the classic zero-width
-   and bidi ranges. New invisible-smuggling vectors (e.g., future
-   Unicode categories whose semantics permit presentation but not
-   semantics) must extend this set; regressions here are gated by
-   `tests/test_sanitize.py::test_unicode_tag_block_is_stripped` and
-   sibling tests.
+   `INVISIBLE_CODEPOINT_CLASS` (consumed by `_INVISIBLE_CODEPOINTS` on
+   the success path **and** by `_FIELD_DELIMITER_PATTERN` /
+   `_safe_field` on the parser/error-channel boundary) covers them plus
+   the classic zero-width and bidi ranges. The single source of truth
+   means new invisible-smuggling vectors (e.g., future Unicode
+   categories whose semantics permit presentation but not semantics)
+   need only be added here to propagate to both surfaces; regressions
+   are gated by
+   `tests/test_sanitize.py::test_unicode_tag_block_is_stripped`,
+   `tests/test_sanitize.py::test_invisible_codepoint_class_*`, and
+   sibling parser-boundary tests in `tests/test_parsers.py`.
 3. **DoS via unbounded `L`.** `f` runs in `Θ(L)` (regex engine worst
    case is higher for some patterns, but the current set is linear on
    non-pathological input). A caller that submits a 10 GB evidence
