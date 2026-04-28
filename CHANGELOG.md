@@ -4,6 +4,45 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Security — codepoint-set asymmetry between sanitize and parser-boundary closed (2026-04-27)
+
+`sanctum.sanitize._INVISIBLE_CODEPOINTS` already covered Unicode-invisible
+smuggling vectors (zero-width controls, bidi controls, the Tag block per
+arXiv 2510.05025, both variation-selector ranges). The parser-boundary
+counterpart `sanctum.parsers._fixture_io._FIELD_DELIMITER_PATTERN` only
+covered ASCII delimiters (`<`, `>`, `\x00`–`\x1f`). That asymmetry
+mattered: `_FIELD_DELIMITER_PATTERN` is what (a) rejects malformed sidecar
+fields at the parser boundary and (b) drives `_safe_field()`, the scrubber
+that runs on attacker-influenceable values that land in exception
+messages — and the FastMCP `isError` channel serializes raw exception
+strings to the LLM, **bypassing** `sanitize.sanitize()` and the
+`<evidence-untrusted>` quarantine wrapper that the success path applies.
+
+- **`sanctum.sanitize.INVISIBLE_CODEPOINT_CLASS`** is now a public
+  character-class string — the same range inventory as the previously
+  private `_INVISIBLE_CODEPOINTS` regex, exported as the source-of-truth
+  string. The compiled pattern stays private; the codepoint set is the
+  shared object.
+- **`sanctum.parsers._fixture_io._FIELD_DELIMITER_PATTERN`** now compiles
+  to `[<>\x00-\x1f{INVISIBLE_CODEPOINT_CLASS}]`, inheriting the same set
+  in one regex. The pattern's call sites — every `_FIELD_DELIMITER_PATTERN.search(...)`
+  in `_fixture_io._build_event` and across the 5 parsers (amcache,
+  appcompat, bam, prefetch, sysmon, userassist) — gain the wider reject
+  surface for free, because they all import the pattern from one module.
+- **`_safe_field()`** now scrubs invisible Unicode codepoints (replaces
+  with `?`) in addition to its prior `<`, `>`, `\x00`–`\x1f` set, closing
+  the error-message channel that previously surfaced raw RLO override
+  (U+202E), Tag-block, or variation-selector codepoints to the LLM.
+- 12 regression tests added: `tests/test_sanitize.py` covers the
+  `INVISIBLE_CODEPOINT_CLASS` export shape and content; `tests/test_parsers.py`
+  covers the parser-boundary reject of `program_path` containing U+202E /
+  U+E0054, the symmetric scrubbing of those codepoints in error messages
+  raised from a malformed `family` field, and a length-bound check that
+  proves `_safe_field`'s 128-char cap holds under an invisibles flood.
+- Out of scope (deferred follow-ups): renaming `_FIELD_DELIMITER_PATTERN`
+  to `_FIELD_REJECT_PATTERN` (5-parser blast); per-call rowcount cap in
+  `_parse_amcache_real` (Hudson-tier follow-up).
+
 ## [0.3.0] — 2026-04-27
 
 ### Documentation — external-research citation pass (2026-04-27)

@@ -43,6 +43,7 @@ from sanctum.parsers._errors import (
     ArtifactMalformedError,
     PartialImplementationError,
 )
+from sanctum.sanitize import INVISIBLE_CODEPOINT_CLASS
 
 FIXTURE_ENV = "SANCTUM_USE_FIXTURE_SIDECAR"
 SIDECAR_SUFFIX = ".sanctum-fixture.json"
@@ -66,12 +67,17 @@ PROGRAM_PATH_MAX_LEN = 4096
 # be used in arithmetic or pre-allocation.
 EVIDENCE_SIZE_MAX = 2**40  # 1 TiB
 
-# Strings that would break the `<evidence-untrusted>...</evidence-untrusted>`
+# Characters that would break the `<evidence-untrusted>...</evidence-untrusted>`
 # quarantine if they appeared in the LLM-visible content of an exception
-# message, plus ASCII control chars used for log injection / prompt smuggling.
-# Defense-in-depth — the success path runs through `sanitize.sanitize()`
-# which has a stronger stripper, but exception messages bypass that.
-_FIELD_DELIMITER_PATTERN = re.compile(r"[<>\x00-\x1f]")
+# message — angle brackets and ASCII control chars (log-injection / prompt
+# smuggling) — composed with the Unicode invisible-codepoint set sourced from
+# ``sanctum.sanitize.INVISIBLE_CODEPOINT_CLASS`` (zero-width, bidi controls,
+# Tag block, variation selectors). Single source of truth: when a new range
+# is added to sanitize.py, this pattern inherits it without code change.
+# Defense-in-depth — the success path runs through ``sanitize.sanitize()``,
+# but the FastMCP ``isError`` channel serializes raw exception strings and
+# bypasses that stripper, which is why this pattern must stay symmetric.
+_FIELD_DELIMITER_PATTERN = re.compile(f"[<>\\x00-\\x1f{INVISIBLE_CODEPOINT_CLASS}]")
 
 
 def _safe_field(value: Any, *, limit: int = 128) -> str:
