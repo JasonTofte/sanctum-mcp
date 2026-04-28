@@ -362,6 +362,163 @@ Comparison drawn from arXiv:2504.02963v1; subsequent revisions may
 shift section numbering. The risk catalog is reproduced for mapping
 context only — the canonical statements live in the paper.
 
+## Peer architectures: ProvSEEK comparison
+
+A peer DFIR-LLM system that ships a related architectural primitive
+is **ProvSEEK** (Mukherjee and Kantarcioglu,
+[arXiv:2508.21323](https://arxiv.org/abs/2508.21323), v1 2025-08-29
+/ v2 2025-11-17). Both systems target the same risk class —
+autonomous LLM-driven forensic analysis producing claims that are
+not grounded in evidence — and both reach for an architectural, not
+prompt-based, mitigation. The differences are load-bearing for
+operator decisions and for hostile-reviewer scrutiny:
+
+| Axis | ProvSEEK | Sanctum |
+|---|---|---|
+| Gate locus | LLM-based **Safety Agent** that reviews proposed conclusions and emits an inconclusive verdict when evidence is insufficient. | Typed **`claim_finding`** function that operates as a two-layer gate (provenance refusal + family-count grading). The gate has no LLM in its inference path. |
+| Verdict shape | Qualitative (conclusive vs. inconclusive). | Quantitative (`DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL`), parameterized by **distinct artifact families** count. The threshold is calibrated against the Poisson-binomial table in §"Non-uniform — Poisson-binomial with realistic `p_i`" above. |
+| Anomaly model | Autoencoder-style rarity scoring on the provenance graph. | Trust-root coupling: artifacts that share a writer (ShimCache + Amcache → AppCompat family, defeated jointly by `BaseFlushAppcompatCache`) collapse into one source for the gate. The model is structural, not statistical. |
+| Reproducibility of the gate verdict | Depends on LLM sampling unless the Safety Agent is pinned to deterministic sampling. | Deterministic — the gate is a pure function of the input audit_ids and the family-mapping table. Verifiable without re-running the agent. |
+
+The two systems are **complements, not substitutes**: a deployment
+that wanted the strengths of both could run a ProvSEEK-style anomaly
+score on the provenance graph *and* feed the resulting audit_ids
+through a Sanctum-style typed-function gate. Sanctum's choice — typed
+function over LLM safety-agent — is driven by the FIND EVIL!
+Constraint Implementation rubric, which directly asks whether
+guardrails are *architectural or prompt-based*. A Safety Agent is
+an LLM in the inference path; a typed function is not.
+
+Comparison drawn from arXiv:2508.21323; ProvSEEK author and version
+verified against the arXiv primary source on 2026-04-27.
+
+## Two-layer gate exposition
+
+[`claim_finding`](../src/sanctum/finding.py) is implemented as two
+cleanly separated layers. The README
+[§"The senior-analyst gate"](../README.md#the-senior-analyst-gate)
+states the layer split for a reader entering at the public surface;
+this section restates the same decomposition for a reader entering
+through the threat-model doc, with the source-of-truth anchors a
+reviewer needs to verify the claim.
+
+**Layer 1 — provenance-integrity refusal** (raises `ClaimFindingError`):
+
+- `audit_ids` is empty.
+- An audit_id refers to a ledger entry that cannot be located in the
+  file at `ledger_path`.
+- An audit_id's `tool` field does not appear in the family-mapping
+  table (`sanctum.families.TOOL_TO_FAMILY`).
+
+These checks fire before any confidence grading. The function returns
+no `Finding`; the call surfaces an exception. **A failed Layer 1 check
+is what the README's "refuses" rhetoric refers to** — the single point
+of public-doc / source-code reconciliation that earlier README
+revisions left ambiguous.
+
+**Layer 2 — confidence grading** (returns `Finding`):
+
+```
+distinct_families = len({TOOL_TO_FAMILY[entry.tool] for entry in resolved_entries})
+deception_present = bool(deception_signals)
+
+if deception_present:
+    tier = DRAFT_TAMPER_SUSPECTED              # safe-graduation, not suppression
+elif distinct_families >= 3:
+    tier = FINAL
+elif distinct_families >= 2:
+    tier = CORROBORATED
+else:
+    tier = DRAFT
+```
+
+The four-tier ordering is
+`DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL`. A
+`DRAFT_TAMPER_SUSPECTED` verdict on a family-count of 3 is a deliberate
+demotion: the deception signal asserts that something on the host has
+already engaged in anti-forensic behaviour, and the gate refuses to
+let a high family count overrule that asymmetric trace (see
+[`docs/THREAT_MODEL_DECEPTION.md`](THREAT_MODEL_DECEPTION.md)).
+
+The grading path emits
+`confirmation_basis ∈ {single_family, independent_artifacts}` in v1
+(the four-value enum and v2-reserved values are documented in
+§"Confirmation basis (v1 vs v2)" above). Promotion from `DRAFT` to
+`CORROBORATED` after the agent gathers a second-family corroborator
+is a **new ledger entry**, not a mutation of the prior one — the
+HMAC chain in
+[`docs/THREAT_MODEL_LEDGER.md`](THREAT_MODEL_LEDGER.md) is what makes
+that append-only invariant load-bearing.
+
+**Why the two-layer split matters for the FIND EVIL! Autonomous
+Execution Quality criterion.** The criterion rewards an agent that
+can self-correct in real time. Sanctum's design relocates the
+self-correction loop **below** the agent — into the typed-function
+gate — so correction is *observable* (a `DRAFT` verdict in the ledger
+followed by a `CORROBORATED` verdict for the same hypothesis after a
+second-family tool call) rather than *performative* (a
+chain-of-thought claim of "I noticed I was wrong"). This is the form
+of self-correction Kamoi *et al.* (TACL 2024) call **external-signal**,
+the form Huang ICLR 2024
+([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows
+empirically helps; it is **not** intrinsic self-correction, which
+Huang shows degrades reasoning. The
+[`src/sanctum/finding.py`](../src/sanctum/finding.py) module
+docstring carries this anchor in code so the rationale travels with
+the implementation.
+
+## Known limits and future work
+
+The gate is architecturally sound for the threat model documented
+above and the family scheme documented in [CLAUDE.md](../CLAUDE.md)
+invariant 5. Three classes of limit are nonetheless named here
+proactively, in order of how often a hostile reviewer is likely to
+surface them. Owning the limits is the credibility move; defending
+them under questioning is not.
+
+1. **Copula research for joint family-defeat distributions
+   (deferred).** §"Load-bearing assumptions" #1 above commits to
+   modelling the joint compromise distribution properly via a
+   shared-latent-factor or copula correlation model. v1 ships with
+   the Bernoulli/Poisson-binomial *independent* model and the
+   §"Scope and threat-model boundary" claim that kernel-mode
+   multi-family forgery is out of scope for v1, defended at the
+   deception layer + HMAC-chained ledger. The copula refinement is
+   a v2 followup, not a v1 dependency, and it does not change the
+   ordering of the §5 stratified-tier recommendation.
+
+2. **Windows-host scope ceiling.** The five-family scheme is
+   Windows-host execution-evidence specific. Memory-resident
+   artifacts (`get_pslist`, `get_netscan`, `get_malfind`,
+   `get_cmdline`, `get_dlls`, `get_handles`), network artifacts,
+   browser history, cloud logs, email, and macOS / Linux host
+   forensics are **explicit non-goals for v1** — see the
+   [README scope statement](../README.md). Adding a sixth family
+   alone is a *regression* under the §"Marginal value of a 6th
+   subsystem" analysis above; expansion would require both a new
+   family **and** a threshold bump (e.g., a `6-of-3` configuration
+   on a defensible `p_6`). v1 chooses depth-over-breadth.
+
+3. **Threshold as engineering judgment until copula ships.** The
+   `≥2-distinct-families = CORROBORATED` boundary is calibrated
+   against the §"Revised Poisson-binomial with artifact families"
+   table — a forgery probability of ~22% at `k=2` under the
+   independent model. The gate emits `DRAFT` (not `CORROBORATED`)
+   for single-family inputs, so the residual ~22% is the
+   probability of a *false-CORROBORATED*, not a false-anything.
+   Whether 22% is "good enough" is an engineering judgment until
+   the copula-corrected number ships; the §5 recommendation
+   reserves `FINAL` (`k=3`, ~4% under family revisions) and the
+   high-confidence `k=4` band (~0.4%) precisely so a reader needing
+   stricter assurance has a typed verdict to consume rather than
+   re-deriving the threshold themselves.
+
+The gate **fails-safe via DRAFT** in every case named above —
+never via suppression, never via fabricated certainty, never via
+silent demotion. Failure-mode coverage (including the
+per-failure-mode fail-safe-via-DRAFT counter) lives in
+[`docs/FAILURE_MODES.md`](FAILURE_MODES.md).
+
 ## Followups
 
 - [x] **Shipped.** `FindingConfidence` enum

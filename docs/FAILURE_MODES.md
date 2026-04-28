@@ -146,3 +146,104 @@ for the full mapping table.
   corroboration" message that forces the agent to call the next tool.
 - **Classification**: **fail-open on demo signal** (not a security gate — a
   scoring-axis gate).
+
+## State 7: Hostile-reviewer concern — Windows-host scope ceiling
+
+*Tested in*: not applicable — this is a scope claim, not a runtime
+state. The bypass-test coverage in
+[`tests/test_bypass.py`](../tests/test_bypass.py) exercises the runtime
+gate, not the scope of artifact families.
+
+
+- **Trigger**: A reviewer or judge points out that the five-family scheme
+  covers Windows-host execution-evidence only — not memory forensics,
+  network artifacts, browser history, cloud logs, email, or macOS / Linux
+  host forensics. They ask: *can an attacker exfiltrate via a non-covered
+  surface and defeat the gate?*
+- **Behaviour**: The gate continues to emit `DRAFT` for any claim that
+  does not have ≥2 distinct families from the in-scope set. An attacker
+  operating purely in an out-of-scope surface produces zero in-scope
+  audit_ids; the `claim_finding` call returns no Finding at all (Layer 1
+  refusal on empty `audit_ids[]`). An attacker operating partially
+  in-scope produces ≤1 in-scope family; the gate returns `DRAFT`.
+  Neither case promotes a forged finding past `DRAFT`.
+- **Detection**: scope is documented in
+  [README §Scope](../README.md) and
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](THREAT_MODEL_TRIANGULATION.md)
+  §"Known limits and future work" #2. There is no runtime detection
+  because there is no runtime corruption — the gate's behaviour is
+  unchanged, only the *coverage* of what it can corroborate.
+- **Recovery**: not applicable — the verdict is correct under the scope.
+  Expansion of the family scheme to memory-resident artifacts is a v2
+  followup; v1 chooses depth-over-breadth per the hackathon brief.
+- **Classification**: **fail-safe via DRAFT** — out-of-scope evidence
+  cannot promote a finding past `DRAFT`, only contribute to a `DRAFT`
+  verdict the agent must explicitly mark as needing scope expansion.
+
+## State 8: Hostile-reviewer concern — k=2 threshold is engineering judgment
+
+*Tested in*: not applicable — this is a calibration concern, not a
+runtime state. The numeric tables are regression-tested by
+[`scripts/validate_threat_model_math.py`](../scripts/validate_threat_model_math.py).
+
+
+- **Trigger**: A reviewer asks: *the `k=2` boundary leaves ~22% forgery
+  probability under your own Poisson-binomial table — why is that
+  acceptable?*
+- **Behaviour**: The gate emits `CORROBORATED` (not `FINAL`) at `k=2`,
+  and `FINAL` only at `k=3` (~4% forgery under the family revision in
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](THREAT_MODEL_TRIANGULATION.md)
+  §"Revised Poisson-binomial with artifact families"). A consumer
+  needing stricter assurance reads `confirmation_basis` and the tier
+  name and routes accordingly. The gate does **not** elide the
+  calibration question — it surfaces a typed verdict at every tier band.
+- **Detection**: the calibration is shipped in tabular form,
+  regression-tested by `scripts/validate_threat_model_math.py`, and
+  named explicitly as engineering judgment under the
+  independent-Bernoulli model in
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](THREAT_MODEL_TRIANGULATION.md)
+  §"Known limits and future work" #3. The copula refinement that would
+  tighten the bound is named as a v2 followup.
+- **Recovery**: a deployment that wants `k=3`-only acceptance can treat
+  `tier ∈ {DRAFT, CORROBORATED}` as "needs further corroboration" and
+  act only on `tier == FINAL`. The typed surface makes that policy
+  expressible without re-deriving the threshold.
+- **Classification**: **fail-safe via DRAFT / tier-stratification** — the
+  gate does not silently promote `k=2` to `FINAL`; the tier band is on
+  the verdict and on the ledger entry.
+
+## State 9: Hostile-reviewer concern — adversary corrals evidence to a single family
+
+*Tested in*: not directly as a single bypass scenario — covered in spirit
+by [`tests/test_bypass.py::test_state3_*`](../tests/test_bypass.py)
+(injection-driven single-family inflation) and the deception-signal
+coverage in [`docs/THREAT_MODEL_DECEPTION.md`](THREAT_MODEL_DECEPTION.md).
+
+
+- **Trigger**: A reviewer asks: *what if an attacker disables four of
+  five families (turn off Sysmon, disable BAM, clear Prefetch, flush
+  AppCompat) so only one family — say UserAssist — can record evidence?
+  The agent then has no path to ≥2 families.*
+- **Behaviour**: The gate returns `DRAFT` (single-family input). The
+  destruction itself leaves traces in the deception layer
+  (`sanctum.deception` reason codes — SysMain service disable, EVTX log
+  clearing via `wevtutil cl`, AppCompat flush), which surface as
+  `deception_signals` in the next `claim_finding` call. With any
+  deception signal present, the gate emits `DRAFT_TAMPER_SUSPECTED`
+  regardless of family count. The attacker's single-family forgery thus
+  cannot reach `CORROBORATED` *and* the destruction itself is recorded
+  as a finding-relevant signal — the asymmetric trace property of
+  destruction-vs-forgery noted in
+  [`docs/THREAT_MODEL_TRIANGULATION.md`](THREAT_MODEL_TRIANGULATION.md)
+  §"Scope and threat-model boundary".
+- **Detection**: deception-signal coverage in
+  [`docs/THREAT_MODEL_DECEPTION.md`](THREAT_MODEL_DECEPTION.md) and
+  audit-ledger immutability via the HMAC chain
+  ([`docs/THREAT_MODEL_LEDGER.md`](THREAT_MODEL_LEDGER.md)) — a forged
+  ledger entry cannot survive `verify_chain`.
+- **Recovery**: agent collects deception signals and re-issues
+  `claim_finding` with them; the gate emits `DRAFT_TAMPER_SUSPECTED`,
+  which the agent reports honestly to the operator.
+- **Classification**: **fail-safe via DRAFT_TAMPER_SUSPECTED** — the
+  gate's response to a corralling adversary is to demote, not to
+  fabricate certainty.
