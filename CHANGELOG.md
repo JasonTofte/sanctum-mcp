@@ -4,6 +4,67 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Documentation — external-research citation pass (2026-04-27)
+
+A review of an external research source list (held privately per
+`/private/` convention; not in this repo) deepened three citation
+paths that were thin or implicit. No source files, parser layer, or
+runtime semantics changed — this is a documentation-clarity /
+citation-credibility pass.
+
+- **`README.md` § "Prior art referenced"** — the **Valhuntir** entry
+  now names the three load-bearing differentiators that Valhuntir's
+  public README does not claim: (1) **HMAC-chained ledger** (vs.
+  per-row independent SHA-256 — chained MAC means a post-hoc edit
+  invalidates every subsequent row, defending insertion / deletion /
+  reorder, not just per-row content); (2) the typed
+  **`claim_finding(hypothesis, audit_ids[])` ≥2-family corroboration
+  gate** (Valhuntir documents "evidence-trail-exists" provenance
+  enforcement, but not a ≥2-independent-family count); (3)
+  **`pip install --require-hashes`** install path with a hash-locked
+  `requirements.txt`. Tool count refreshed to ~90 across 11 packages
+  (previously cited "73-tool breadth"). Comparison documented as
+  drawn from public README only with an as-of date (2026-04-25), so
+  a future Valhuntir change does not silently invalidate the claim.
+  Valhuntir's strengths Sanctum is **explicit about not chasing** —
+  Examiner Portal, OpenSearch indexing, RAG corpus, OpenCTI/REMnux
+  integrations — are now named as out-of-v1-scope by design.
+
+- **`README.md` § "Why this shape"** — the existing GTG-1002
+  (Anthropic, Nov 2025) reference now hyperlinks to the announcement
+  at `https://www.anthropic.com/news/disrupting-AI-espionage`. Prose
+  summary unchanged.
+
+- **`docs/THREAT_MODEL_TRIANGULATION.md`** — new section
+  **"Mapping to published LLM-DFIR risk taxonomy"** maps six of the
+  nine LLM-in-DFIR risks named by Yin, Wang, Xu, Zhuang, Mozumder,
+  Smith, and Zhang ([arXiv:2504.02963v1](https://arxiv.org/abs/2504.02963),
+  3 April 2025) — hallucination, chain-of-custody violation,
+  non-determinism, prompt injection, lack of domain knowledge, lack
+  of standardization — to specific Sanctum primitives (family gate,
+  HMAC-chained ledger, `<evidence-untrusted>` quarantine, typed
+  parsers, DFIR-Metric methodology). The section also names three
+  paper-recommended mitigations Sanctum **does not** adopt
+  (RAG grounding, domain fine-tuning, multi-model ensemble) with
+  reasoning, and three risks called out as honestly out-of-scope
+  (bias and fairness, interpretability-as-general-LLM-property,
+  prompt sensitivity). Anchors Sanctum's invariants in a
+  peer-reviewed risk catalog rather than ad-hoc risk language.
+
+- **`docs/THREAT_MODEL_DEPENDENCIES.md` § "Posture ladder"** — the
+  rung-4 vendoring contingency for `windowsprefetch` now names
+  [Dissect](https://github.com/fox-it/dissect) (Fox-IT,
+  MIT-licensed, multi-contributor, company-backed) as the explicit
+  multi-maintainer fallback parser source for Prefetch, registry
+  hives, and EVTX. Converts the contingency from "we'd vendor
+  something" to "we'd swap to this specific multi-maintainer
+  alternative." The trigger remains unchanged
+  (unpatched-CVE-on-abandoned-upstream or
+  hostile-ownership-transfer); the swap is explicitly **not
+  preemptive** — today's rung-2 posture is the correct policy until
+  the trigger fires, and ADR-PL-006's delegate-to-vendored-library
+  decision continues to hold.
+
 ### Changed — `get_amcache` MCP tool now returns real-parser rows (closes security MED-1)
 
 - **`src/sanctum/server.py`** — Replaced the week-1 placeholder

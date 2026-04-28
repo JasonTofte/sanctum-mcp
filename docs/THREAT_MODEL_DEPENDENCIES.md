@@ -120,6 +120,27 @@ specific failure modes:
   we don't trust. The contingency is named in
   [`CLAUDE.md` → "Pinning policy"](../CLAUDE.md) and in this
   package's per-dep comment in `pyproject.toml`.
+
+  **Named multi-maintainer fallback parser source: [Dissect](https://github.com/fox-it/dissect)
+  (Fox-IT, MIT-licensed, multi-contributor, company-backed)** — the
+  framework ships parsers for all three single-maintainer-pinned
+  artifact types in Sanctum's surface: Prefetch (as a plugin inside
+  [`dissect.target`](https://github.com/fox-it/dissect.target) at
+  `dissect/target/plugins/os/windows/prefetch.py`), registry hives
+  ([`dissect.regf`](https://github.com/fox-it/dissect.regf)), and
+  EVTX ([`dissect.eventlog`](https://github.com/fox-it/dissect.eventlog)).
+  Naming Dissect as the explicit fallback converts the rung-4
+  contingency from "we'd vendor *something*" to "we'd swap to *this
+  specific* multi-maintainer parser." Same threat model treatment
+  applies at swap time — exact-pin in `pyproject.toml`,
+  hash-locked `requirements.txt`, license-text preserved if vendored
+  under `third_party/`. The swap is **not preemptive**: today's
+  rung-2 posture (exact-pin + `--require-hashes`) defeats the
+  realistic mirror-operator and account-takeover attacks against the
+  current pins. The trigger is unpatched-CVE-on-abandoned-upstream
+  or hostile-ownership-transfer; absent those, the load-bearing pin
+  on `windowsprefetch==4.0.3` is correct policy and ADR-PL-006's
+  delegate-to-vendored-library decision continues to hold.
 - **Promote to rung 3 wholesale** when PEP 740 is broadly supported
   by upstream publishers (it's still rolling out as of 2026). At that
   point `pip install --require-hashes` should be supplemented with

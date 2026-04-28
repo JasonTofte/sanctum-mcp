@@ -320,6 +320,48 @@ asserted at the time of the claim.
    paying a false-negative cost for the `CORROBORATED` tier while
    still offering `FINAL` as a stricter grade.
 
+## Mapping to published LLM-DFIR risk taxonomy
+
+Yin, Wang, Xu, Zhuang, Mozumder, Smith, and Zhang, *Digital Forensics
+in the Age of Large Language Models*
+([arXiv:2504.02963v1](https://arxiv.org/abs/2504.02963), 3 April 2025)
+enumerate nine LLM-in-DFIR risks across §3.2.2, §4.1, and §4.2. Sanctum's architectural primitives map to a subset; the
+paper-recommended mitigations Sanctum **does not** adopt (RAG
+grounding, domain fine-tuning, multi-model ensembling) are alternative
+paths to overlapping goals — the family-corroboration gate is
+Sanctum's architectural answer to the same family of problems.
+
+| Paper risk (§ref) | Sanctum primitive that constrains it |
+|---|---|
+| Hallucinations (§4.1) — fabricated evidence narratives | `claim_finding(hypothesis, audit_ids[])` rejects single-family claims; every assertion must cite ≥2 ledger rows backed by typed parser output. The family-coupling correction (§"Family coupling and the AppCompat correction" above) tightens this further by forbidding `{ShimCache, Amcache}` from counting as two sources. |
+| Chain-of-custody violations (§4.2) — unlogged intermediate outputs, cloud-API leakage of evidence | Append-only HMAC-chained JSONL ledger; `SANCTUM_LEDGER_HMAC_KEY` is mandatory and the server refuses to start without it (no silent downgrade). Optional RFC 3161 TSA stamping per [`THREAT_MODEL_LEDGER.md`](THREAT_MODEL_LEDGER.md) raises tamper-evidence to non-repudiable. |
+| Non-determinism / reproducibility (§4.2) — variable outputs across identical runs | The ledger preserves *one canonical run's conclusions* with hashed inputs and outputs; downstream consumers verify against the ledger entry, not against a re-run. The agent's intrinsic non-determinism is bounded by the deterministic gate verdict at `claim_finding`, not by enforcing repeated identical sampling. |
+| Prompt injection attacks (§3.2.2) — attacker-authored evidence text hijacks LLM | All tool output wrapped in `<evidence-untrusted>` and pre-processed by `sanctum.sanitize.strip_known_injection_patterns()` per [`THREAT_MODEL_SANITIZATION.md`](THREAT_MODEL_SANITIZATION.md). The `_safe_field` exception-channel scrubber covers the indirect path (vendored-library exceptions carrying attacker-influenced offsets). |
+| Lack of domain-specific knowledge (§4.1) — general LLMs miss forensic schema nuance | Typed parsers (`get_amcache`, `get_prefetch`, `get_shimcache`, `get_userassist`, `get_bam`, `get_sysmon_4688`) enforce schema correctness at the tool boundary so the LLM never reinvents the forensic data model from raw bytes. The `ExecutionEvent` contract is the schema the LLM consumes. |
+| Lack of standardization (§4.2) — no industry framework | DFIR-Metric Module III scoring per [`ACCURACY.md`](ACCURACY.md) gives Sanctum a published yardstick. The methodology is shipped before the numbers are, so a reader of the IR-Accuracy claim can answer *"how would Sanctum prove it?"* today. |
+
+Out of Sanctum's direct scope from the paper's risk list: **bias and
+fairness** (a model property; Sanctum's typed surface neither
+introduces nor mitigates training-data bias), **interpretability** as a
+general-LLM concern (partially addressed by `audit_ids[]` traceability,
+but the full "explain the model's reasoning" research agenda is
+out-of-scope for a typed-function gate), and **prompt sensitivity**
+(varies with the prompt path, but the family gate downstream of any
+prompt path constrains the *output* even when prompts vary). These are
+honest limits, called out so the mapping is not over-applied.
+
+The paper's recommended mitigations Sanctum *does not* adopt:
+
+| Paper recommendation | Sanctum's choice | Rationale |
+|---|---|---|
+| Retrieval-Augmented Generation (RAG) for grounding | Not adopted in v1 | Typed parsers + family-corroboration gate are Sanctum's grounding mechanism. RAG would add a second trust boundary (the retrieval corpus) that itself becomes a target for evidence-injection. v2 followup if a forensic-specific corpus with chain-of-custody guarantees ships. |
+| Domain-specific fine-tuning | Not adopted | Sanctum is LLM-agnostic per [`LLM_AGNOSTIC.md`](LLM_AGNOSTIC.md); a fine-tune locks the deployment to a specific model and date. The architectural-guarantees-at-the-server choice is the bet that *any* compliant MCP client + frontier model is enough when the gate fires correctly. |
+| Multi-model ensemble | Not adopted | The family-corroboration gate plays the same role at the **evidence** layer (≥2 independent families) instead of at the **inference** layer (≥2 independent models). Cheaper, more reproducible, and the trust topology is auditable in a way model-ensemble agreement is not. |
+
+Comparison drawn from arXiv:2504.02963v1; subsequent revisions may
+shift section numbering. The risk catalog is reproduced for mapping
+context only — the canonical statements live in the paper.
+
 ## Followups
 
 - [x] **Shipped.** `FindingConfidence` enum
