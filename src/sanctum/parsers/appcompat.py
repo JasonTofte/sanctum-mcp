@@ -101,7 +101,7 @@ _NULL_PATH_SENTINEL = "None"
 
 def parse_shimcache(hive_path: Path) -> list[ExecutionEvent]:
     if not hive_path.is_file():
-        raise ArtifactNotFoundError(f"SYSTEM hive not found: {hive_path}")
+        raise ArtifactNotFoundError(f"SYSTEM hive not found: {_safe_field(hive_path.name)}")
     if fixture_mode():
         return load_sidecar(hive_path, expected_family=_FAMILY, expected_tool=_TOOL)
     return _parse_shimcache_real(hive_path)

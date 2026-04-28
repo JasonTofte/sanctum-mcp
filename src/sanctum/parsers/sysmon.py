@@ -146,7 +146,7 @@ _SYSMON_HASH_FIELDS: dict[str, tuple[str, int]] = {
 
 def parse_sysmon(evtx_path: Path) -> list[ExecutionEvent]:
     if not evtx_path.is_file():
-        raise ArtifactNotFoundError(f"EVTX file not found: {evtx_path}")
+        raise ArtifactNotFoundError(f"EVTX file not found: {_safe_field(evtx_path.name)}")
     if fixture_mode():
         return load_sidecar(evtx_path, expected_family=_FAMILY, expected_tool=_TOOL)
     return _parse_sysmon_real(evtx_path)

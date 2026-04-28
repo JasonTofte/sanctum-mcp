@@ -100,7 +100,7 @@ _PATH_PREFIXES = ("UEME_RUNPATH:", "UEME_RUNPIDL:")
 
 def parse_userassist(hive_path: Path) -> list[ExecutionEvent]:
     if not hive_path.is_file():
-        raise ArtifactNotFoundError(f"NTUSER.DAT not found: {hive_path}")
+        raise ArtifactNotFoundError(f"NTUSER.DAT not found: {_safe_field(hive_path.name)}")
     if fixture_mode():
         return load_sidecar(hive_path, expected_family=_FAMILY, expected_tool=_TOOL)
     return _parse_userassist_real(hive_path)

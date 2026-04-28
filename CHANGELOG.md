@@ -4,6 +4,56 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Security — error-channel scrub gaps closed at server entrypoint and parser boundaries (2026-04-28)
+
+The `sanctum.sanitize.sanitize()` pipeline and the `<evidence-untrusted>`
+quarantine wrapper only run on the **success path**. The FastMCP `isError`
+channel serializes raised exception strings to the LLM verbatim — any
+attacker-influenceable string interpolated into a `raise` message reaches
+the LLM without scrubbing (memory: `feedback_error_channel_bypass`).
+Two raise-site classes still interpolated unwrapped attacker-influenceable
+input despite the codepoint-set work above:
+
+- **`server.py:108` — `_validate_case_id_format`** (live attacker lane).
+  The allowlist-failure path raised `ValueError(f"unsafe case_id: {case_id!r}")`.
+  Python's `repr()` happens to escape Cf-category Unicode (U+202E RLO,
+  Tag block U+E0001–U+E007F) and ASCII control bytes via `unicode_escape`,
+  but does **not** escape printable ASCII like `<` `>`. An attacker could
+  smuggle `"<<SYSTEM>> ignore previous instructions"` (or arbitrary
+  printable injection text) through the case_id allowlist failure into
+  the LLM's exception-handling context. Wrapped with `_safe_field()`,
+  preserving `!r` for analyst quote-delimited readability + existing
+  test-regex compatibility (`match="unsafe case_id"` regex still holds).
+- **6 parsers** — `amcache.py:97`, `appcompat.py:104`, `bam.py:138`,
+  `prefetch.py:91`, `sysmon.py:149`, `userassist.py:103`. Each
+  `ArtifactNotFoundError` raise interpolated `{path}` (full PosixPath)
+  unwrapped. **These are not currently attacker-reachable through the
+  MCP flow** (the case_id allowlist + operator-set CASES_ROOT root +
+  `.resolve()` upstream gates the path), but the parser entry points are
+  public functions that ad-hoc scripts / direct CLI usage could reach
+  with attacker bytes. Wrapped uniformly with `_safe_field(<path>.name)`
+  so the invariant "every parser scrubs basenames in its raised
+  exceptions" is now uniform across all 6 parsers and pinned in a
+  parametrized regression test.
+
+- **9 regression tests added**: 3 new `test_bypass.py` tests pin the
+  case_id scrub invariant against angle-bracket injection (AC-eb-1),
+  RLO override (AC-eb-2 part 1), and embedded newlines (AC-eb-2 part 2);
+  the RLO and newline tests include a provenance pin (`assert "?" in msg`)
+  so a future refactor that drops `_safe_field` leaving only `repr` cannot
+  pass on `unicode_escape` alone. 1 parametrized `test_parsers.py` test
+  (×6 cases) pins the AC-eb-3 uniform-invariant property: every parser
+  substitutes `<` and `>` with `?` and preserves the documented prefix
+  string in its `ArtifactNotFoundError` message.
+- **CLAUDE.md invariant 2** gains an "Error-channel corollary" note
+  documenting that the `<evidence-untrusted>` invariant covers the
+  success path only and that `_safe_field()` is the load-bearing
+  exception-message scrubber.
+- Honest scope: `server.py:108` closes a concrete attacker lane;
+  the 6-parser pass is uniform-invariant defense-in-depth. The PR
+  ships both because the per-file diff is one-token and the uniform
+  invariant is what defends future ad-hoc parser callers.
+
 ### Security — codepoint-set asymmetry between sanitize and parser-boundary closed (2026-04-27)
 
 `sanctum.sanitize._INVISIBLE_CODEPOINTS` already covered Unicode-invisible

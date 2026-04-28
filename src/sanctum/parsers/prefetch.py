@@ -88,7 +88,7 @@ _FILETIME_SLOT_BYTES = 8
 
 def parse_prefetch(pf_path: Path) -> list[ExecutionEvent]:
     if not pf_path.is_file():
-        raise ArtifactNotFoundError(f"prefetch file not found: {pf_path}")
+        raise ArtifactNotFoundError(f"prefetch file not found: {_safe_field(pf_path.name)}")
     if fixture_mode():
         return load_sidecar(pf_path, expected_family=_FAMILY, expected_tool=_TOOL)
     return _parse_prefetch_real(pf_path)
