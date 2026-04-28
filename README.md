@@ -16,7 +16,7 @@ A purpose-built **Model Context Protocol (MCP) server** that exposes a narrow, t
 
 ## Why this shape
 
-GTG-1002 (Anthropic, Nov 2025) documented attackers defeating prompt-based guardrails via role-play jailbreak at 80–90% autonomy. The hackathon's `Constraint Implementation` judging criterion asks directly: *"Are guardrails architectural or prompt-based?"* A guardrail expressed as a system-prompt instruction fails whenever a jailbreak frames injected text as authoritative. A guardrail expressed as *the typed function doesn't exist* doesn't.
+GTG-1002 ([Anthropic, Nov 2025](https://www.anthropic.com/news/disrupting-AI-espionage)) documented attackers defeating prompt-based guardrails via role-play jailbreak at 80–90% autonomy. The hackathon's `Constraint Implementation` judging criterion asks directly: *"Are guardrails architectural or prompt-based?"* A guardrail expressed as a system-prompt instruction fails whenever a jailbreak frames injected text as authoritative. A guardrail expressed as *the typed function doesn't exist* doesn't.
 
 ## The senior-analyst gate
 
@@ -234,7 +234,12 @@ followups for each are tracked in the relevant threat-model docs.
 
 ## Prior art referenced
 
-- **Valhuntir** (Steve Anson / AppliedIR, MIT) — reference example from the hackathon brief. Sanctum deliberately ships a narrower, deeper slice rather than mimicking Valhuntir's 73-tool breadth.
+- **Valhuntir** (Steve Anson / AppliedIR, MIT — ~90 tools across 11 packages with optional OpenSearch indexing as of 2026-04-25) — reference example from the hackathon brief and the closest near-neighbour project. Sanctum deliberately ships a narrower, deeper slice rather than mimicking Valhuntir's breadth, with three load-bearing primitives that Valhuntir's public README does not claim:
+  1. **HMAC-chained audit ledger** — each row's MAC depends on the prior row's, so a post-hoc edit anywhere in history invalidates every subsequent row. Valhuntir's README documents per-row independent SHA-256 hashing, which catches per-row edits but not insertion / deletion / reorder. Sanctum's optional RFC 3161 TSA stamp ([`docs/THREAT_MODEL_LEDGER.md`](docs/THREAT_MODEL_LEDGER.md)) raises the ledger from tamper-evident to non-repudiable.
+  2. **`claim_finding(hypothesis, audit_ids[])` family-corroboration gate** as a typed function — a single-family claim returns `DRAFT`, ≥2 distinct artifact families returns `CORROBORATED` ([`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md)). Valhuntir's README documents "evidence-trail-exists" provenance enforcement, but not a ≥2-independent-family count. The five-family scheme with distinct trust roots is what makes the gate resistant to single-syscall multi-artifact tampering (`BaseFlushAppcompatCache`, `AntiForensic.NET`).
+  3. **Hash-locked install path** — `pip install -r requirements.txt --require-hashes` rejects any wheel whose SHA-256 doesn't match the lockfile, defeating the compromised-mirror attack ([`docs/THREAT_MODEL_DEPENDENCIES.md`](docs/THREAT_MODEL_DEPENDENCIES.md) §"Posture ladder" rung 2).
+
+  Comparison drawn from Valhuntir's public README at the as-of date above; Sanctum has not audited Valhuntir's implementation. Valhuntir's strengths — Examiner Portal browser UI, OpenSearch-backed scale, RAG knowledge corpus, OpenCTI/REMnux integrations — are out of v1 scope for Sanctum by design (see [Scope](#)).
 - **Protocol SIFT** (teamdfir) — the POC this hackathon extends. Protocol SIFT is a Claude Code configuration bundle with no MCP server; Sanctum provides the out-of-process architectural boundary Protocol SIFT lacks.
 - **Sygnia** "When Your Logs Lie to You" (Aug 2025) — the concrete evidence-driven prompt-injection PoC Sanctum's sanitization layer is designed against.
 - **Greshake et al.**, *Not what you've signed up for* (arXiv 2302.12173) — the theoretical foundation for indirect prompt injection.
