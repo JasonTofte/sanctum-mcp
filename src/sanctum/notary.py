@@ -164,8 +164,7 @@ def stamp_head(
     status_text = _parse_timestamp_reply_status(tsr_path)
     if "Status: Granted" not in status_text:
         raise RuntimeError(
-            f"TSA {tsa_url} did not grant the stamp. "
-            f"Parsed status:\n{status_text}"
+            f"TSA {tsa_url} did not grant the stamp. " f"Parsed status:\n{status_text}"
         )
 
     return StampResult(
@@ -321,6 +320,7 @@ def _build_timestamp_query(digest_hex: str) -> bytes:
     # :func:`shutil.which` in :func:`stamp_head` (presence check); ``digest_hex``
     # is a hex string read from the ledger (untrusted-input risk: none — hex
     # alphabet cannot contain shell metacharacters).
+    # fmt: off
     argv = [  # noqa: S607 — openssl is a stable, universally-present binary; pre-check in stamp_head()
         "openssl", "ts", "-query",
         "-digest", digest_hex,
@@ -328,6 +328,7 @@ def _build_timestamp_query(digest_hex: str) -> bytes:
         "-no_nonce",
         "-cert",
     ]
+    # fmt: on
     result = subprocess.run(argv, capture_output=True, check=True)  # noqa: S603
     return result.stdout
 

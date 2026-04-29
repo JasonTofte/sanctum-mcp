@@ -21,9 +21,7 @@ from sanctum import audit, notary
 
 
 @pytest.fixture
-def ledger_with_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def ledger_with_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Writable ledger with one real entry so stamp_head has a non-genesis head."""
     path = tmp_path / "ledger.jsonl"
     monkeypatch.setenv(audit.LEDGER_ENV, str(path))
@@ -66,9 +64,7 @@ def _mock_openssl_and_http(
         if cmd[2] == "-reply":
             status = "Status: Granted" if granted else "Status: Rejected"
             text = f"Status info:\n{status}\nToken info:\n  Policy: 1.2\n"
-            return subprocess.CompletedProcess(
-                cmd, 0, stdout=text.encode("utf-8")
-            )
+            return subprocess.CompletedProcess(cmd, 0, stdout=text.encode("utf-8"))
         raise AssertionError(f"unexpected openssl invocation: {cmd}")
 
     monkeypatch.setattr(notary.subprocess, "run", _fake_run)
@@ -165,9 +161,7 @@ def test_stamp_head_archive_dir_override(
     assert alt.exists()
 
 
-def test_stamp_head_works_on_empty_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_stamp_head_works_on_empty_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Stamping an empty ledger uses the genesis head — still useful as a baseline.
 
     An operator may want to stamp a fresh ledger to publish "we started
@@ -218,9 +212,7 @@ def test_stamp_head_or_log_falls_back_on_network_error(
     """AC-2: URLError from urlopen → rung-1 sentinel + structured WARN."""
     import urllib.error
 
-    _mock_openssl_and_http(
-        monkeypatch, network_error=urllib.error.URLError("connection refused")
-    )
+    _mock_openssl_and_http(monkeypatch, network_error=urllib.error.URLError("connection refused"))
     caplog.set_level("WARNING", logger="sanctum.notary")
     outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
     assert outcome.rung_reached == 1
@@ -309,19 +301,18 @@ def test_stamp_head_or_log_warn_line_is_structured(
     """
     import urllib.error
 
-    _mock_openssl_and_http(
-        monkeypatch, network_error=urllib.error.URLError("offline")
-    )
+    _mock_openssl_and_http(monkeypatch, network_error=urllib.error.URLError("offline"))
     caplog.set_level("WARNING", logger="sanctum.notary")
     outcome = notary.stamp_head_or_log(tsa_url="https://tsa.example/fake")
 
     fallback_records = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelname == "WARNING" and "tsa_stamp_fallback" in r.getMessage()
     ]
-    assert len(fallback_records) == 1, (
-        "expected exactly one WARN record carrying event=tsa_stamp_fallback"
-    )
+    assert (
+        len(fallback_records) == 1
+    ), "expected exactly one WARN record carrying event=tsa_stamp_fallback"
     record = fallback_records[0]
     # Structured fields surfaced via logger.warning(..., extra={...})
     assert getattr(record, "event", None) == "tsa_stamp_fallback"
