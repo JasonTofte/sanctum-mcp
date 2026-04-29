@@ -392,6 +392,33 @@ an LLM in the inference path; a typed function is not.
 Comparison drawn from arXiv:2508.21323; ProvSEEK author and version
 verified against the arXiv primary source on 2026-04-27.
 
+### Defensive-posture comparison
+
+ProvSEEK is a research prototype focused on provenance-graph analysis and LLM
+grounding for autonomous DFIR.  The following table compares the **deployment
+security posture** of both systems — the guardrails that protect the analysis
+pipeline itself, independent of the corroboration logic:
+
+| Security axis | Sanctum | ProvSEEK | Gap |
+|---|---|---|---|
+| **Evidence corroboration gate** | Family-typed `claim_finding` — typed function, no LLM in inference path, deterministic verdict. `src/sanctum/finding.py`. | Safety Agent (LLM-based) — qualitative conclusive/inconclusive verdict. arXiv:2508.21323 §3.3. | Sanctum's gate is reproducible by deterministic inspection; ProvSEEK's depends on Safety Agent sampling. |
+| **Audit ledger integrity** | HMAC-SHA-256-chained append-only JSONL; server refuses to start without `SANCTUM_LEDGER_HMAC_KEY`; optional RFC 3161 TSA stamping. `src/sanctum/audit.py`, `src/sanctum/notary.py`. | Not addressed in arXiv:2508.21323 — audit trail design is outside the paper's scope. | ProvSEEK has no published ledger-integrity model; Sanctum's non-repudiation rung is deployment-specific. |
+| **Evidence output quarantine** | Every tool return wrapped in `<evidence-untrusted>` after `strip_known_injection_patterns()`. `src/sanctum/sanitize.py:wrap_evidence`. | Not addressed in arXiv:2508.21323. | Injection-pattern stripping is not a provenance-graph concern; Sanctum adds it as a deployment-layer guard. |
+| **Evidence mount enforcement** | Cases root mounted read-only at OS level; `_validate_evidence_mount()` checks VFS ro flag at server startup; refuses to serve if writable. `src/sanctum/server.py:83`. | Not addressed in arXiv:2508.21323. | Sanctum targets operator deployment on analyst hosts with real evidence — RO mount is a deployment invariant, not a research concern. |
+| **Error-channel scrubbing** | `_safe_field()` applies the shared delimiter inventory to attacker-influenced bytes before they land in FastMCP `isError` exception strings. `src/sanctum/parsers/_fixture_io.py:83`. | Not addressed in arXiv:2508.21323. | FastMCP's `isError` path is a Sanctum-specific deployment detail. |
+| **Cross-host correlation** | Not implemented (v1 scope: single-host, host-based artifacts only). | Provenance graph spans processes and may extend cross-host. arXiv:2508.21323 §3. | **Sanctum gap** — ProvSEEK can correlate events across a multi-machine kill chain; Sanctum's v1 family gate is single-host. Cross-host is explicitly deferred to v2 (see §"Known limits and future work"). |
+| **Learned anomaly detection** | Not implemented — structural trust-root coupling only; deterministic, no training data. | Autoencoder-style rarity scoring on provenance graph. arXiv:2508.21323 §3.2. | **Sanctum gap** — ProvSEEK can surface anomalous-but-un-patterned behaviour Sanctum cannot; Sanctum's determinism is both a strength (reproducible) and a limit (no learned baselines). |
+
+The two gaps documented above ("Sanctum doesn't do this") are acknowledged as
+deliberate scope decisions, not oversights.  Cross-host correlation requires
+a multi-host evidence collection architecture outside the v1 FIND EVIL!
+submission scope.  Learned anomaly detection requires a training corpus and
+reintroduces non-determinism, which Sanctum's FIND EVIL! Constraint
+Implementation criterion requires to be absent from the gate's inference path.
+
+Comparison drawn from arXiv:2508.21323; ProvSEEK author and version
+verified against the arXiv primary source on 2026-04-27.
+
 ## Two-layer gate exposition
 
 [`claim_finding`](../src/sanctum/finding.py) is implemented as two

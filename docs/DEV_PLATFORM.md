@@ -68,7 +68,7 @@ dimension simple.
 
 2. Boot the laptop via F12 → USB. Install Ubuntu with:
    - "Erase disk and install Ubuntu"
-   - "Encrypt the new Ubuntu installation" (LUKS — chain-of-custody hygiene for
+   - "Encrypt the new Ubuntu installation" (LUKS — evidence-integrity hygiene for
      any dev-time case data that lands on disk).
 
 3. First boot:

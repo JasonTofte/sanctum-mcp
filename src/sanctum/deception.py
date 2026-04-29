@@ -17,7 +17,7 @@ Design invariants:
     "absence of evidence is evidence of absence" fallacy that anti-forensic
     research (Garfinkel 2007; Conlan, Baggili, Breitinger 2016) warns against.
 2.  **Reason codes, not booleans.** A boolean ``tampered=True`` collapses
-    distinct attacker actions; an analyst preparing chain-of-custody
+    distinct attacker actions; an analyst preparing incident-response
     documentation needs to know WHICH technique fingerprint fired.
 3.  **Deterministic only.** No statistical models, no thresholds tuned on a
     dataset judges can't see. Each check is a Boolean predicate over a small

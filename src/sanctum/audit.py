@@ -2,8 +2,8 @@
 
 Every tool call writes one line of JSONL. Each entry is chained to the previous
 via an **HMAC-SHA-256** keyed by ``SANCTUM_LEDGER_HMAC_KEY``. Mutation of any
-past entry invalidates every entry after it, yielding a tamper-evident chain
-of custody that cannot be recomputed by an attacker who does not hold the key.
+past entry invalidates every entry after it, yielding a tamper-evident record
+chain that cannot be recomputed by an attacker who does not hold the key.
 
 Security posture ladder:
 
@@ -14,9 +14,9 @@ Security posture ladder:
 2. **Non-repudiable (:mod:`sanctum.notary`).** Periodically stamp the current
    ledger head to an RFC 3161 Time-Stamp Authority. The TSA's digital
    signature chains to a public PKI root, so a forger now also needs to
-   compromise the TSA — impractical. This is the tier required for
-   court-admissible chain of custody (FRE 902(13)/(14); NIST SP 800-53
-   AU-10(5) Digital Signatures).
+   compromise the TSA — impractical. This is the non-repudiable posture
+   rung for IR-accountability; FRE 902(13)/(14) and NIST SP 800-53
+   AU-10(5) Digital Signatures are downstream legal corollaries.
 3. **Publicly witnessed (future).** Merkle-tree publication to Sigstore
    Rekor or equivalent RFC 9162 transparency log. Not required for the
    hackathon scope; flagged here so the upgrade path is explicit.
@@ -56,7 +56,7 @@ fingerprints, not integrity links. The ``line_hash`` (HMAC-SHA-256)
 is what binds these fingerprints into the chain.
 
 References:
-- NIST SP 800-86 §4 — chain of custody.
+- NIST SP 800-86 §4 — evidence handling and integrity procedures.
 - NIST SP 800-53 r5 AU-9(3) Cryptographic Protection, AU-10(5) Digital
   Signatures (roadmap to asymmetric signing), AU-11(1) Long-term Retrieval.
 - RFC 2104 — HMAC primitive definition.

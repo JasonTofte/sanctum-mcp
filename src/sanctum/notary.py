@@ -9,9 +9,9 @@ An RFC 3161 Time-Stamp Authority (TSA) provides the missing third-party
 witness. The TSA signs a ``TimeStampToken`` that binds the ledger head's
 hash to a wall-clock time; the TSA's signing cert chains to a public PKI
 root. A forger now also needs to compromise the TSA — impractical for any
-single attacker. This is the tier required for court-admissible chain of
-custody (FRE 902(13)/(14); NIST SP 800-53 AU-10(5) Digital Signatures;
-AU-11(1) Long-term Retrieval).
+single attacker. This is the non-repudiable posture rung for
+IR-accountability; FRE 902(13)/(14) and NIST SP 800-53 AU-10(5) Digital
+Signatures are downstream legal corollaries.
 
 This module wraps ``openssl ts`` for request construction and response
 parsing, so there are no new Python dependencies — only the ``openssl``
@@ -41,7 +41,7 @@ References:
 - RFC 3161 — Internet X.509 Public Key Infrastructure Time-Stamp Protocol (TSP)
 - NIST SP 800-53 r5 — AU-9(3), AU-10(5), AU-11(1)
 - RFC 9162 — Certificate Transparency v2 (companion pattern; future upgrade)
-- FRE 902(13)/(14) — self-authentication of electronic records
+- FRE 902(13)/(14) — self-authentication of electronic records (downstream legal corollary; design goal is IR-accuracy)
 - ``docs/THREAT_MODEL_LEDGER.md`` — full threat model for the ledger posture
 """
 

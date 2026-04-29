@@ -4,6 +4,38 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — MCP CVE coverage tests + ProvSEEK deepening + IR-accuracy sweep (Phase 1, 2026-04-29)
+
+**F6 — MCP-class CVE coverage** (`tests/test_mcp_cve_coverage.py`):
+- 4 tests asserting architectural coverage of CVE-2025-49596 (MCP Inspector
+  unauthenticated command injection) and CVE-2025-53109 (MCP Filesystem symlink
+  path-traversal). Both CVE IDs verified against NVD primary source 2026-04-29.
+- `docs/THREAT_MODEL_DEPENDENCIES.md` — new §"MCP ecosystem CVE coverage" section
+  citing both CVE records with submitter-assigned CVSS 4.0 scores (NVD enrichment
+  pending) and mapping each to Sanctum's architectural coverage.
+
+**F7 — Sygnia 2025-08 attack-coverage assertion** (`tests/test_sygnia_attack_coverage.py`):
+- 3 tests confirming the Sygnia 2025-08 Mimikatz mis-narration pattern is stripped
+  on both the success path (`sanitize` + `wrap_evidence`) and the error path
+  (`_safe_field` exception-channel scrubber). Delta from `test_sanitize.py`: named
+  fixture, dual-path assertion.
+
+**F8 — ProvSEEK defensive-posture table** (`docs/THREAT_MODEL_TRIANGULATION.md`):
+- Added §"Defensive-posture comparison" sub-table to the existing ProvSEEK section.
+  Five axes covered: evidence corroboration gate, audit ledger integrity, evidence
+  output quarantine, mount-VFS enforcement, error-channel scrubbing — each citing
+  `src/` file:line. Two Sanctum gaps documented honestly: cross-host correlation
+  and learned anomaly detection (both deferred to v2).
+
+**IR-accuracy vocabulary sweep** (7 files, docstrings/comments only):
+- `src/sanctum/audit.py`, `notary.py`, `deception.py`, `server.py`: reframed
+  "court-admissible chain of custody" to "non-repudiable posture rung for
+  IR-accountability; FRE 902 is a downstream legal corollary."
+- `docs/THREAT_MODEL_DECEPTION.md`, `DEV_PLATFORM.md`, `THREAT_MODEL_DEPENDENCIES.md`:
+  "chain-of-custody" → "IR-accuracy"/"evidence-integrity"/"audit record" as appropriate.
+- `docs/THREAT_MODEL_LEDGER.md:33-38` sidebar preserved verbatim (explicit aside on
+  FRE 902 as non-load-bearing legal context).
+
 ### Added — DFIR-Metric eval driver (Phase 2.1, 2026-04-29)
 
 First quantitative IR-accuracy measurement infrastructure comparing
