@@ -432,9 +432,11 @@ def test_gap_verify_chain_missing_ledger_is_vacuous_truth(
     monkeypatch.setenv(audit.HMAC_KEY_ENV, _secrets.token_hex(32))
     missing = tmp_path / "never-created.jsonl"
     assert not missing.exists()
-    ok, lines, bad = audit.verify_chain(missing)
+    # Position 2 is "first_bad_line_1based" (None on clean/missing ledger),
+    # not a line count, after the AC-4/AC-10 contract change.
+    ok, first_bad, bad = audit.verify_chain(missing)
     assert ok is True
-    assert lines == 0
+    assert first_bad is None
     assert bad is None
 
 

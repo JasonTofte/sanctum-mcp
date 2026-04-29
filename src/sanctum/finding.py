@@ -103,28 +103,51 @@ class Finding:
     demoted_for_tamper: bool
 
 
-def claim_finding(
+@dataclass(frozen=True)
+class FindingEvaluation:
+    """Gate-only evaluation of a claim — no ledger I/O.
+
+    Mirrors :class:`Finding` minus ``audit_id``, because the audit_id is
+    minted at ledger-append time. Server-side callers use this when they
+    need to write the offload payload BEFORE the ledger append (so the
+    on-disk path and the ledger entry share a pre-minted audit_id) — the
+    universal offload helper in ``sanctum.server`` is the single call
+    site that does that.
+    """
+
+    case_id: str
+    hypothesis: str
+    tier: FindingConfidence
+    audit_ids: tuple[str, ...]
+    families: tuple[str, ...]
+    n_distinct_families: int
+    confirmation_basis: ConfirmationBasis
+    reason_codes: tuple[str, ...]
+    demoted_for_tamper: bool
+
+
+def evaluate_claim(
     *,
     case_id: str,
     hypothesis: str,
     audit_ids: Sequence[str],
     deception_signals: Sequence[DeceptionSignal] = (),
     ledger_path: Path | None = None,
-) -> Finding:
-    """Gate a forensic claim through the family-corroboration check.
+) -> FindingEvaluation:
+    """Pure gate evaluation — does NOT write to the ledger.
 
-    See module docstring for the full flow. Caller-facing contract:
+    Implements steps 1–4 of the module-level flow (read entries, dedupe,
+    resolve families, classify confidence, derive ``confirmation_basis``).
+    Step 5 (ledger append) is the caller's responsibility — :func:`claim_finding`
+    delegates to this function and then appends; the server-side offload
+    helper does the same but interposes the write-once payload step
+    between the evaluation and the ledger append, so the on-disk file
+    and the ledger entry share a pre-minted audit_id.
 
-    - Returns a :class:`Finding` whose ``tier`` is the result of the
-      family count + deception-signal demotion.
-    - Always appends a ``tool="claim_finding"`` entry to the ledger,
-      *including* on a DRAFT result. The audit trail records every
-      claim attempt — promoting from DRAFT later is a *new* entry, not
-      a mutation.
-    - Raises :class:`ClaimFindingError` on empty ``audit_ids``,
-      missing ledger references, or unknown tool names.
+    Raises :class:`ClaimFindingError` on empty ``audit_ids``, missing
+    ledger references, or unknown tool names — same contracts as
+    :func:`claim_finding`.
     """
-
     if not audit_ids:
         raise ClaimFindingError("audit_ids is empty; a finding requires at least one source")
 
@@ -160,38 +183,7 @@ def claim_finding(
         "independent_artifacts" if len(families) >= 2 else "single_family"
     )
 
-    finding_payload: dict[str, Any] = {
-        "hypothesis": hypothesis,
-        "tier": tier.value,
-        "audit_ids": list(deduped_ids),
-        "families": families,
-        "n_distinct_families": len(families),
-        "confirmation_basis": confirmation_basis,
-        "reason_codes": list(reason_codes),
-        "demoted_for_tamper": signal_present,
-    }
-    finding_hash = _sha256_canonical(finding_payload)
-
-    entry: LedgerEntry = append_entry(
-        case_id=case_id,
-        tool="claim_finding",
-        args={
-            "hypothesis": hypothesis,
-            "audit_ids": list(deduped_ids),
-            "deception_signal_count": len(deception_signals),
-        },
-        input_ref={"finding": finding_payload},
-        # Findings carry no payload that needs sanitization — the
-        # hypothesis string is agent-authored, not evidence-authored —
-        # but the schema requires both fields as content fingerprints.
-        # Use the canonical-encoded finding hash for both.
-        pre_sanitization_sha256=finding_hash,
-        post_sanitization_sha256=finding_hash,
-        rowcount=len(deduped_ids),
-    )
-
-    return Finding(
-        audit_id=entry.audit_id,
+    return FindingEvaluation(
         case_id=case_id,
         hypothesis=hypothesis,
         tier=tier,
@@ -201,6 +193,79 @@ def claim_finding(
         confirmation_basis=confirmation_basis,
         reason_codes=reason_codes,
         demoted_for_tamper=signal_present,
+    )
+
+
+def claim_finding(
+    *,
+    case_id: str,
+    hypothesis: str,
+    audit_ids: Sequence[str],
+    deception_signals: Sequence[DeceptionSignal] = (),
+    ledger_path: Path | None = None,
+) -> Finding:
+    """Gate a forensic claim through the family-corroboration check.
+
+    See module docstring for the full flow. Caller-facing contract:
+
+    - Returns a :class:`Finding` whose ``tier`` is the result of the
+      family count + deception-signal demotion.
+    - Always appends a ``tool="claim_finding"`` entry to the ledger,
+      *including* on a DRAFT result. The audit trail records every
+      claim attempt — promoting from DRAFT later is a *new* entry, not
+      a mutation.
+    - Raises :class:`ClaimFindingError` on empty ``audit_ids``,
+      missing ledger references, or unknown tool names.
+    """
+    evaluation = evaluate_claim(
+        case_id=case_id,
+        hypothesis=hypothesis,
+        audit_ids=audit_ids,
+        deception_signals=deception_signals,
+        ledger_path=ledger_path,
+    )
+
+    finding_payload: dict[str, Any] = {
+        "hypothesis": evaluation.hypothesis,
+        "tier": evaluation.tier.value,
+        "audit_ids": list(evaluation.audit_ids),
+        "families": list(evaluation.families),
+        "n_distinct_families": evaluation.n_distinct_families,
+        "confirmation_basis": evaluation.confirmation_basis,
+        "reason_codes": list(evaluation.reason_codes),
+        "demoted_for_tamper": evaluation.demoted_for_tamper,
+    }
+    finding_hash = _sha256_canonical(finding_payload)
+
+    entry: LedgerEntry = append_entry(
+        case_id=case_id,
+        tool="claim_finding",
+        args={
+            "hypothesis": hypothesis,
+            "audit_ids": list(evaluation.audit_ids),
+            "deception_signal_count": len(deception_signals),
+        },
+        input_ref={"finding": finding_payload},
+        # Findings carry no payload that needs sanitization — the
+        # hypothesis string is agent-authored, not evidence-authored —
+        # but the schema requires both fields as content fingerprints.
+        # Use the canonical-encoded finding hash for both.
+        pre_sanitization_sha256=finding_hash,
+        post_sanitization_sha256=finding_hash,
+        rowcount=len(evaluation.audit_ids),
+    )
+
+    return Finding(
+        audit_id=entry.audit_id,
+        case_id=evaluation.case_id,
+        hypothesis=evaluation.hypothesis,
+        tier=evaluation.tier,
+        audit_ids=evaluation.audit_ids,
+        families=evaluation.families,
+        n_distinct_families=evaluation.n_distinct_families,
+        confirmation_basis=evaluation.confirmation_basis,
+        reason_codes=evaluation.reason_codes,
+        demoted_for_tamper=evaluation.demoted_for_tamper,
     )
 
 
