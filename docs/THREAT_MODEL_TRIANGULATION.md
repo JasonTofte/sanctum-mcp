@@ -205,6 +205,56 @@ return FINAL
 This is a minimal change to the P0 design; it strictly tightens the gate
 without touching the numeric `k` threshold.
 
+## Family coupling: shared-hive risk (BAM ↔ AppCompat)
+
+The AppCompat correction above establishes that ShimCache and Amcache
+share a trust root and collapse into one family. A second, weaker
+coupling exists between the **BAM** and **AppCompat** families that is
+worth naming explicitly for analysts who cite a `{BAM, AppCompat}`
+pair as their two-family corroboration.
+
+**Shared registry hive.** Both families write into the SYSTEM hive:
+
+- AppCompat (ShimCache): `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache`
+- BAM: `HKLM\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\<SID>`
+
+They are written by **different OS subsystems** — Application Experience
+Service (AppCompat) and the Background Activity Moderator kernel driver
+(`bam.sys`) — so the coupling is at the **storage root**, not the writer.
+The two families remain distinct under the current family-gate definition
+because the gate collapses by shared *writer* (trust root), not shared
+storage.
+
+**Named threat.** A single hive-level write — `reg.exe` registry import,
+`SetRegValue`-class API call, or a raw hive replacement — that targets the
+SYSTEM hive path can desynchronize BAM and AppCompat entries simultaneously.
+The attacker does not need to invoke `BaseFlushAppcompatCache` (the
+AppCompat-specific flush API) separately; a hive replacement touches both
+key paths in one operation. In practice, this threat is **less tractable
+than the within-AppCompat one** because a forensically-clean hive
+replacement is detectable via MFT timestamps, Volume Shadow Copy
+discrepancies, and `$LogFile` sequence gap analysis — additional
+side-channels the deception layer (`THREAT_MODEL_DECEPTION.md`) and
+Prefetch/Sysmon corroboration cover.
+
+**Rule unchanged.** The ≥2 distinct families = CORROBORATED rule is
+unchanged. This addendum documents a known limit of the shared-hive
+storage root; it does not modify the gate. The BAM and AppCompat families
+remain distinct in `sanctum.families.TOOL_TO_FAMILY` because their writers
+are separate OS components, and an analyst citing a `{BAM, AppCompat}` pair
+is not claiming writer independence — they are claiming output independence,
+which survives all but a coordinated multi-component attack or a raw hive
+replacement (the latter being detectable through the channels named above).
+
+**Weakly corroborated qualifier.** An analyst citing only a
+`{BAM, AppCompat}` pair (two families, CORROBORATED tier) should note the
+shared-SYSTEM-hive storage root as a caveat on the independence claim. A
+third family from a different hive or from a different file-system path
+(Prefetch, Sysmon, UserAssist/NTUSER.dat) removes this caveat and promotes
+the finding to FINAL. The CORROBORATED verdict on a `{BAM, AppCompat}` pair
+is honest and defensible; "weakly corroborated" is how an analyst should
+frame it in an IR report when no third corroborator is available.
+
 ## Revised Poisson-binomial with artifact families
 
 Under the family reframe, two changes propagate into the probability

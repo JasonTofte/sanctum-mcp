@@ -4,6 +4,35 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — BAM↔AppCompat shared-hive risk + Casey C-Scale ordinal (Phase 2, 2026-04-29)
+
+**F1 — BAM ↔ AppCompat shared-hive coupling disclosure** (doc-only):
+- `docs/THREAT_MODEL_TRIANGULATION.md` — new §"Family coupling: shared-hive risk (BAM ↔
+  AppCompat)" documenting the shared SYSTEM-hive storage root of BAM
+  (`SYSTEM\CurrentControlSet\Services\bam\...`) and AppCompat
+  (`SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache`).
+  Names the threat (single hive-level write / `reg.exe`-class /
+  `SetRegValue`-class / hive replacement can desynchronize both families
+  simultaneously). States explicitly: "The ≥2 distinct families = CORROBORATED
+  rule is unchanged. This addendum documents a known limit; it does not
+  modify the gate."
+- `README.md` — one-paragraph "Known limit" qualifier in the family-gate
+  narrative noting the BAM ↔ AppCompat shared-SYSTEM-hive caveat and linking
+  to the full threat-model section.
+
+**F5 — Casey C-Scale ordinal output on `Finding`** (`src/sanctum/finding.py`):
+- New `_CONFIDENCE_TO_C_SCALE` mapping constant:
+  `DRAFT_TAMPER_SUSPECTED → C0`, `DRAFT → C2`, `CORROBORATED → C4`, `FINAL → C5`.
+  (C1/C3/C6 unused — no tier mapping; C6 is theoretical per Casey 2011.)
+- `Finding.c_scale: str` field added at end of frozen dataclass (ARCH-003:
+  additive-only; existing field access and dict equality tests unaffected).
+- `docs/ACCURACY.md` — new §"Casey C-Scale alignment" table with citation
+  "Casey, E., *Digital Evidence and Computer Crime*, 3rd ed., 2011" and
+  partial-verification notice (C0–C6 labels convergent across 5+ secondary
+  sources; verbatim 3rd-ed wording unverifiable without physical copy).
+- 4 new explicit mapping tests + 4 `c_scale` assertions in existing tier
+  tests (`tests/test_finding.py`). Regression baseline: 400 passing (from 396).
+
 ### Added — MCP CVE coverage tests + ProvSEEK deepening + IR-accuracy sweep (Phase 1, 2026-04-29)
 
 **F6 — MCP-class CVE coverage** (`tests/test_mcp_cve_coverage.py`):

@@ -55,6 +55,7 @@ def test_single_family_returns_draft(ledger: Path) -> None:
     assert f.tier is audit.FindingConfidence.DRAFT
     assert f.n_distinct_families == 1
     assert f.families == (FAMILY_APPCOMPAT,)
+    assert f.c_scale == "C2"
 
 
 def test_two_families_returns_corroborated(ledger: Path) -> None:
@@ -62,6 +63,7 @@ def test_two_families_returns_corroborated(ledger: Path) -> None:
     f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
     assert f.tier is audit.FindingConfidence.CORROBORATED
     assert f.n_distinct_families == 2
+    assert f.c_scale == "C4"
 
 
 def test_three_families_returns_final(ledger: Path) -> None:
@@ -73,6 +75,7 @@ def test_three_families_returns_final(ledger: Path) -> None:
     f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
     assert f.tier is audit.FindingConfidence.FINAL
     assert f.n_distinct_families == 3
+    assert f.c_scale == "C5"
 
 
 def test_same_family_collapses(ledger: Path) -> None:
@@ -156,6 +159,7 @@ def test_deception_signal_demotes_final_to_corroborated(ledger: Path) -> None:
     assert f.tier is audit.FindingConfidence.CORROBORATED
     assert f.demoted_for_tamper is True
     assert f.reason_codes == (TamperReason.TAMPER_LIKELY_SYSMAIN_DISABLED.value,)
+    assert f.c_scale == "C4"
 
 
 def test_deception_signal_demotes_corroborated_to_draft(ledger: Path) -> None:
@@ -167,6 +171,7 @@ def test_deception_signal_demotes_corroborated_to_draft(ledger: Path) -> None:
         deception_signals=[_signal()],
     )
     assert f.tier is audit.FindingConfidence.DRAFT
+    assert f.c_scale == "C2"
 
 
 def test_deception_signal_demotes_draft_to_tamper_suspected(ledger: Path) -> None:
@@ -178,6 +183,7 @@ def test_deception_signal_demotes_draft_to_tamper_suspected(ledger: Path) -> Non
         deception_signals=[_signal()],
     )
     assert f.tier is audit.FindingConfidence.DRAFT_TAMPER_SUSPECTED
+    assert f.c_scale == "C0"
 
 
 def test_multiple_deception_signals_demote_only_one_tier(ledger: Path) -> None:
@@ -278,6 +284,7 @@ def test_finding_ledger_entry_has_finding_metadata(ledger: Path) -> None:
     # in-memory Finding — so a downstream verifier walking the ledger
     # sees what kind of corroboration was claimed.
     assert entry["input_ref"]["finding"]["confirmation_basis"] == "independent_artifacts"
+    assert entry["input_ref"]["finding"]["c_scale"] == f.c_scale
 
 
 def test_draft_findings_still_appear_in_ledger(ledger: Path) -> None:
@@ -290,3 +297,47 @@ def test_draft_findings_still_appear_in_ledger(ledger: Path) -> None:
     assert f1.tier is audit.FindingConfidence.DRAFT
     assert f2.tier is audit.FindingConfidence.CORROBORATED
     assert f1.audit_id != f2.audit_id
+
+
+# ─── Casey C-Scale mapping (AC-4, AC-5) ──────────────────────────────────────
+
+
+def test_draft_tamper_suspected_maps_to_c0(ledger: Path) -> None:
+    """DRAFT_TAMPER_SUSPECTED tier → C0 (no evidentiary value; Casey 2011 §3rd ed.)."""
+    aid = _record("get_amcache")
+    f = claim_finding(
+        case_id="case-1",
+        hypothesis="X ran",
+        audit_ids=[aid],
+        deception_signals=[_signal()],
+    )
+    assert f.tier is audit.FindingConfidence.DRAFT_TAMPER_SUSPECTED
+    assert f.c_scale == "C0"
+
+
+def test_draft_maps_to_c2(ledger: Path) -> None:
+    """DRAFT tier (single family) → C2 (unconfirmed; Casey 2011 §3rd ed.)."""
+    aid = _record("get_amcache")
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=[aid])
+    assert f.tier is audit.FindingConfidence.DRAFT
+    assert f.c_scale == "C2"
+
+
+def test_corroborated_maps_to_c4(ledger: Path) -> None:
+    """CORROBORATED tier (≥2 families) → C4 (corroborated; Casey 2011 §3rd ed.)."""
+    aids = [_record("get_amcache"), _record("get_prefetch")]
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
+    assert f.tier is audit.FindingConfidence.CORROBORATED
+    assert f.c_scale == "C4"
+
+
+def test_final_maps_to_c5(ledger: Path) -> None:
+    """FINAL tier (≥3 families) → C5 (beyond reasonable doubt; Casey 2011 §3rd ed.)."""
+    aids = [
+        _record("get_amcache"),
+        _record("get_prefetch"),
+        _record("get_userassist"),
+    ]
+    f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
+    assert f.tier is audit.FindingConfidence.FINAL
+    assert f.c_scale == "C5"

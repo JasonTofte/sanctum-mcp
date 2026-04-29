@@ -34,6 +34,8 @@ Why families rather than individual artifacts: ShimCache and Amcache are both wr
 
 The five families listed are produced by **distinct trust roots**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function — [`claim_finding(hypothesis, audit_ids[])`](src/sanctum/finding.py) — forces the agent to behave like a senior analyst: **single-family input is a hypothesis; multi-family input is evidence**.
 
+**Known limit — BAM ↔ AppCompat shared SYSTEM hive.** BAM (`SYSTEM\CurrentControlSet\Services\bam\...`) and AppCompat (`SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache`) both reside in the SYSTEM registry hive, so a single raw hive replacement can desynchronize both families simultaneously. They remain distinct families because they have separate *writers* (`bam.sys` vs. the Application Experience Service), but a `{BAM, AppCompat}` two-family finding should be noted as weakly corroborated in an IR report when no third corroborator is available. The ≥2-families = CORROBORATED rule is unchanged; this is a documented caveat, not a gate change. See [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md) §"Family coupling: shared-hive risk (BAM ↔ AppCompat)".
+
 The function operates as a **two-layer gate**:
 
 - **Layer 1 — provenance-integrity refusal.** `claim_finding` raises `ClaimFindingError` when inputs cannot be validated as ledger-grounded: empty `audit_ids[]`, audit_ids whose ledger entries are missing, unknown tool names. These are *refused*, not graded — the call returns no `Finding` at all. Layer 1 is the "refuses" surface in the opener above: provenance-broken claims do not reach the grading layer.
