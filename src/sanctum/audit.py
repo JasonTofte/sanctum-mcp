@@ -180,6 +180,21 @@ class LedgerEntry:
     # Emitting ``"payload_ref": null`` would silently break ``verify_chain``
     # on every pre-feature line. See AC-10.
     payload_ref: dict[str, Any] | None = None
+    elapsed_ms: int | None = None  # wall-clock milliseconds for the tool call
+    token_estimate: dict[str, int] | None = None  # {"input": int, "output": int} LLM token counts
+
+    def __post_init__(self) -> None:
+        # Construction-time invariants for instrumentation fields. Caught here so
+        # malformed entries never reach the chain — a negative elapsed_ms or a
+        # typo'd token_estimate key would otherwise be silently HMAC-signed and
+        # later trip a downstream consumer with no way to localise the bug.
+        if self.elapsed_ms is not None and self.elapsed_ms < 0:
+            raise ValueError(f"elapsed_ms must be non-negative, got {self.elapsed_ms}")
+        if self.token_estimate is not None and set(self.token_estimate.keys()) != {"input", "output"}:
+            raise ValueError(
+                f"token_estimate must have exactly keys {{'input', 'output'}}, "
+                f"got {sorted(self.token_estimate.keys())}"
+            )
 
     def to_jsonl(self) -> str:
         body: dict[str, Any] = {
@@ -197,6 +212,10 @@ class LedgerEntry:
         }
         if self.payload_ref is not None:
             body["payload_ref"] = self.payload_ref
+        if self.elapsed_ms is not None:
+            body["elapsed_ms"] = self.elapsed_ms
+        if self.token_estimate is not None:
+            body["token_estimate"] = self.token_estimate
         return json.dumps(body, ensure_ascii=False, sort_keys=True) + "\n"
 
 
@@ -292,6 +311,8 @@ def append_entry(
     rowcount: int | None = None,
     payload_ref: dict[str, Any] | None = None,
     audit_id: str | None = None,
+    elapsed_ms: int | None = None,
+    token_estimate: dict[str, int] | None = None,
 ) -> LedgerEntry:
     """Append one entry and return its populated :class:`LedgerEntry`.
 
@@ -301,15 +322,14 @@ def append_entry(
 
     Optional kwargs:
 
-    - ``payload_ref``: when not None, the dict is HMAC-covered as part of
-      the ``line_hash`` input — a swapped offload payload (file content
-      drifts from ``payload_ref.sha256``) breaks ``verify_chain``. When
-      None, the canonical JSON form OMITS the key (not null-valued) so
-      legacy ledgers verify bytewise-identically post-feature (AC-10).
-    - ``audit_id``: callers (e.g. ``_emit_offloaded_response``) pre-mint
-      the UUID so the on-disk offload path and the ledger entry share the
-      same key by construction (AC-7). When None, the ID is minted here
-      to preserve pre-feature behaviour for legacy callers.
+    - ``payload_ref``: when not None, HMAC-covered in ``line_hash`` — a
+      swapped offload payload breaks ``verify_chain``. Omitted (not null)
+      when None so legacy ledgers verify bytewise-identically (AC-10).
+    - ``audit_id``: pre-mint UUID so on-disk offload path and ledger entry
+      share the same key by construction (AC-7). Minted here when None.
+    - ``elapsed_ms``, ``token_estimate``: instrumentation fields — omitted
+      from the JSONL line when None so pre/post-instrumentation entries
+      co-exist in a single chain without breaking ``verify_chain``.
     """
 
     key = require_hmac_key()
@@ -333,11 +353,14 @@ def append_entry(
         "rowcount": rowcount,
         "prev_hash": prev_hash,
     }
-    # Conditional include — see ``LedgerEntry.payload_ref`` doc for the
-    # forward-compat rationale. ``_line_hash_for`` hashes the dict it sees,
-    # so omitting the key here also omits it from the HMAC input.
+    # Conditional includes — omit-not-null for forward-compat (see
+    # ``LedgerEntry.payload_ref`` and instrumentation field docs).
     if payload_ref is not None:
         raw["payload_ref"] = payload_ref
+    if elapsed_ms is not None:
+        raw["elapsed_ms"] = elapsed_ms
+    if token_estimate is not None:
+        raw["token_estimate"] = token_estimate
     raw["line_hash"] = _line_hash_for(raw, key=key)
     entry = LedgerEntry(**raw)
 

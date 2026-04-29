@@ -536,3 +536,300 @@ def test_verify_chain_legacy_then_new_entry_chains_cleanly(
     assert ok is True
     assert first_bad is None
     assert bad_audit_id is None
+
+
+# ---------------------------------------------------------------------------
+# AC-7: Audit ledger instrumentation extension
+# T-1, T-2, T-3, T-4, T-5 — Phase A (RED phase)
+# ---------------------------------------------------------------------------
+
+
+def test_append_entry_with_instrumentation_kwargs(ledger: Path) -> None:
+    """T-1 (P0): append_entry accepts elapsed_ms and token_estimate; both are
+    surfaced as LedgerEntry attributes and the chain verifies.
+
+    AC-7: "each entry carries elapsed_ms (int) and token_estimate ({'input': int,
+    'output': int} dict)" — this test is the primary positive oracle.
+    """
+    # Arrange
+    elapsed = 42
+    tokens = {"input": 100, "output": 20}
+
+    # Act
+    entry = audit.append_entry(
+        case_id="C1",
+        tool="get_amcache",
+        args={"hive": "/x"},
+        input_ref=None,
+        pre_sanitization_sha256="a" * 64,
+        post_sanitization_sha256="b" * 64,
+        rowcount=0,
+        elapsed_ms=elapsed,
+        token_estimate=tokens,
+    )
+
+    # Assert — new fields are present as attributes
+    assert entry.elapsed_ms == elapsed
+    assert entry.token_estimate == tokens
+
+    # Assert — HMAC chain is intact after the new fields are included
+    ok, first_bad_line, bad = audit.verify_chain(ledger)
+    assert ok is True
+    assert first_bad_line is None
+    assert bad is None
+
+
+def test_append_entry_backward_compatible(ledger: Path) -> None:
+    """T-2 (P0): append_entry with no new kwargs defaults to None without raising.
+
+    AC-7: "additive change; backward-compatible — old entries lacking these
+    fields parse fine". Existing callers pass no elapsed_ms / token_estimate;
+    they must not be forced to change their call sites.
+    """
+    # Arrange — call with the LEGACY signature (no new kwargs at all)
+    entry = audit.append_entry(
+        case_id="C2",
+        tool="get_shimcache",
+        args={"hive": "/y"},
+        input_ref=None,
+        pre_sanitization_sha256="c" * 64,
+        post_sanitization_sha256="d" * 64,
+        rowcount=5,
+    )
+
+    # Assert — new fields default to None, are not raised, and are present
+    assert entry.elapsed_ms is None
+    assert entry.token_estimate is None
+
+    # Assert — chain integrity is preserved with None-valued new fields
+    ok, first_bad_line, bad = audit.verify_chain(ledger)
+    assert ok is True
+    assert first_bad_line is None
+    assert bad is None
+
+
+def test_verify_chain_accepts_pre_extension_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-3 (P0): verify_chain passes on a ledger written BEFORE the new kwargs
+    were added to append_entry.
+
+    AC-7: "verify_chain returns (ok=True, ...) on a pre-extension ledger
+    committed at tests/fixtures/ledger_pre_instrumentation.jsonl".
+
+    NOTE (GREEN phase): The fixture file tests/fixtures/ledger_pre_instrumentation.jsonl
+    does not exist yet. The Phase A GREEN agent is responsible for creating it
+    BEFORE the new kwargs land in append_entry — i.e., the fixture must be
+    generated from the pre-extension codebase and committed so this test can
+    prove backwards-compat is enforced, not merely claimed.
+
+    When the fixture exists, this test verifies the chain is intact for all
+    N lines without knowledge of N (N is whatever the GREEN agent writes).
+    """
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "ledger_pre_instrumentation.jsonl"
+    )
+    # The fixture is committed; set the HMAC key that was used to write it.
+    # Convention: GREEN agent documents the key it used in a companion
+    # tests/fixtures/ledger_pre_instrumentation.key (hex, single line).
+    key_path = fixture_path.with_suffix(".key")
+    if not fixture_path.exists():
+        pytest.fail(
+            "tests/fixtures/ledger_pre_instrumentation.jsonl not found. "
+            "Phase A GREEN agent must create this fixture before the kwargs land."
+        )
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, key_path.read_text(encoding="utf-8").strip())
+
+    # Count lines to derive expected N (every non-empty line = 1 entry)
+    expected_n = sum(
+        1 for line in fixture_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    )
+
+    # Act
+    ok, first_bad_line, bad = audit.verify_chain(fixture_path)
+
+    # Assert
+    assert ok is True, f"Pre-extension ledger chain broken at audit_id={bad}"
+    assert first_bad_line is None
+    assert bad is None
+
+
+def test_verify_chain_accepts_mixed_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-4 (P0): verify_chain passes on a ledger mixing pre-extension entries
+    (no elapsed_ms/token_estimate in raw JSONL) followed by post-extension entries
+    (both fields present).
+
+    AC-7: "verify_chain returns (ok=True, ...) on a mixed ledger that concatenates
+    pre-extension entries followed by post-extension entries".
+
+    The oracle challenge: if the implementation accidentally omits elapsed_ms /
+    token_estimate from ALL hashes (including post-extension entries), the
+    legacy-only T-3 test would still pass. T-4 rules out that silent-omission
+    bug because the post-extension entries' hashes will be wrong if the fields
+    are excluded, and the final chain continuity check will catch it when T-5
+    tampers one.
+    """
+    # Use a fixed key for this test (so we can compute legacy HMACs manually)
+    hmac_key_hex = secrets.token_hex(32)
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, hmac_key_hex)
+    hmac_key_bytes = bytes.fromhex(hmac_key_hex)
+
+    ledger_path = tmp_path / "mixed_ledger.jsonl"
+    monkeypatch.setenv(audit.LEDGER_ENV, str(ledger_path))
+
+    import hashlib as _hashlib
+    import hmac as _hmac
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    def _compute_line_hash(entry_without_line_hash: dict) -> str:
+        """Replicate _line_hash_for for building legacy entries manually."""
+        blob = json.dumps(entry_without_line_hash, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
+        )
+        return _hmac.new(hmac_key_bytes, blob, _hashlib.sha256).hexdigest()
+
+    # --- Build 3 legacy (pre-extension) entries manually ---
+    # Legacy shape: no elapsed_ms, no token_estimate keys at all.
+    # Fields must match the pre-extension canonical format.
+    legacy_entries: list[dict] = []
+    prev_hash = "0" * 64
+    for i in range(3):
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        args_blob = json.dumps({"idx": i}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        args_hash = _hashlib.sha256(args_blob).hexdigest()
+        raw: dict = {
+            "audit_id": str(_uuid.uuid4()),
+            "ts": ts,
+            "case_id": "legacy-case",
+            "tool": "get_amcache",
+            "args_hash": args_hash,
+            "input_ref": None,
+            "pre_sanitization_sha256": "a" * 64,
+            "post_sanitization_sha256": "b" * 64,
+            "rowcount": i,
+            "prev_hash": prev_hash,
+        }
+        raw["line_hash"] = _compute_line_hash(raw)
+        legacy_entries.append(raw)
+        prev_hash = raw["line_hash"]
+
+    # Write the 3 legacy entries to the ledger
+    with ledger_path.open("w", encoding="utf-8") as fh:
+        for entry in legacy_entries:
+            fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+
+    # --- Append 3 post-extension entries via append_entry (new kwargs present) ---
+    for j in range(3):
+        audit.append_entry(
+            case_id="post-ext-case",
+            tool="get_shimcache",
+            args={"run": j},
+            input_ref=None,
+            pre_sanitization_sha256="e" * 64,
+            post_sanitization_sha256="f" * 64,
+            rowcount=j,
+            elapsed_ms=10 + j,
+            token_estimate={"input": 50 + j, "output": 5 + j},
+        )
+
+    # Act
+    ok, first_bad_line, bad = audit.verify_chain(ledger_path)
+
+    # Assert — all 6 entries (3 legacy + 3 post-extension) verify cleanly
+    assert ok is True, f"Mixed ledger chain broken at audit_id={bad}"
+    assert first_bad_line is None
+    assert bad is None
+
+
+def test_tamper_with_elapsed_ms_breaks_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-5 (P0 — SECURITY INVARIANT): elapsed_ms is included in the HMAC blob.
+
+    AC-7: "the kwargs are explicitly part of the HMAC _line_hash_for blob ...
+    so a post-write tamper of elapsed_ms or token_estimate is detected".
+
+    Oracle: the test proves inclusion by forced-divergence injection.
+    If elapsed_ms were EXCLUDED from the HMAC blob, mutating it would leave
+    verify_chain returning ok=True — and this test would fail at the assertion,
+    correctly surfacing the regression during the RED phase.
+
+    This test asserts ok is False AND bad == the exact audit_id of the mutated
+    line — not just ok is False (matrix calls this out explicitly in T-5 oracle).
+    """
+    # Arrange
+    ledger_path = tmp_path / "tamper_ledger.jsonl"
+    monkeypatch.setenv(audit.LEDGER_ENV, str(ledger_path))
+    monkeypatch.setenv(audit.HMAC_KEY_ENV, secrets.token_hex(32))
+
+    # Write one post-extension entry with elapsed_ms=42
+    entry = audit.append_entry(
+        case_id="tamper-case",
+        tool="get_amcache",
+        args={"hive": "/evidence/Amcache.hve"},
+        input_ref=None,
+        pre_sanitization_sha256="a" * 64,
+        post_sanitization_sha256="b" * 64,
+        rowcount=1,
+        elapsed_ms=42,
+        token_estimate={"input": 200, "output": 30},
+    )
+    expected_audit_id = entry.audit_id
+
+    # Act — tamper: read the raw JSONL, mutate elapsed_ms from 42 to 99
+    raw_line = ledger_path.read_text(encoding="utf-8").strip()
+    parsed = json.loads(raw_line)
+    assert parsed["elapsed_ms"] == 42, (
+        "Pre-condition: elapsed_ms must be 42 in the written entry. "
+        "If this assertion fails at GREEN, elapsed_ms is not being written to JSONL."
+    )
+    parsed["elapsed_ms"] = 99  # tamper
+    ledger_path.write_text(
+        json.dumps(parsed, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    # Assert — chain must be broken, and the bad audit_id must be the one we tampered
+    ok, _count, bad = audit.verify_chain(ledger_path)
+    assert ok is False, (
+        "SECURITY REGRESSION: verify_chain returned ok=True after tampering elapsed_ms. "
+        "This means elapsed_ms is NOT included in the HMAC blob — the field is unprotected."
+    )
+    assert bad == expected_audit_id, (
+        f"verify_chain identified the wrong bad entry: got {bad!r}, "
+        f"expected {expected_audit_id!r}."
+    )
+
+
+def test_append_entry_rejects_negative_elapsed_ms(ledger: Path) -> None:
+    """elapsed_ms must be a non-negative wall-clock value; -1 is a clock-skew bug."""
+    with pytest.raises(ValueError, match="elapsed_ms"):
+        audit.append_entry(
+            case_id="bad-elapsed",
+            tool="get_amcache",
+            args={"hive": "/x"},
+            input_ref=None,
+            pre_sanitization_sha256="a" * 64,
+            post_sanitization_sha256="b" * 64,
+            rowcount=0,
+            elapsed_ms=-1,
+            token_estimate={"input": 1, "output": 1},
+        )
+
+
+def test_append_entry_rejects_unexpected_token_estimate_keys(ledger: Path) -> None:
+    """token_estimate shape is fixed: {'input', 'output'}. Typos must fail loudly."""
+    with pytest.raises(ValueError, match="token_estimate"):
+        audit.append_entry(
+            case_id="bad-token-keys",
+            tool="get_amcache",
+            args={"hive": "/x"},
+            input_ref=None,
+            pre_sanitization_sha256="a" * 64,
+            post_sanitization_sha256="b" * 64,
+            rowcount=0,
+            elapsed_ms=10,
+            token_estimate={"in": 1, "out": 1},
+        )

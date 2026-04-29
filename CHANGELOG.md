@@ -4,6 +4,46 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — DFIR-Metric eval driver (Phase 2.1, 2026-04-29)
+
+First quantitative IR-accuracy measurement infrastructure comparing
+Sanctum-mediated vs bare-LLM on the DFIR-Metric Module II CTF
+(arXiv:2505.19973) Sanctum-relevant subset.
+
+New files:
+- `scripts/run_dfir_metric_eval.py` — end-to-end eval driver: spawns MCP
+  stdio subprocess, drives 8-turn agentic loop, extracts `claim_status`
+  and `audit_ids`, SIGTERM→SIGKILL teardown, emits `EvalReport` JSON.
+  AC-11: handshake-timeout/call-hang/crash all produce per-row markers
+  (`<subprocess_timeout>`, `<subprocess_crash>`) without aborting the run.
+  AC-6: `STRATEGY="interleave"` keeps prompt-cache warm across arms.
+  AC-12: metric named `sanctum_partial_credit_accuracy`, not TUS@m.
+  H3 fix: Anthropic SDK errors (`RateLimitError`, `APIError`, etc.) convert
+  to `<api_error>` rows so a transient API failure doesn't abort the eval.
+  M3 fix: `stderr=DEVNULL` prevents 64KB kernel-buffer deadlock from MCP
+  server logging output.
+- `scripts/summarize_eval.py` — emits ACCURACY.md markdown fragment from
+  EvalReport JSON: per-arm summary table + per-family breakdown +
+  high-variance ⚠ annotation + AC-12 metric-name disclaimer.
+- `scripts/dfir_metric_subset.py` — runtime-fetches DFIR-Metric repo,
+  filters to Sanctum-relevant 5-family subset (AC-3/AC-5).
+- `tests/benchmarks/test_dfir_metric_smoke.py` — 6 smoke tests covering
+  AC-1a/AC-1b/AC-2/AC-4/AC-8/AC-11 with `MockAnthropicClient` (no live
+  API). `_spawned_procs` + `_leaked_pids` module registries for AC-1b
+  zero-leak assertion.
+- `docs/ACCURACY.md` — Methodology section (subset-selection, scoring
+  construction, N=3 caveat, single-author bias disclosure, AC-12
+  disclaimer) before Numbers placeholder; License & Reproduction section.
+- `docs/ADR_EVAL_DRIVER.md` — 4 ADRs: interleave strategy, metric naming,
+  pre-call cost cap, API error row markers.
+
+Security fixes in this batch:
+- H1: Deleted dead `_read_claim_finding_status` (cargo-cult dead logic).
+- H2: `_leaked_pids` set + ERROR log on SIGKILL second-timeout in
+  `_MCPClient.close()` for explicit zombie detection (AC-1b).
+- M1: Cost-cap projection now includes `cache_write` ($6.25/MTok) to
+  avoid ~25% underestimate on cache-cold calls.
+
 ### Added — universal payload-offload for typed MCP tools (2026-04-29)
 
 Closes the silent-corruption surface from `anthropics/claude-code#36319`

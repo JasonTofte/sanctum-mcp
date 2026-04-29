@@ -1,62 +1,44 @@
 # IR-accuracy methodology
 
 This document is the **measurement protocol** for Sanctum's
-IR-Accuracy axis (one of the six FIND EVIL! judging criteria, weighted
-1/6 and a Stage 1 gate). It pins what we measure, what we measure
-*against*, how we score, and how a third party reproduces the
-evaluation. The actual numbers — Sanctum's TUS@k score, family-gate
-abstention rate, deception-signal correctness — fill in when the
-real parser bodies ship in week 3 (`regipy` for `.hve` hives,
-`python-evtx` for Sysmon, `libscca` / native-Python for Prefetch);
-until then this doc is methodology-only and the §"Numbers" table
-flags every cell as `pending`.
+IR-Accuracy axis (one of the six FIND EVIL! judging criteria,
+weighted 1/6 and a Stage 1 gate). It pins what we measure, what we
+measure *against*, how we score, and how a third party reproduces
+the evaluation.
 
-The methodology lands first because the IR-Accuracy claim in
-[`README.md`](../README.md) is on record from the v0.2.0 release: a
-judge or contributor reading that claim today should be able to
-answer *"how would Sanctum prove it?"* without waiting for the
-benchmark run.
+The methodology section comes **before** the Numbers section
+(AC-9). This is deliberate: a judge or contributor reading the
+IR-accuracy claim in [`README.md`](../README.md) should be able to
+answer *"how would Sanctum prove it?"* without scrolling past a
+single number first. Numbers without methodology are unfalsifiable;
+methodology without numbers is at least honest.
 
 > ⚠️ **Scope of this document — read first.** This methodology
-> measures the *server-side* IR-accuracy of Sanctum's typed-tool
-> outputs and the family-gate's verdict tier. It does **not**
-> measure end-to-end agent behavioural quality (whether Opus 4.7
-> chooses the right `get_*` tools, whether it interprets evidence
-> correctly, whether it falls for novel evidence-injection that
-> survives the sanitizer). Those are separate axes — the
-> sanitization residual is treated in
+> measures the *agent-mediated* IR-accuracy of Sanctum's typed-tool
+> outputs against a bare-LLM baseline on a Sanctum-relevant subset
+> of the public DFIR-Metric Module II (CTF) corpus. It does **not**
+> measure end-to-end agent behavioural quality (whether the model
+> chooses the right `get_*` tools across a long IR engagement,
+> whether it interprets multi-artifact narratives correctly, or
+> whether it falls for novel evidence-injection that survives the
+> sanitizer). Those are separate axes — the sanitization residual
+> is treated in
 > [`docs/THREAT_MODEL_SANITIZATION.md`](THREAT_MODEL_SANITIZATION.md);
 > the agent-cognition surface is OOS for v1 per the **Limits of
-> structural defenses** section in `README.md`. This doc is the
-> *bytes-out-of-the-server* benchmark only.
+> structural defenses** section in `README.md`.
 
-## Why DFIR-Metric
+## Methodology
+
+### Why DFIR-Metric
 
 [DFIR-Metric (Cherif et al., arXiv:2505.19973, May
 2025)](https://arxiv.org/abs/2505.19973) is the closest published
-DFIR-LLM benchmark to Sanctum's domain. Three reasons it is the
-right yardstick:
-
-1. **Domain match.** Module III ("Disk Forensics CTF") covers Windows
-   host-based execution-evidence questions — the exact scope claim
-   Sanctum makes in its [Scope](../README.md) line. Module I
-   (multiple-choice DFIR knowledge) and Module II ("Linux Forensics
-   CTF") are out of scope; Sanctum is not a general DFIR knowledge
-   recall system and does not handle Linux artifacts.
-2. **Published baseline numbers.** DFIR-Metric reports per-model
-   scores including GPT-4.1 at **38.52% TUS@4** on Module III as the
-   best disclosed score at publication. Having a frontier-model
-   baseline at hand means Sanctum's number is interpretable on day
-   one — *better than 38.52%*, *worse than 38.52%*, or *similar*
-   are all meaningful answers.
-3. **Adversarial-aware metric design.** DFIR-Metric's Task
-   Understanding Score (TUS@k) explicitly samples k completions per
-   task and counts a task as solved only if *all k* succeed — the
-   benchmark design is robust to lucky-sample noise and aligned with
-   the family-corroboration gate's "consistent answer across
-   independent attempts" philosophy. Pure pass@1 single-shot
-   benchmarks would mask sampling variance that the family gate
-   exists to suppress.
+DFIR-LLM benchmark to Sanctum's domain. We use **Module II — the
+CTF subset**, which contains hands-on Windows host-based execution
+and persistence questions over CFReDS-derived images. Module I
+(multiple-choice DFIR knowledge recall) and the survey-style
+modules are out of scope; Sanctum is not a knowledge-recall
+system.
 
 We deliberately do **not** benchmark against:
 
@@ -64,103 +46,167 @@ We deliberately do **not** benchmark against:
   questions are not standardised and a per-case scoring rubric is
   not published. CFReDS is excellent as input data; it is not a
   benchmark.
-- **DFIR-Metric Module II (Linux)** — Sanctum's tool surface and
-  family scheme are Windows-specific.
 - **CTF challenge sites with non-public answer keys (M57-Patents,
   CyberDefenders)** — see [`README.md`](../README.md) §"Dataset
   choice — license-safe only".
 
-## What TUS@k means
+### Subset-selection rationale
 
-DFIR-Metric defines **TUS@k** (Task Understanding Score at k) as a
-strict-consistency variant of pass@k: for each task, the model is
-sampled k independent times; the task is counted as solved only if
-**all k samples** produce the correct answer. The benchmark's
-headline GPT-4.1 score of 38.52% on Module III is TUS@4 — i.e.,
-GPT-4.1 produced the correct answer on every one of four
-independent samples for 38.52% of Module III tasks.
-
-The strict-consistency framing is what makes TUS@k a useful
-yardstick for an architecturally-hardened system like Sanctum:
-- A pure pass@1 metric rewards lucky samples — useless for a
-  forensic system where one correct answer mixed with three
-  hallucinated alternatives is *worse* than a consistent
-  abstention.
-- pass@k (any of k correct) rewards breadth at the cost of
-  reliability — also useless for forensics, where evidence quality
-  is the whole game.
-- TUS@k punishes inconsistency. A model that flips between two
-  different "correct" answers across samples scores 0; a model
-  that consistently abstains scores 0; a model that consistently
-  produces the right answer scores 1.
-
-For full formal details consult Cherif et al. §3 ("Metrics");
-the description above is a summary, not the canonical
-definition.
-
-## Module III scope and what we measure
-
-DFIR-Metric Module III contains **N tasks** spanning disk
-forensics CTF questions over CFReDS-derived images. The
-public-domain test set is published with the paper. Three subset
-filters apply to Sanctum's eval:
+We score on a **Sanctum-relevant subset** of DFIR-Metric Module II,
+not the full module. Three filters apply, each documented and
+reviewable in
+[`tests/benchmarks/dfir_metric_subset.py`](../tests/benchmarks/dfir_metric_subset.py):
 
 | Filter | Reason | Effect on N |
 |---|---|---|
-| **Windows-only tasks** | Sanctum is Windows host-based per [Scope](../README.md). Linux-rooted Module III tasks (if any) are excluded. | Reduces N to the Windows subset (`pending — count when filter is applied to the published task list`). |
-| **Memory-resident artifacts excluded** | Memory tools are v2 per Phase B4 descope ([`CHANGELOG.md`](../CHANGELOG.md) `[Unreleased]`). Tasks that require live process listings, network connections, or code-injection markers as the *primary* evidence are excluded. Tasks that mention memory artifacts incidentally but are answerable from on-disk evidence are *included*. | Reduces N by the memory-primary-evidence count (`pending`). |
-| **Five-family-coverable tasks** | Tasks that require artifacts outside Sanctum's five v1 families (e.g., browser history, network capture) are excluded — those are out of scope per [Scope](../README.md). | Reduces N by the cross-family count (`pending`). |
+| **Five-family-coverable** | Tasks must be answerable from the AppCompat / Explorer / BAM / Sysmon / SysMain families that Sanctum's typed tools cover today. Tasks requiring browser history, network capture, memory-resident artifacts, or other out-of-family evidence are excluded. | Reduces N to the family-coverable subset. |
+| **Windows-only** | Sanctum is Windows host-based per [Scope](../README.md). Linux-rooted CTF tasks are excluded. | Reduces N to the Windows subset. |
+| **Single-criterion ground truth** | Sanctum's per-question scorer matches one expected pattern per question; tasks with multi-criterion compound answers are excluded (rather than partial-credited under a different metric, which would be apples-to-oranges with the bare arm). | Reduces N marginally. |
 
-The filtered subset, **N_sanctum**, is the denominator for
-Sanctum's TUS@k score. The filter list is committed alongside
-the eval driver (planned location: `tests/benchmarks/dfir_metric_subset.py`)
-so the reduction is reviewable.
+We also report the Jaccard similarity of the subset against the
+upstream task list as a sanity check that the filter list is
+reproducible (see
+[`tests/benchmarks/test_subset_jaccard_similarity.py`](../tests/benchmarks/test_subset_jaccard_similarity.py),
+opt-in).
 
-We also report N_sanctum as a fraction of the full Module III N —
-so a reader can tell at a glance whether Sanctum is benchmarking
-on 95% of Module III or 5%.
+### Bare-arm fairness
 
-## Sanctum's verdict-tier adaptation
+The "bare" arm gives the same model the same question against the
+same evidence bytes — but as raw `<evidence-untrusted>...
+</evidence-untrusted>`-wrapped bytes in the prompt, with no MCP
+tool surface. This is the direct comparison the README claim turns
+on: *"a forensic system whose hardness comes from the architecture,
+not from the model"*. To keep it fair:
 
-DFIR-Metric expects a single string answer per task. Sanctum
-returns a typed `Finding` with a four-valued tier
-(`DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL`). The
-mapping to TUS@k scoring is explicit:
+- Same model, same temperature (Opus 4.7, default sampling).
+- Same wall-clock and per-question token cap.
+- Same scoring pattern.
+- Same case fixture.
+- Bare arm receives evidence as bytes, hex-encoded if necessary; if
+  the evidence exceeds the bare-arm context budget
+  (`BARE_ARM_TOKEN_LIMIT` in `scripts/run_dfir_metric_eval.py`), the
+  driver emits `<context_overflow>` for that row rather than
+  truncating silently.
 
-| Sanctum tier | TUS@k treatment | Rationale |
-|---|---|---|
-| `FINAL` (≥3 families) | Counted as a committed answer; correctness checked. | Strongest corroboration; the system stands behind the answer. |
-| `CORROBORATED` (2 families) | Counted as a committed answer; correctness checked. | Cross-family agreement = the family gate's success case. |
-| `DRAFT` (1 family) | Counted as **abstention**, not as a wrong answer. | The gate explicitly tells the agent "you don't have enough corroboration to commit"; treating this as a wrong answer would punish honest uncertainty. |
-| `DRAFT_TAMPER_SUSPECTED` (deception signal demoted any tier) | Counted as **abstention**, not as a wrong answer. | Same rationale as DRAFT — the deception layer is signalling "don't trust your own corroboration". |
+The bare arm has **no** abstention vocabulary and no audit-ledger
+context, so its per-row `claim_status` is `null` and its
+`audit_ids` are `()`. The Sanctum arm reports both and the family
+gate drives whether a CORROBORATED, DRAFT, or
+DRAFT_TAMPER_SUSPECTED tier appears.
 
-This produces **two reportable numbers** instead of one:
+### Scoring construction
 
-1. **TUS@k (strict)** — abstention counted as wrong. This is the
-   apples-to-apples comparison against DFIR-Metric's published
-   GPT-4.1 38.52% baseline (which has no abstention vocabulary).
-2. **TUS@k (coverage-adjusted)** — abstention separated from
-   incorrect. We report **precision** (correct ÷ committed) and
-   **coverage** (committed ÷ N_sanctum) separately. A high
-   precision with low coverage is a perfectly reasonable
-   forensic posture; a high coverage with low precision is the
-   GTG-1002 / Sygnia failure mode the architecture is designed
-   against.
+The scorer uses a **single criterion per question** — either a
+case-insensitive substring match or, when prefixed with `~`, a
+regex match (e.g., `~(?i)\bAmcache\b` matches the word `Amcache`
+case-insensitively). Construction rules:
 
-Both numbers are reported. The strict number is the headline; the
-coverage-adjusted pair is the honest expansion.
+- The expected pattern is the smallest substring that uniquely
+  identifies the correct answer in the upstream task corpus.
+- A pattern is "good" if it matches every documented correct
+  answer string for the task and rejects every documented incorrect
+  answer string. Patterns are reviewed in
+  [`tests/benchmarks/dfir_metric_subset.py`](../tests/benchmarks/dfir_metric_subset.py).
 
-## Reproducing the evaluation
+### Cost cap and prompt-cache strategy
 
-The eval driver (planned, **not yet shipped**) lives at:
+- **Cost cap**: `--max-cost-usd` (default `$50`). The driver checks
+  the **projected next-call cost** against the cap **before** issuing
+  the call (`_check_cost_cap_pre_call`); if the next call would
+  push spent + projected ≥ cap, the run halts with
+  `partial=True` and `halt_reason="cost_cap_exceeded"`. This
+  guards against a single expensive call blowing past the cap by
+  orders of magnitude.
+- **Prompt-cache strategy**: `STRATEGY = "interleave"`. We run the
+  arms question-interleaved (arm-A Q1, arm-B Q1, arm-A Q2, …) so
+  the system prompt stays in the 5-minute default cache TTL across
+  both arms. The alternative (`ttl_1h_beta`) requires the
+  `extended-cache-ttl-2025-04-11` beta header and is deferred to
+  avoid a beta dependency for the hackathon submission.
 
-```
-scripts/run_dfir_metric_eval.py
-tests/benchmarks/dfir_metric_subset.py   # the filter list
-tests/benchmarks/expected_outputs/        # per-task expected answers
-```
+### N=3 limitation caveat
 
-The expected reproduction flow:
+Each question is run **N=3 times per arm**, mean and standard
+deviation reported. N=3 is the smallest sample that produces a
+non-degenerate standard deviation; it is **not** sufficient to
+make confident inferences about model variance. The Numbers
+section auto-flags any per-arm `accuracy_std / accuracy_mean >
+0.15` with a `⚠ high variance — interpret with caution` annotation
+(see `scripts/summarize_eval.py::_should_flag_high_variance` and
+`tests/test_eval_driver_unit.py::test_summarize_flags_high_variance`).
+
+### Family-tagging procedure
+
+The five-family tag on each question (AppCompat / Explorer / BAM /
+Sysmon / SysMain) is the load-bearing input to both the subset
+filter and the per-family breakdown in the Numbers table.
+Procedure:
+
+1. **One author** reads each upstream Module II task and assigns
+   one family tag based on the artifact the question primarily
+   asks about (the artifact whose evidence answers the question
+   most directly).
+2. **One pass** — tags are committed in
+   `tests/benchmarks/dfir_metric_subset.py` and not revised after
+   the eval is run. Re-tagging after seeing results would let the
+   scorer re-classify the easy ones into a "Sanctum is good at"
+   family and the hard ones into a "Sanctum is bad at" family,
+   which is exactly the bias the per-family columns exist to
+   surface.
+3. **Single-author bias is visible**: per-family `tagged_count`
+   columns in the Numbers table show the distribution. A tagger
+   who avoided hard families ("we tagged the easy ones") shows up
+   as low `tagged_count` for those families. The reader can spot
+   this without trusting our self-report.
+
+### AC-12 disclaimer — we do not implement TUS@m
+
+We report `sanctum_partial_credit_accuracy`, **not** TUS@m. The
+DFIR-Metric paper defines TUS@m (Cherif et al. §3) as partial
+credit averaged over m scoring criteria per question. We use
+single-criterion exact-match for clarity at hackathon scope; the
+formula is:
+
+    score(q) = 1.0 if scoring_pattern matches predicted else 0.0
+    arm_accuracy = mean(score(q) for q in subset)
+
+This is **binary correctness per question**. Promote to TUS@m for
+paper-grade reporting (multiple criteria per question, partial
+credit averaged). The metric name in the Numbers table is
+`sanctum_partial_credit_accuracy` so the difference from the
+upstream paper is visible inline next to the numbers.
+
+## License & Reproduction
+
+### License posture
+
+DFIR-Metric upstream
+([`github.com/Cherifa-Cherif/DFIR-Metric`](https://github.com/Cherifa-Cherif/DFIR-Metric),
+arXiv:2505.19973) currently ships **without a `LICENSE` file**.
+That's not the same as "all rights reserved" but it's not the same
+as a permissive grant either; we treat it as license-unspecified
+and decline to redistribute the corpus.
+
+Therefore the eval is **runtime-fetch only**:
+
+- The driver does not vendor the DFIR-Metric task corpus into this
+  repo.
+- The fetcher (`scripts/fetch_dfir_metric.py`) downloads the
+  upstream file from the canonical raw URL into a local cache
+  (default: `.cache/dfir-metric/`, gitignored).
+- The fetcher records the upstream `commit_sha` and content
+  `sha256` into the EvalReport JSON so reproductions are
+  identifiable.
+- A judge/reviewer who wants to re-run the eval downloads the
+  upstream corpus themselves; nothing in this repo redistributes
+  it.
+
+If the DFIR-Metric authors prefer a different posture (mirroring
+restrictions, takedown, license clarification), the contact path
+is **`jason.tofte@gmail.com`** — this repo will adjust within 48h
+of a written request.
+
+### Reproduction
 
 ```bash
 # 1. Bootstrap (one-time per host)
@@ -169,130 +215,95 @@ cd find-evil
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 
-# 2. Place the DFIR-Metric Module III task corpus at the canonical path
-#    (the corpus is published with the arXiv paper; not redistributed
-#     in this repo to respect upstream licensing).
-export SANCTUM_DFIR_METRIC_CORPUS=/path/to/dfir_metric_module_iii/
+# 2. Fetch the upstream corpus into the local cache
+python -m scripts.fetch_dfir_metric
 
-# 3. Run the eval — k=4 to match the published GPT-4.1 baseline
-python scripts/run_dfir_metric_eval.py --k 4 --model claude-opus-4-7 \
-    --output reports/eval-$(date +%Y%m%d).json
+# 3. Run the eval (interleaved arms; N=3; cost cap $50)
+python -m scripts.run_dfir_metric_eval \
+    --arm both --n-runs 3 --max-cost-usd 50 \
+    --output-dir reports/
 
-# 4. Inspect the report
-python scripts/summarize_eval.py reports/eval-*.json
+# 4. Render the markdown fragment for ACCURACY.md
+python -m scripts.summarize_eval reports/eval-*.json
 ```
 
-Expected runtime: **`pending`** — depends on Module III task count
-post-filter and per-task wall-clock for the MCP loop. Order-of-
-magnitude estimate: 30–90 minutes for k=4 on the filtered subset
-on a typical laptop, dominated by parser execution + Anthropic API
-latency.
+The report JSON is the source of truth; the markdown fragment in
+the Numbers section below is generated from it via
+`scripts/summarize_eval.py::summarize`. Every Sanctum-arm row
+carries the `audit_ids` list emitted by the typed-tool calls — a
+reviewer can spot-check by reading the audit ledger directly (see
+[`docs/THREAT_MODEL_LEDGER.md`](THREAT_MODEL_LEDGER.md)).
 
-The report JSON is a list of per-task records:
+## Numbers
 
-```json
-{
-  "task_id": "module-iii-task-042",
-  "expected_answer": "psexec.exe",
-  "k": 4,
-  "samples": [
-    {"finding": {"tier": "CORROBORATED", "answer": "psexec.exe", ...}, "audit_ids": [...]},
-    {"finding": {"tier": "CORROBORATED", "answer": "psexec.exe", ...}, "audit_ids": [...]},
-    {"finding": {"tier": "FINAL",        "answer": "psexec.exe", ...}, "audit_ids": [...]},
-    {"finding": {"tier": "DRAFT",        "answer": null,         ...}, "audit_ids": [...]}
-  ],
-  "tus_k_strict": false,
-  "tus_k_coverage_adjusted": {
-    "committed": 3,
-    "correct": 3,
-    "abstained": 1
-  }
-}
-```
+> The first eval run will paste here. **Until that run completes,
+> the table below is a placeholder and the absence of numbers is
+> the message** — the methodology is the artifact.
 
-A third party can verify the report by spot-checking individual
-`audit_ids` against the audit ledger committed alongside the
-report — every Sanctum answer is traceable to the underlying
-parser output via the HMAC-chained ledger ([`docs/THREAT_MODEL_LEDGER.md`](THREAT_MODEL_LEDGER.md)).
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-*.json` -->
 
-## Numbers — pending
+| Arm | accuracy_mean ± std | abstention_rate | false_confidence_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
+|---|---|---|---|---|---|---|---|
+| `sanctum` | `pending` | `pending` | `pending` | `pending` | `pending` | `pending` | `pending` |
+| `bare`    | `pending` | n/a | n/a | `pending` | `pending` | `pending` | `pending` |
 
-The headline table will fill in once the week-3 parser bodies ship
-and the first eval run completes. **Every cell below is currently
-`pending`; do not infer a hidden number.** This is methodology
-publication, not results publication.
+| Arm | Family | tagged_count | correct_count | accuracy |
+|---|---|---|---|---|
+| `sanctum` | `AppCompat` | `pending` | `pending` | `pending` |
+| `sanctum` | `Explorer`  | `pending` | `pending` | `pending` |
+| `sanctum` | `BAM`       | `pending` | `pending` | `pending` |
+| `sanctum` | `Sysmon`    | `pending` | `pending` | `pending` |
+| `sanctum` | `SysMain`   | `pending` | `pending` | `pending` |
+| `bare`    | `AppCompat` | `pending` | `pending` | `pending` |
+| `bare`    | `Explorer`  | `pending` | `pending` | `pending` |
+| `bare`    | `BAM`       | `pending` | `pending` | `pending` |
+| `bare`    | `Sysmon`    | `pending` | `pending` | `pending` |
+| `bare`    | `SysMain`   | `pending` | `pending` | `pending` |
 
-| Metric | Sanctum (Opus 4.7) | DFIR-Metric baseline (GPT-4.1) | Notes |
-|---|---|---|---|
-| **TUS@4 (strict)** | `pending` | 38.52% | Abstention = wrong. Direct apples-to-apples. |
-| **TUS@4 precision** | `pending` | n/a | Correct ÷ committed. No abstention vocabulary in the GPT-4.1 baseline. |
-| **TUS@4 coverage** | `pending` | n/a | Committed ÷ N_sanctum. |
-| **Family-gate abstention rate** | `pending` | n/a | Fraction of tasks where the gate emitted DRAFT or DRAFT_TAMPER_SUSPECTED. |
-| **Deception-signal precision** | `pending` | n/a | Of cases where Sanctum emits DRAFT_TAMPER_SUSPECTED, fraction where the underlying CFReDS image is in fact tampered. Measured against the synthetic adversarial corpus in `tests/adversarial/` (week 6). |
-| **N_sanctum / N_module_iii** | `pending` | n/a | Filter ratio after Windows-only / no-memory / five-family-coverable filters. |
-
-The eval driver will be added in a separate PR once parser bodies
-land — that PR will overwrite this table with real numbers and
-attach the per-task report JSON as evidence. **Until then, the
-absence of numbers is the message** — the methodology is the
-artifact, and the numbers will be published as soon as they exist.
+<!-- END pasted fragment -->
 
 ## Honest limits
 
-1. **Parser blocker.** No numbers can be produced before week 3
-   parser bodies ship. The current parser layer raises
-   `PartialImplementationError` in production and only accepts
-   sidecar fixtures under `SANCTUM_USE_FIXTURE_SIDECAR=1` — see
-   [`docs/REPRODUCTION.md`](REPRODUCTION.md) §"Known limitations".
-   Running this methodology against the fixture-sidecar path
-   would produce numbers that reflect the fixtures, not real
-   parsing.
-2. **Model coupling.** Numbers reported here are for **Claude
-   Opus 4.7 only**, the reference configuration per
-   [`docs/LLM_AGNOSTIC.md`](LLM_AGNOSTIC.md). Other models would
-   inherit the architectural guarantees but produce different
-   accuracy numbers; v1 does not run a multi-model accuracy
-   comparison. The DFIR-Metric paper reports multiple models
-   (GPT-4.1, Llama, Gemini); apples-to-apples cross-model claims
-   require running the full multi-model matrix, which is a v2
-   followup.
-3. **Subset bias.** The Windows-only / no-memory /
-   five-family-coverable filter reduces N. If the filter
-   accidentally removes tasks that *would* be solvable by
-   Sanctum's surface, the reported number under-states the
-   system's accuracy. The filter list is committed and reviewable
-   so this bias is auditable. A v2 followup would expand the
-   five-family scheme to cover what the filter currently excludes.
-4. **TUS@k consistency assumption.** The TUS@k metric assumes
-   k independent samples; with `temperature=0` (Opus 4.7
-   reference configuration) the four samples are nearly
-   identical, which inflates TUS@k toward pass@1 semantics. The
-   DFIR-Metric paper notes the same assumption holds for any
-   greedy-decoding configuration in its baseline; the comparison
-   stays fair as long as both sides use the same sampling regime.
-   We will report the sampling configuration alongside the
-   number.
-5. **Question coverage.** DFIR-Metric Module III's task
-   distribution may not match the question distribution Sanctum
-   sees in real IR engagements. The benchmark is a *proxy* for
-   in-the-wild accuracy, not a guarantee of it. Sanctum's
-   architectural posture (refuse rather than guess; surface
-   provenance for every claim) is designed to degrade gracefully
-   on out-of-distribution questions; the eval cannot prove that
-   directly.
+1. **N=3.** Three runs per question is the smallest sample that
+   surfaces a non-zero standard deviation; it is not statistically
+   sufficient. Cells with `accuracy_std / accuracy_mean > 0.15`
+   are auto-flagged with `⚠ high variance — interpret with
+   caution`. Promote to N≥10 for paper-grade reporting.
+2. **Subset bias.** The five-family / Windows-only /
+   single-criterion filter reduces N. If the filter accidentally
+   removes tasks Sanctum would have solved, the reported number
+   under-states the system's accuracy. The filter list is
+   committed and reviewable.
+3. **Single-author tagging.** Family tags are assigned by one
+   author in one pass. The per-family `tagged_count` column makes
+   the distribution visible so a reader can spot a "we tagged the
+   easy ones" pattern. Promote to multi-author adjudication for
+   paper-grade reporting.
+4. **Model coupling.** Numbers are for **Claude Opus 4.7 only**.
+   Other models inherit the architectural guarantees but produce
+   different accuracy numbers; v1 does not run a multi-model
+   matrix. See [`docs/LLM_AGNOSTIC.md`](LLM_AGNOSTIC.md).
+5. **Single-criterion scoring.** We do not implement TUS@m. A
+   question that has multiple acceptable answer phrasings or
+   multi-criterion compound answers is filtered out of the subset
+   rather than partial-credited. Promote to TUS@m for paper-grade
+   comparison against the upstream baseline.
+6. **Bare-arm context overflow.** The bare arm receives evidence
+   as bytes; if the evidence exceeds `BARE_ARM_TOKEN_LIMIT`, the
+   driver records `<context_overflow>` for that row. This is a
+   correctness-preserving choice (we report what happened) but
+   means very large evidence files systematically penalise the
+   bare arm in the comparison.
 
 ## Followups
 
-- [ ] Ship the eval driver alongside week-3 parser bodies. Single
-      PR — driver + filter list + first run's report JSON
-      committed under `reports/`.
-- [ ] Populate the §"Numbers" table; revise this section's
-      "pending" cells to actual values; add a paragraph
-      summarising the headline finding.
-- [ ] Multi-model matrix (v2). Re-run the eval against Sonnet
-      4.6 and Haiku 4.5 to surface the model-quality dependence
-      that [`docs/LLM_AGNOSTIC.md`](LLM_AGNOSTIC.md) flags as
-      currently un-validated.
-- [ ] Cross-benchmark sanity check (v2). Re-run against a second
-      forensic-LLM benchmark if one ships before submission;
-      single-benchmark numbers are inherently fragile.
+- [ ] Run the first eval; populate the Numbers table.
+- [ ] Multi-model matrix (v2) — re-run against Sonnet 4.6 and
+      Haiku 4.5 to surface the model-quality dependence.
+- [ ] Multi-author family tagging (v2) — adjudicate disagreements,
+      report Cohen's κ.
+- [ ] Promote to TUS@m (v2) — multi-criterion partial credit, for
+      apples-to-apples comparison against the upstream paper's
+      published baselines.
+- [ ] N≥10 (v2) — statistically sufficient sample for variance
+      claims.

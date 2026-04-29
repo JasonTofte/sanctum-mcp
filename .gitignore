@@ -22,6 +22,19 @@ ledger/
 audit/
 *.jsonl
 
+# DFIR-Metric eval cache + run reports — license-clean reproduction.
+# Upstream JSON (license: null) lives only on contributor machines; the
+# public repo carries Sanctum's derivative metadata in
+# tests/benchmarks/dfir_metric_subset.py. The fixture-smoke report is
+# carved back in so AC-4 schema-reference can ship.
+.cache/dfir-metric/
+reports/eval-*.json
+!reports/eval-*-fixture-smoke.json
+# Carve-out: this fixture is the load-bearing pre-extension ledger for AC-7
+# (T-3/T-4 oracle). Generated once via scripts/gen_pre_instrumentation_fixture.py
+# and committed so verify_chain backwards-compat is testable on a fresh checkout.
+!tests/fixtures/ledger_pre_instrumentation.jsonl
+
 # Python
 __pycache__/
 *.py[cod]
@@ -46,6 +59,10 @@ build/
 *.pem
 *.key
 secrets/
+# Carve-out: AC-7 fixture HMAC key — public, deterministic, test-only
+# (paired with tests/fixtures/ledger_pre_instrumentation.jsonl above).
+# A fresh checkout needs this to verify the pre-extension chain.
+!tests/fixtures/ledger_pre_instrumentation.key
 
 # OS / editor
 .DS_Store
