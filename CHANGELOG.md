@@ -4,6 +4,88 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — universal payload-offload for typed MCP tools (2026-04-29)
+
+Closes the silent-corruption surface from `anthropics/claude-code#36319`
+where the MCP stdio transport silently drops JSON-RPC responses
+> ~800–1100 B. Sanctum's typed tools (`get_amcache`, `claim_finding`)
+return forensic evidence dumps that exceed this and would otherwise
+truncate without an `isError`.
+
+Every typed tool now writes its sanitized full payload **write-once** to
+`$SANCTUM_OUTPUT_ROOT/<case_id>/<audit_id>/<tool>.json` (mode `0o444`,
+`O_CREAT|O_EXCL|O_NOFOLLOW`) and returns only a short summary (< 1024 B)
+wrapped in `<evidence-untrusted>`. The caller reads the full payload via
+Claude Code's generic `Read` tool. AC-13 fixes the inline summary to
+≤ 11 keys (`audit_id`, `case_id`, `tool`, `rowcount`, `input_ref`,
+`payload_ref`, `pre/post_sanitization_sha256`, plus three optional
+`tier`/`n_distinct_families`/`demoted_for_tamper` for `claim_finding`) —
+the agent-authored `hypothesis` and the full row payload live only in
+the offloaded file, quarantined from the inline LLM-visible response.
+
+Architecture (decisions 1–5 = A, A, A, A, C; user-approved 2026-04-28):
+
+- **`SANCTUM_OUTPUT_ROOT`** is the new env var. Server refuses to start
+  if unset OR if its `realpath` resolves under `SANCTUM_CASES_ROOT`
+  (read-only evidence mount) — fail-closed parity with
+  `_validate_evidence_mount`.
+- **`audit_id` is pre-minted in the tool wrapper** (`uuid.uuid4()`) and
+  threaded into both the on-disk path and `audit.append_entry(audit_id=…)`.
+  On-disk and ledger keys align by construction, not by happy coincidence.
+  `audit_id is None` fallback in `append_entry` preserves backward compat
+  for non-offload callers.
+- **HMAC chain covers `payload_ref`**: `_line_hash_for` hashes the entry
+  dict, which conditionally includes `payload_ref` when present. A
+  swapped on-disk file with a forged `payload_ref.sha256` to match
+  breaks `verify_chain`.
+- **Forward-compat omit-not-null**: legacy ledgers (no `payload_ref` key)
+  verify bytewise-identically post-feature. `LedgerEntry.to_jsonl`
+  emits the key only when not None — emitting `"payload_ref": null`
+  would have silently broken `verify_chain` on every legacy entry.
+  `verify_chain` return contract is now
+  `(ok, first_bad_line_1based, first_bad_audit_id)`.
+- **`L_max` cap applies pre-offload**: oversize payloads (> 16 MiB) raise
+  `InputTooLargeError` from `sanitize()` before any 0o444 file lands or
+  any ledger entry is appended. Offload is for the 1 KB → ~5 MB band,
+  not a regex-DoS escape hatch.
+- **Universal offload via `_emit_offloaded_response()`**: single helper
+  in `server.py` is the only entry point for offloaded responses. New
+  tool wrappers use the helper or fail review.
+
+**Path-traversal allowlist**: `case_id` (operator-supplied), `audit_id`
+(server-minted UUID4), and `tool` (server-internal closed enum) all run
+the full structural + character-class check on the raw input AND on the
+NFKC-normalised form. Rejects `..`, `/`, leading `.`, NUL, control chars
+U+0000–U+001F + U+007F, and the named bidi/zero-width set: U+202E (RLO),
+U+2066 (LRI), U+200B–U+200D (ZWSP/ZWNJ/ZWJ), U+FEFF (BOM). FULLWIDTH
+SOLIDUS (U+FF0F → `/` under NFKC) is rejected post-normalisation.
+
+**Durability**: `os.fdatasync(payload_fd)` then `os.fsync(parent_dir_fd)`
+before returning. `fchmod` re-asserts `0o444` against unusual umask.
+
+**Crash-window contract** (AC-9): if `append_entry` raises after the
+payload write succeeds, the file is an orphan — mode `0o444` makes it
+impossible to rewrite from the same process. The helper logs ERROR with
+the orphan path before re-raising so the operator can correlate; no
+auto-delete.
+
+Test coverage: 334 passed, 6 skipped (was 333 before this PR; T-16/AC-6
+L_max non-bypass added at integration level as a regression canary that
+pins the ordering invariant `sanitize → write_payload → append_entry`).
+
+Files: `src/sanctum/payload.py` (new), `src/sanctum/audit.py` (extends
+`append_entry` with optional `payload_ref` and `audit_id` kwargs;
+forward-compat omit-not-null), `src/sanctum/finding.py` (split into
+`evaluate_claim` for pure gate + `claim_finding` for ledger-writing),
+`src/sanctum/server.py` (universal `_emit_offloaded_response` helper,
+startup guards, `case_id` format validator).
+
+References:
+- ADR: `docs/ADR_PAYLOAD_OFFLOAD.md` (extracted post-merge).
+- Threat model: `docs/THREAT_MODEL_LEDGER.md` "Ledger field roles" table
+  now lists `payload_ref` as HMAC-keyed.
+- Upstream issue: <https://github.com/anthropics/claude-code/issues/36319>.
+
 ### Security — error-channel scrub gaps closed at server entrypoint and parser boundaries (2026-04-28)
 
 The `sanctum.sanitize.sanitize()` pipeline and the `<evidence-untrusted>`

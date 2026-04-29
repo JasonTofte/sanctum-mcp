@@ -46,22 +46,43 @@ assumptions, so the distinction is named here explicitly.
 | `input_ref.sha256`            | plain SHA-256 | Source-file content fingerprint at call time     | No — auditing aid only |
 | `pre_sanitization_sha256`     | plain SHA-256 | Tool-output content fingerprint, pre-sanitize    | No — auditing aid only |
 | `post_sanitization_sha256`    | plain SHA-256 | Tool-output content fingerprint, post-sanitize   | No — auditing aid only |
+| `payload_ref` (dict)          | HMAC-SHA-256 (dict-as-input) | Reference to write-once offloaded payload file (`path`, `sha256`, `bytes`, `format`) | **Yes** — the dict is hashed into `_line_hash_for`'s input, so a forged `payload_ref.sha256` to match a swapped on-disk file breaks `verify_chain`. Optional field — legacy entries omit the key entirely (omit-not-null forward-compat); see `src/sanctum/audit.py` § "payload_ref forward-compat". |
 
-The HMAC-keyed `line_hash`/`prev_hash` pair is the **security
-boundary**. The four plain-SHA-256 content fields are
-**forensic-traceability aids**: they let an analyst verify what bytes
-were sanitized into what, and detect downstream substitution of the
-input file — but an attacker who holds the HMAC key can rewrite a
-content hash freely (and rewriting the line_hash to match). Treating
+The HMAC-keyed `line_hash`/`prev_hash` pair plus `payload_ref` (when
+present) form the **security boundary**. The four plain-SHA-256 content
+fields are **forensic-traceability aids**: they let an analyst verify
+what bytes were sanitized into what, and detect downstream substitution
+of the input file — but an attacker who holds the HMAC key can rewrite
+a content hash freely (and rewrite the `line_hash` to match). Treating
 content fingerprints as if they were integrity primitives understates
 the trust placed in the HMAC key and overstates the trust placed in
 the content fields. The two roles are complementary, not redundant.
 
+`payload_ref` is the bridge between the on-disk evidence file (mode
+`0o444`, write-once via `O_CREAT|O_EXCL|O_NOFOLLOW`) and the ledger
+entry that authorises it: an attacker who swaps the JSON contents of
+the offloaded file at `<SANCTUM_OUTPUT_ROOT>/<case>/<audit>/<tool>.json`
+can detect the mismatch by re-hashing the file and comparing to
+`payload_ref.sha256`, but to *silently* legitimise the swap they would
+also need to rewrite `payload_ref.sha256` in the ledger entry — and
+that rewrite breaks the HMAC chain because the dict is hashed into
+`_line_hash_for`'s input.
+
 This mirrors the in-code clarification at the top of
 [`src/sanctum/audit.py`](../src/sanctum/audit.py): *"The non-chain
 hashes (`args_hash`, `input_ref.sha256`, `pre_sanitization_sha256`,
-`post_sanitization_sha256`) remain plain SHA-256 — they are content
-fingerprints, not integrity links."*
+`post_sanitization_sha256`, `payload_ref.sha256`) remain plain
+SHA-256 — they are content fingerprints, not integrity links. The
+`line_hash` (HMAC-SHA-256) is what binds these fingerprints into the
+chain."*
+
+`payload_ref.sha256` is in the non-chain-hash list because the SHA-256
+itself is plain (it's a content digest of the offloaded JSON), but the
+**enclosing `payload_ref` dict** is HMAC-covered through
+`_line_hash_for` — so an attacker cannot silently rewrite the dict's
+`sha256` to legitimise a swapped on-disk file without breaking
+`verify_chain`. The "fingerprint vs integrity link" distinction lives
+at the field level; the chain coverage lives at the entry-dict level.
 
 ## Attack model — rung 1 (HMAC chain)
 
