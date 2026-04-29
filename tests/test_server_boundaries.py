@@ -211,9 +211,9 @@ def test_parse_amcache_stub_is_absent_from_server_module(
     A surviving dead stub re-opens the attack surface MED-1 closes.
     """
     importlib.reload(server)
-    assert not hasattr(server, "_parse_amcache_stub"), (
-        "_parse_amcache_stub still exists on server module — stub was not deleted"
-    )
+    assert not hasattr(
+        server, "_parse_amcache_stub"
+    ), "_parse_amcache_stub still exists on server module — stub was not deleted"
 
 
 # ─── T-5: AC-3 — empty sidecar → rows==[] and rowcount==0 ───────────────────
@@ -240,16 +240,16 @@ def test_get_amcache_empty_sidecar_returns_empty_rows_and_zero_rowcount(
 
     # Verify ledger rowcount agrees.
     last_entry = json.loads(ledger_path.read_text().strip().splitlines()[-1])
-    assert last_entry["rowcount"] == 0, (
-        f"ledger rowcount must be 0 for empty events, got {last_entry['rowcount']!r}"
-    )
+    assert (
+        last_entry["rowcount"] == 0
+    ), f"ledger rowcount must be 0 for empty events, got {last_entry['rowcount']!r}"
 
     # Negative-sample: stub-shape keys must not appear even in a fabricated 1-row result.
     for stub_key in ("source", "note", "hve_size_bytes", "hve_sha256"):
         for row in body["rows"]:
-            assert stub_key not in row, (
-                f"stub key {stub_key!r} found — stub may still be returning a fabricated row"
-            )
+            assert (
+                stub_key not in row
+            ), f"stub key {stub_key!r} found — stub may still be returning a fabricated row"
 
 
 # ─── T-10: AC-5 — JSON round-trip and ISO-8601 timestamp ─────────────────────
@@ -344,6 +344,7 @@ def test_parse_amcache_stub_literal_absent_from_server_source() -> None:
     comment, or ``# legacy`` annotation survives.
     """
     import sanctum.server as _server_mod
+
     server_source = Path(_server_mod.__file__).read_text(encoding="utf-8")
     assert "_parse_amcache_stub" not in server_source, (
         "The literal string '_parse_amcache_stub' still appears in server.py — "
