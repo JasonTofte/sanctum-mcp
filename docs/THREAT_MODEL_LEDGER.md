@@ -23,9 +23,19 @@ a strictly stronger attacker than the previous.
 | 2 | rung 1 + RFC 3161 TSA stamp of ledger head (this doc) | attacker with ledger write access **and** HMAC key | attacker who also compromises the TSA signing cert |
 | 3 | rung 2 + public Merkle-tree witness (Sigstore Rekor) | rung-2 attacker plus TSA compromise | attacker who compromises both TSA and public log (practically infeasible) |
 
-Rung 2 is the tier required for court-admissible chain of custody under
-FRE 902(13)/(14). Rung 3 is the roadmap item flagged in
+Rung 2 ensures that even an attacker who compromises the HMAC key cannot
+silently rewrite history without also defeating an external time-witness.
+The IR-accuracy property this provides is *post-hoc audit_id forgery is
+detectable* — which is what `claim_finding` relies on when it refuses
+claims whose audit_ids don't resolve to the on-disk ledger. Rung 3 is the
+roadmap item flagged in
 [FAILURE_MODES State 5](FAILURE_MODES.md#state-5-audit-ledger-tampered-post-hoc).
+
+> Aside on legal admissibility: rung 2 also satisfies the cryptographic
+> requirements named in FRE 902(13)/(14) for self-authenticating records,
+> but Sanctum is positioned for IR not prosecution — the design driver is
+> forgery-resistant evidence-citation for the family-corroboration gate.
+> See [README §"Limits of structural defenses"](../README.md#limits-of-structural-defenses).
 
 Sanctum currently ships rung 2. Before this document landed the code was
 at rung 0 despite the README claiming rung 1 — the single biggest

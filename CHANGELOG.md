@@ -4,6 +4,46 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — DFIR-Metric eval driver (Phase 2.1, 2026-04-29)
+
+First quantitative IR-accuracy measurement infrastructure comparing
+Sanctum-mediated vs bare-LLM on the DFIR-Metric Module II CTF
+(arXiv:2505.19973) Sanctum-relevant subset.
+
+New files:
+- `scripts/run_dfir_metric_eval.py` — end-to-end eval driver: spawns MCP
+  stdio subprocess, drives 8-turn agentic loop, extracts `claim_status`
+  and `audit_ids`, SIGTERM→SIGKILL teardown, emits `EvalReport` JSON.
+  AC-11: handshake-timeout/call-hang/crash all produce per-row markers
+  (`<subprocess_timeout>`, `<subprocess_crash>`) without aborting the run.
+  AC-6: `STRATEGY="interleave"` keeps prompt-cache warm across arms.
+  AC-12: metric named `sanctum_partial_credit_accuracy`, not TUS@m.
+  H3 fix: Anthropic SDK errors (`RateLimitError`, `APIError`, etc.) convert
+  to `<api_error>` rows so a transient API failure doesn't abort the eval.
+  M3 fix: `stderr=DEVNULL` prevents 64KB kernel-buffer deadlock from MCP
+  server logging output.
+- `scripts/summarize_eval.py` — emits ACCURACY.md markdown fragment from
+  EvalReport JSON: per-arm summary table + per-family breakdown +
+  high-variance ⚠ annotation + AC-12 metric-name disclaimer.
+- `scripts/dfir_metric_subset.py` — runtime-fetches DFIR-Metric repo,
+  filters to Sanctum-relevant 5-family subset (AC-3/AC-5).
+- `tests/benchmarks/test_dfir_metric_smoke.py` — 6 smoke tests covering
+  AC-1a/AC-1b/AC-2/AC-4/AC-8/AC-11 with `MockAnthropicClient` (no live
+  API). `_spawned_procs` + `_leaked_pids` module registries for AC-1b
+  zero-leak assertion.
+- `docs/ACCURACY.md` — Methodology section (subset-selection, scoring
+  construction, N=3 caveat, single-author bias disclosure, AC-12
+  disclaimer) before Numbers placeholder; License & Reproduction section.
+- `docs/ADR_EVAL_DRIVER.md` — 4 ADRs: interleave strategy, metric naming,
+  pre-call cost cap, API error row markers.
+
+Security fixes in this batch:
+- H1: Deleted dead `_read_claim_finding_status` (cargo-cult dead logic).
+- H2: `_leaked_pids` set + ERROR log on SIGKILL second-timeout in
+  `_MCPClient.close()` for explicit zombie detection (AC-1b).
+- M1: Cost-cap projection now includes `cache_write` ($6.25/MTok) to
+  avoid ~25% underestimate on cache-cold calls.
+
 ### Added — universal payload-offload for typed MCP tools (2026-04-29)
 
 Closes the silent-corruption surface from `anthropics/claude-code#36319`
@@ -85,6 +125,55 @@ References:
 - Threat model: `docs/THREAT_MODEL_LEDGER.md` "Ledger field roles" table
   now lists `payload_ref` as HMAC-keyed.
 - Upstream issue: <https://github.com/anthropics/claude-code/issues/36319>.
+
+### Documentation — IR-accuracy positioning correction (2026-04-28)
+
+Internal positioning correction. The user-facing framing across five
+passages led with "evidence spoliation" / "court-admissible chain of
+custody" / "tamper-evident to non-repudiable" — legal-admissibility
+language that misrepresented the design driver. Sanctum's mechanisms
+(HMAC chain, RFC 3161 notary, read-only mounts, family-corroboration
+gate, sanitization) all serve **IR-accuracy** purposes: detecting
+audit_id forgery so `claim_finding` can refuse fabricated citations,
+preventing the LLM from corrupting evidence mid-investigation, gating
+single-family hypotheses to a DRAFT verdict. The legal framing was a
+downstream property of those mechanisms, not the goal — leading with
+it overclaimed scope (Sanctum is positioned for IR, not prosecution)
+while underclaiming the IR-accuracy primitive that is the actual
+differentiator at machine speed.
+
+Reframe = words, not code. Zero source-code changes; every test still
+passes; section anchors and the underlying cryptographic facts (HMAC
+chain definition, RFC 3161 mechanics, posture rungs, key-management
+guidance) are preserved verbatim in deeper sections.
+
+Files touched:
+- `README.md` (lines 13-15) — failure-mode headline reorders to lead
+  with "Confident-wrong findings under attacker-influenced evidence"
+  (the IR-accuracy primitive); "Evidence spoliation" replaced with
+  "Evidence loss / anti-forensic destruction" as #2.
+- `README.md` (line 132, scoring table) — "Audit Trail Quality" row
+  reworded to lead with "evidence-citation forgery detection" framing;
+  rubric-axis labels unchanged.
+- `README.md` (lines 244-249, Valhuntir comparison) — three numbered
+  differentiators reordered: `claim_finding` family gate promoted to
+  #1 (was #2), hash-locked install to #2 (was #3), HMAC ledger to #3
+  (was #1). Phrase "raises the ledger from tamper-evident to
+  non-repudiable" replaced with "extends forgery-detection across
+  HMAC-key compromise."
+- `docs/THREAT_MODEL_LEDGER.md` (lines 26-27) — lead paragraph leads
+  with audit_id-forgery-detection framing; FRE 902(13)/(14) language
+  demoted to a one-paragraph aside that explicitly states "Sanctum is
+  positioned for IR not prosecution."
+- `CLAUDE.md` (invariant 3) — leads with "`claim_finding` cites
+  `audit_ids[]`; the gate refuses unresolved citations" framing. The
+  cryptographic facts (HMAC-SHA-256 chain, mandatory key, server-
+  refuses-to-start-if-unset) are preserved unmodified after the lead.
+
+Mechanisms whose framed *purpose* changed (cryptographic substrate
+unchanged): HMAC chain, RFC 3161 notary, audit ledger. Mechanisms
+whose framing was already on-message: family-corroboration gate,
+sanitization, read-only mounts.
 
 ### Security — error-channel scrub gaps closed at server entrypoint and parser boundaries (2026-04-28)
 
