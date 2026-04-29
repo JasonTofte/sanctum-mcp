@@ -248,14 +248,16 @@ def test_unknown_tool_in_referenced_entry_refused(
 def test_finding_appends_a_ledger_entry_and_extends_chain(ledger: Path) -> None:
     aids = [_record("get_amcache"), _record("get_prefetch")]
     f = claim_finding(case_id="case-1", hypothesis="X ran", audit_ids=aids)
-    ok, n, bad = audit.verify_chain(ledger)
+    # Position 2 of verify_chain's return is "first_bad_line_1based" (None on
+    # clean), not a line count, after the AC-4/AC-10 contract change. The
+    # 2-get + 1-claim count is now asserted via direct file read below.
+    ok, first_bad, bad = audit.verify_chain(ledger)
     assert ok is True
     assert bad is None
-    # 2 get_* entries + 1 claim_finding entry
-    assert n == 3
-    # The Finding's audit_id is the ledger entry it wrote
+    assert first_bad is None
     with ledger.open("r", encoding="utf-8") as fh:
         lines = [line for line in fh if line.strip()]
+    assert len(lines) == 3, "2 get_* entries + 1 claim_finding entry"
     last_entry_audit_id = __import__("json").loads(lines[-1])["audit_id"]
     assert last_entry_audit_id == f.audit_id
 

@@ -36,13 +36,24 @@ Canonical entry format (one line of JSONL, ``ensure_ascii=False``,
       "pre_sanitization_sha256": "...",
       "post_sanitization_sha256": "...",
       "rowcount": 1247,
+      "payload_ref": {"path": "...", "sha256": "...", "bytes": 4096,
+                      "format": "application/json"},
       "prev_hash": "<HMAC-SHA256 line_hash of previous entry>",
       "line_hash": "<HMAC-SHA256 of this entry excluding line_hash itself>"
     }
 
+The ``payload_ref`` field is OPTIONAL — entries written before the
+payload-offload feature OR by callers that don't produce an offload
+payload OMIT the key entirely (the canonical bytes do NOT contain
+``"payload_ref": null``). This omit-not-null contract preserves
+bytewise hash compatibility with pre-feature ledgers; see AC-10 in
+the payload-offload plan.
+
 The non-chain hashes (``args_hash``, ``input_ref.sha256``,
-``pre_sanitization_sha256``, ``post_sanitization_sha256``) remain plain
-SHA-256 — they are content fingerprints, not integrity links.
+``pre_sanitization_sha256``, ``post_sanitization_sha256``,
+``payload_ref.sha256``) remain plain SHA-256 — they are content
+fingerprints, not integrity links. The ``line_hash`` (HMAC-SHA-256)
+is what binds these fingerprints into the chain.
 
 References:
 - NIST SP 800-86 §4 — chain of custody.
@@ -162,28 +173,31 @@ class LedgerEntry:
     rowcount: int | None
     prev_hash: str
     line_hash: str
+    # Forward-compat sentinel: ``None`` means "this entry was written by a
+    # caller that did not produce an offload payload" — the canonical JSON
+    # form OMITS the ``payload_ref`` key entirely so legacy ledgers (entries
+    # that pre-date this field) hash bytewise-identically post-feature.
+    # Emitting ``"payload_ref": null`` would silently break ``verify_chain``
+    # on every pre-feature line. See AC-10.
+    payload_ref: dict[str, Any] | None = None
 
     def to_jsonl(self) -> str:
-        return (
-            json.dumps(
-                {
-                    "audit_id": self.audit_id,
-                    "ts": self.ts,
-                    "case_id": self.case_id,
-                    "tool": self.tool,
-                    "args_hash": self.args_hash,
-                    "input_ref": self.input_ref,
-                    "pre_sanitization_sha256": self.pre_sanitization_sha256,
-                    "post_sanitization_sha256": self.post_sanitization_sha256,
-                    "rowcount": self.rowcount,
-                    "prev_hash": self.prev_hash,
-                    "line_hash": self.line_hash,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            + "\n"
-        )
+        body: dict[str, Any] = {
+            "audit_id": self.audit_id,
+            "ts": self.ts,
+            "case_id": self.case_id,
+            "tool": self.tool,
+            "args_hash": self.args_hash,
+            "input_ref": self.input_ref,
+            "pre_sanitization_sha256": self.pre_sanitization_sha256,
+            "post_sanitization_sha256": self.post_sanitization_sha256,
+            "rowcount": self.rowcount,
+            "prev_hash": self.prev_hash,
+            "line_hash": self.line_hash,
+        }
+        if self.payload_ref is not None:
+            body["payload_ref"] = self.payload_ref
+        return json.dumps(body, ensure_ascii=False, sort_keys=True) + "\n"
 
 
 def require_hmac_key() -> bytes:
@@ -276,12 +290,26 @@ def append_entry(
     pre_sanitization_sha256: str,
     post_sanitization_sha256: str,
     rowcount: int | None = None,
+    payload_ref: dict[str, Any] | None = None,
+    audit_id: str | None = None,
 ) -> LedgerEntry:
     """Append one entry and return its populated :class:`LedgerEntry`.
 
     Writes atomically via rename to avoid partial-line corruption on crash.
     Raises :class:`RuntimeError` if ``SANCTUM_LEDGER_HMAC_KEY`` is unset —
     the ledger never silently downgrades to plain-SHA-256.
+
+    Optional kwargs:
+
+    - ``payload_ref``: when not None, the dict is HMAC-covered as part of
+      the ``line_hash`` input — a swapped offload payload (file content
+      drifts from ``payload_ref.sha256``) breaks ``verify_chain``. When
+      None, the canonical JSON form OMITS the key (not null-valued) so
+      legacy ledgers verify bytewise-identically post-feature (AC-10).
+    - ``audit_id``: callers (e.g. ``_emit_offloaded_response``) pre-mint
+      the UUID so the on-disk offload path and the ledger entry share the
+      same key by construction (AC-7). When None, the ID is minted here
+      to preserve pre-feature behaviour for legacy callers.
     """
 
     key = require_hmac_key()
@@ -290,11 +318,11 @@ def append_entry(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     prev_hash = _last_line_hash(path)
-    audit_id = str(uuid.uuid4())
+    resolved_audit_id = audit_id if audit_id is not None else str(uuid.uuid4())
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     raw: dict[str, Any] = {
-        "audit_id": audit_id,
+        "audit_id": resolved_audit_id,
         "ts": ts,
         "case_id": case_id,
         "tool": tool,
@@ -305,6 +333,11 @@ def append_entry(
         "rowcount": rowcount,
         "prev_hash": prev_hash,
     }
+    # Conditional include — see ``LedgerEntry.payload_ref`` doc for the
+    # forward-compat rationale. ``_line_hash_for`` hashes the dict it sees,
+    # so omitting the key here also omits it from the HMAC input.
+    if payload_ref is not None:
+        raw["payload_ref"] = payload_ref
     raw["line_hash"] = _line_hash_for(raw, key=key)
     entry = LedgerEntry(**raw)
 
@@ -328,35 +361,41 @@ def append_entry(
     return entry
 
 
-def verify_chain(path: Path | None = None) -> tuple[bool, int, str | None]:
+def verify_chain(path: Path | None = None) -> tuple[bool, int | None, str | None]:
     """Walk the ledger and verify HMAC-chain integrity.
 
-    Returns ``(ok, lines_scanned, first_bad_audit_id)``. ``first_bad_audit_id``
-    is ``None`` when the chain is intact. A verification failure means either
-    (a) a past entry was mutated, (b) the HMAC key differs from the one used
-    at write time, or (c) the chain was re-ordered.
+    Returns ``(ok, first_bad_line_1based, first_bad_audit_id)``:
+
+    - On a clean (or missing/empty) ledger: ``(True, None, None)``.
+    - On HMAC drift at line K (1-based): ``(False, K, audit_id_at_line_K)``.
+
+    A verification failure means either (a) a past entry was mutated
+    (including any covered field — ``payload_ref`` is HMAC-covered, so
+    swapping a payload's SHA-256 breaks verification — see AC-4), (b) the
+    HMAC key differs from the one used at write time, or (c) the chain was
+    re-ordered.
 
     Requires ``SANCTUM_LEDGER_HMAC_KEY`` to be set, just like :func:`append_entry`.
     """
 
     path = path or _ledger_path()
     if not path.exists():
-        return True, 0, None
+        return True, None, None
 
     key = require_hmac_key()
     prev = _GENESIS_PREV
-    scanned = 0
+    line_no = 0
     with path.open("r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
                 continue
-            scanned += 1
+            line_no += 1
             entry = json.loads(line)
             if entry.get("prev_hash") != prev:
-                return False, scanned, entry.get("audit_id")
+                return False, line_no, entry.get("audit_id")
             recomputed = _line_hash_for(entry, key=key)
             if entry.get("line_hash") != recomputed:
-                return False, scanned, entry.get("audit_id")
+                return False, line_no, entry.get("audit_id")
             prev = entry["line_hash"]
-    return True, scanned, None
+    return True, None, None
