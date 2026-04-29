@@ -86,6 +86,55 @@ References:
   now lists `payload_ref` as HMAC-keyed.
 - Upstream issue: <https://github.com/anthropics/claude-code/issues/36319>.
 
+### Documentation — IR-accuracy positioning correction (2026-04-28)
+
+Internal positioning correction. The user-facing framing across five
+passages led with "evidence spoliation" / "court-admissible chain of
+custody" / "tamper-evident to non-repudiable" — legal-admissibility
+language that misrepresented the design driver. Sanctum's mechanisms
+(HMAC chain, RFC 3161 notary, read-only mounts, family-corroboration
+gate, sanitization) all serve **IR-accuracy** purposes: detecting
+audit_id forgery so `claim_finding` can refuse fabricated citations,
+preventing the LLM from corrupting evidence mid-investigation, gating
+single-family hypotheses to a DRAFT verdict. The legal framing was a
+downstream property of those mechanisms, not the goal — leading with
+it overclaimed scope (Sanctum is positioned for IR, not prosecution)
+while underclaiming the IR-accuracy primitive that is the actual
+differentiator at machine speed.
+
+Reframe = words, not code. Zero source-code changes; every test still
+passes; section anchors and the underlying cryptographic facts (HMAC
+chain definition, RFC 3161 mechanics, posture rungs, key-management
+guidance) are preserved verbatim in deeper sections.
+
+Files touched:
+- `README.md` (lines 13-15) — failure-mode headline reorders to lead
+  with "Confident-wrong findings under attacker-influenced evidence"
+  (the IR-accuracy primitive); "Evidence spoliation" replaced with
+  "Evidence loss / anti-forensic destruction" as #2.
+- `README.md` (line 132, scoring table) — "Audit Trail Quality" row
+  reworded to lead with "evidence-citation forgery detection" framing;
+  rubric-axis labels unchanged.
+- `README.md` (lines 244-249, Valhuntir comparison) — three numbered
+  differentiators reordered: `claim_finding` family gate promoted to
+  #1 (was #2), hash-locked install to #2 (was #3), HMAC ledger to #3
+  (was #1). Phrase "raises the ledger from tamper-evident to
+  non-repudiable" replaced with "extends forgery-detection across
+  HMAC-key compromise."
+- `docs/THREAT_MODEL_LEDGER.md` (lines 26-27) — lead paragraph leads
+  with audit_id-forgery-detection framing; FRE 902(13)/(14) language
+  demoted to a one-paragraph aside that explicitly states "Sanctum is
+  positioned for IR not prosecution."
+- `CLAUDE.md` (invariant 3) — leads with "`claim_finding` cites
+  `audit_ids[]`; the gate refuses unresolved citations" framing. The
+  cryptographic facts (HMAC-SHA-256 chain, mandatory key, server-
+  refuses-to-start-if-unset) are preserved unmodified after the lead.
+
+Mechanisms whose framed *purpose* changed (cryptographic substrate
+unchanged): HMAC chain, RFC 3161 notary, audit ledger. Mechanisms
+whose framing was already on-message: family-corroboration gate,
+sanitization, read-only mounts.
+
 ### Security — error-channel scrub gaps closed at server entrypoint and parser boundaries (2026-04-28)
 
 The `sanctum.sanitize.sanitize()` pipeline and the `<evidence-untrusted>`
