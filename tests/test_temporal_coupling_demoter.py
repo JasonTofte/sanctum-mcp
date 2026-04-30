@@ -293,3 +293,64 @@ def test_evaluate_claim_no_demotion_without_event_timestamps(
 
     assert result.tier == FindingConfidence.CORROBORATED
     assert result.demoted_for_temporal is False
+
+
+# ─── T-AC6: AC-6 demo fixture — end-to-end timestomp detection ───────────────
+
+_DEMO_FIXTURE = Path("tests/fixtures/timestomp_injection_demo")
+
+
+def test_timestomp_demo_fixture_demotes_to_draft(
+    ledger_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-6 (P1): timestomp demo fixture triggers demotion end-to-end.
+
+    Scenario (MITRE ATT&CK T1070.006 — Timestomp):
+    - Amcache records C:\\Temp\\malware.exe at T = 2024-01-15T10:30 UTC (real).
+    - Prefetch last-run was FORGED to T+3600 = 2024-01-15T11:30 UTC.
+    - Cross-family spread = 3600 s >> 5 s default window.
+    - Gate should demote CORROBORATED → DRAFT, demoted_for_temporal=True.
+
+    Exercises the full path: fixture parser → timestamp extraction → ledger →
+    evaluate_claim temporal demoter.
+    """
+    from sanctum.parsers.amcache import parse_amcache
+    from sanctum.parsers.prefetch import parse_prefetch
+
+    monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
+    monkeypatch.delenv("SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS", raising=False)
+
+    amcache_path = _DEMO_FIXTURE / "cases/demo/registry/Amcache.hve"
+    prefetch_path = _DEMO_FIXTURE / "cases/demo/Prefetch/MALWARE.EXE-AABBCCDD.pf"
+
+    amcache_events = parse_amcache(amcache_path)
+    prefetch_events = parse_prefetch(prefetch_path)
+
+    assert amcache_events, "demo fixture: Amcache sidecar must have at least one event"
+    assert prefetch_events, "demo fixture: Prefetch sidecar must have at least one event"
+
+    # Mirror _emit_offloaded_response's extraction: min(timestamp) per family.
+    amcache_first_ts = min(e.timestamp.isoformat() for e in amcache_events)
+    prefetch_first_ts = min(e.timestamp.isoformat() for e in prefetch_events)
+
+    aid1 = _write_ledger_entry(
+        ledger_env, case_id="demo", tool="get_amcache",
+        first_event_ts=amcache_first_ts,
+    )
+    aid2 = _write_ledger_entry(
+        ledger_env, case_id="demo", tool="get_prefetch",
+        first_event_ts=prefetch_first_ts,
+    )
+
+    result = evaluate_claim(
+        case_id="demo",
+        hypothesis="C:\\Temp\\malware.exe executed — Amcache+Prefetch corroboration with forged Prefetch timestamp",
+        audit_ids=[aid1, aid2],
+    )
+
+    assert result.tier == FindingConfidence.DRAFT, (
+        f"Expected DRAFT (timestomp demotion), got {result.tier}. "
+        f"Amcache ts={amcache_first_ts}, Prefetch ts={prefetch_first_ts}"
+    )
+    assert result.demoted_for_temporal is True

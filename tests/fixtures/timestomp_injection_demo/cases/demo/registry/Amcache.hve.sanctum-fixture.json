@@ -1,0 +1,1 @@
+{"family": "AppCompat", "tool": "get_amcache", "events": [{"program_path": "C:\\Temp\\malware.exe", "timestamp": "2024-01-15T10:30:00+00:00", "evidence_size_bytes": 49152, "extras": {"row_index": "0", "note": "Amcache records actual execution at T=10:30 UTC"}}]}
