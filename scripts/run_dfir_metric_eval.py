@@ -290,11 +290,12 @@ BARE_ARM_TOKEN_LIMIT = 150_000  # Opus 4.7 200K minus prompt + answer headroom
 _ANSWER_TAG_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
 _FAMILY_TO_TOOL: Mapping[str, str] = types.MappingProxyType(
     {
+        # Maps subset short-names (dfir_metric_subset.Family) to MCP tool names.
         "AppCompat": "get_amcache",
-        # The remaining four families' typed tools land in later phases;
-        # for the Sanctum arm here we route to the typed tool when one
-        # exists, else the model must answer from system-prompt context
-        # (and is expected to abstain).
+        "Explorer": "get_userassist",
+        "BAM": "get_bam",
+        "Sysmon": "get_sysmon_4688",
+        "SysMain": "get_prefetch",
     }
 )
 
@@ -321,6 +322,75 @@ class Question:
             raise ValueError("text must be non-empty")
         if not self.scoring_pattern:
             raise ValueError("scoring_pattern must be non-empty")
+
+
+# --- Question hydration from corpus -------------------------------------
+
+_QUESTION_TEXT_KEYS = ("question", "Q", "prompt", "stem", "text")
+_EVIDENCE_KEYS = ("evidence", "artifact", "data", "content", "raw")
+
+
+def hydrate_questions_from_corpus(
+    corpus_path: Path,
+    subset: "Sequence[Any]",  # Sequence[SubsetEntry] — import deferred to avoid circular
+) -> tuple["Question", ...]:
+    """Build Question objects from the cached DFIR-Metric corpus + SUBSET.
+
+    The corpus JSON is a list of records.  Each SubsetEntry's ``line_offset``
+    indexes into that list.  We extract question text via ``_QUESTION_TEXT_KEYS``
+    (first match wins) and evidence bytes via ``_EVIDENCE_KEYS`` (falling back
+    to empty bytes — the bare arm is expected to answer from knowledge when no
+    binary evidence blob is embedded).
+
+    Raises ``ValueError`` if a line_offset is out of range or no question-text
+    key is found, so bad SUBSET entries surface loudly rather than silently
+    producing wrong questions.
+    """
+    records: list[dict[str, Any]] = json.loads(corpus_path.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        raise ValueError(
+            f"expected DFIR-Metric corpus to be a JSON array; got {type(records).__name__}"
+        )
+
+    questions: list[Question] = []
+    for entry in subset:
+        offset: int = entry.line_offset
+        if offset >= len(records):
+            raise ValueError(
+                f"SUBSET line_offset {offset} is out of range; corpus has {len(records)} records"
+            )
+        rec = records[offset]
+
+        # Extract question text — fail loudly if no key matches.
+        q_text: str | None = None
+        for key in _QUESTION_TEXT_KEYS:
+            if key in rec and isinstance(rec[key], str):
+                q_text = rec[key]
+                break
+        if q_text is None:
+            raise ValueError(
+                f"corpus record at line_offset {offset} has no question-text key; "
+                f"tried {_QUESTION_TEXT_KEYS!r}; observed keys: {sorted(rec.keys())}"
+            )
+
+        # Extract evidence bytes — fall back to empty (knowledge-only bare arm).
+        bare_evidence = b""
+        for key in _EVIDENCE_KEYS:
+            val = rec.get(key)
+            if isinstance(val, (bytes, str)):
+                bare_evidence = val.encode("utf-8") if isinstance(val, str) else val
+                break
+
+        questions.append(
+            Question(
+                q_id=f"dfir_metric_{offset}",
+                family=entry.family,
+                text=q_text,
+                scoring_pattern=entry.scoring_pattern,
+                bare_evidence=bare_evidence,
+            )
+        )
+    return tuple(questions)
 
 
 class AnthropicProtocol(Protocol):
@@ -887,11 +957,21 @@ def _tool_definitions_for(family: str) -> list[dict[str, Any]]:
             },
         }
     ]
+    _TOOL_DESCRIPTIONS: dict[str, str] = {
+        "get_amcache": "Return Amcache.hve InventoryApplicationFile rows (AppCompat family).",
+        "get_userassist": "Return NTUSER.DAT UserAssist GUI-launch rows (Explorer/NTUSER family).",
+        "get_bam": "Return SYSTEM hive BAM background-process rows (Background-service family).",
+        "get_sysmon_4688": "Return Sysmon EID 1 / Security EID 4688 process-create rows (Kernel-ETW family).",
+        "get_prefetch": "Return SysMain Prefetch execution rows (SysMain family).",
+    }
     if family in _FAMILY_TO_TOOL:
+        tool_name = _FAMILY_TO_TOOL[family]
         tools.append(
             {
-                "name": _FAMILY_TO_TOOL[family],
-                "description": f"Return structured rows for the {family} family.",
+                "name": tool_name,
+                "description": _TOOL_DESCRIPTIONS.get(
+                    tool_name, f"Return structured rows for the {family} family."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {"case_id": {"type": "string"}},
@@ -1143,3 +1223,169 @@ def run_eval(
         encoding="utf-8",
     )
     return report
+
+
+# --- CLI entrypoint -----------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    from scripts.fetch_dfir_metric import fetch_upstream
+    from tests.benchmarks.dfir_metric_subset import SUBSET
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the DFIR-Metric IR-accuracy eval: Sanctum-mediated vs bare-LLM. "
+            "Requires ANTHROPIC_API_KEY in environment. "
+            "First-time run: provide --sha256 so the corpus can be fetched and verified. "
+            "Subsequent runs use the cache at --corpus-cache (SHA-256 re-checked)."
+        )
+    )
+    parser.add_argument(
+        "--sha256",
+        default=None,
+        help=(
+            "SHA-256 hex digest of the upstream DFIR-Metric-CTF.json. "
+            "Required if the corpus cache is absent. "
+            "Get it with: python3 -c \""
+            "import urllib.request, hashlib; "
+            "r=urllib.request.urlopen('https://raw.githubusercontent.com/DFIR-Metric/DFIR-Metric/main/DFIR-Metric-CTF.json'); "
+            "print(hashlib.sha256(r.read()).hexdigest())\""
+        ),
+    )
+    parser.add_argument(
+        "--arm",
+        choices=["sanctum", "bare", "both"],
+        default="both",
+        help="Which arm(s) to run (default: both).",
+    )
+    parser.add_argument(
+        "--n-runs",
+        type=int,
+        default=3,
+        help="Number of runs per question per arm (default: 3).",
+    )
+    parser.add_argument(
+        "--max-cost-usd",
+        type=float,
+        default=50.0,
+        help="Hard cost cap in USD (default: 50.0).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("reports"),
+        help="Directory for the EvalReport JSON (default: reports/).",
+    )
+    parser.add_argument(
+        "--corpus-cache",
+        type=Path,
+        default=Path(".cache/dfir-metric"),
+        help="Directory for the cached upstream corpus (default: .cache/dfir-metric/).",
+    )
+    parser.add_argument(
+        "--case-root",
+        type=Path,
+        default=Path("tests/fixtures/accuracy_corpus/cases/smoke"),
+        help="Case directory the Sanctum arm's tools read from (default: accuracy corpus smoke case).",
+    )
+    parser.add_argument(
+        "--model",
+        default="claude-opus-4-7",
+        help="Model ID for both arms (default: claude-opus-4-7).",
+    )
+    args = parser.parse_args()
+
+    corpus_path = args.corpus_cache / "DFIR-Metric-CTF.json"
+    provenance_path = args.corpus_cache / "PROVENANCE.json"
+
+    if not corpus_path.exists():
+        if args.sha256 is None:
+            print(
+                "ERROR: corpus not cached and --sha256 not provided.\n"
+                "Run with --sha256 <hex> to fetch and verify the upstream corpus.\n"
+                "Get the SHA-256 with:\n"
+                "  python3 -c \""
+                "import urllib.request, hashlib; "
+                "r=urllib.request.urlopen('https://raw.githubusercontent.com/DFIR-Metric/"
+                "DFIR-Metric/main/DFIR-Metric-CTF.json'); "
+                "print(hashlib.sha256(r.read()).hexdigest())\"",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"Fetching upstream corpus → {corpus_path} ...")
+        fetch_upstream(expected_sha256=args.sha256, cache_dir=args.corpus_cache)
+        print("Fetch OK.")
+    else:
+        # Re-verify the cached file if --sha256 was given.
+        if args.sha256 is not None:
+            import hashlib
+
+            actual = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
+            if actual != args.sha256:
+                print(
+                    f"ERROR: cached corpus SHA-256 mismatch.\n"
+                    f"  expected: {args.sha256}\n"
+                    f"  actual:   {actual}\n"
+                    "Delete .cache/dfir-metric/ and re-run to re-fetch.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+    dfir_metric_commit_sha = "unknown"
+    if provenance_path.exists():
+        try:
+            prov = json.loads(provenance_path.read_text(encoding="utf-8"))
+            dfir_metric_commit_sha = prov.get("sha256", "unknown")[:12]
+        except Exception:
+            pass
+
+    print(f"Hydrating {len(SUBSET)} questions from corpus ...")
+    questions = hydrate_questions_from_corpus(corpus_path, SUBSET)
+    print(f"  {len(questions)} questions across families: "
+          f"{sorted({q.family for q in questions})}")
+
+    case_root = args.case_root.resolve()
+    print(f"Case root: {case_root}")
+    print(f"Arm: {args.arm}  n_runs: {args.n_runs}  max_cost: ${args.max_cost_usd}")
+    print(f"Output dir: {args.output_dir}")
+    print()
+
+    server_env = dict(os.environ)
+    import secrets as _secrets
+    import tempfile as _tempfile
+
+    _tmp_root = _tempfile.mkdtemp(prefix="sanctum-eval-")
+    _output_root = Path(_tmp_root) / "output"
+    _output_root.mkdir()
+    server_env.setdefault("SANCTUM_LEDGER_HMAC_KEY", _secrets.token_hex(32))
+    server_env["SANCTUM_LEDGER_PATH"] = str(Path(_tmp_root) / "ledger.jsonl")
+    server_env["SANCTUM_CASES_ROOT"] = str(case_root.parent)
+    server_env["SANCTUM_OUTPUT_ROOT"] = str(_output_root)
+    server_env["SANCTUM_SKIP_MOUNT_CHECK"] = "1"
+    server_env["SANCTUM_USE_FIXTURE_SIDECAR"] = "1"
+
+    report = run_eval(
+        arm=args.arm,  # type: ignore[arg-type]
+        questions=questions,
+        n_runs=args.n_runs,
+        max_cost_usd=args.max_cost_usd,
+        output_dir=args.output_dir,
+        model_id=args.model,
+        case_root=case_root,
+        server_env=server_env,
+        dfir_metric_commit_sha=dfir_metric_commit_sha,
+    )
+
+    out_path = args.output_dir / f"{report.run_id}.json"
+    print(f"\nDone. Report: {out_path}")
+    print(f"  cost_usd:   ${report.cost_usd:.4f}")
+    print(f"  partial:    {report.partial}")
+    if report.halt_reason:
+        print(f"  halt:       {report.halt_reason}")
+    for arm_name, agg in report.aggregates.items():
+        print(f"  [{arm_name}] accuracy={agg.accuracy_mean:.1%} ± {agg.accuracy_std:.1%}")
+    print()
+    print(f"Paste the Numbers table into docs/ACCURACY.md with:")
+    print(f"  python -m scripts.summarize_eval {out_path}")

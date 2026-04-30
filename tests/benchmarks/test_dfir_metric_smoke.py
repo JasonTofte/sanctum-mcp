@@ -126,11 +126,14 @@ def _tool_use_then_answer(
 @pytest.fixture
 def server_env(tmp_path: Path) -> dict[str, str]:
     env = os.environ.copy()
+    output_root = tmp_path / "output"
+    output_root.mkdir()
     env.update(
         {
             "SANCTUM_LEDGER_HMAC_KEY": secrets.token_hex(32),
             "SANCTUM_LEDGER_PATH": str(tmp_path / "ledger.jsonl"),
             "SANCTUM_CASES_ROOT": str(FIXTURES_ROOT),
+            "SANCTUM_OUTPUT_ROOT": str(output_root),
             "SANCTUM_SKIP_MOUNT_CHECK": "1",
             "SANCTUM_USE_FIXTURE_SIDECAR": "1",
             "SANCTUM_LOG_LEVEL": "WARNING",

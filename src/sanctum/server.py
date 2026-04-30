@@ -720,13 +720,15 @@ async def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> 
 
     Returns the AC-13 inline summary (audit_id, case_id, tool, rowcount,
     input_ref, payload_ref, pre/post sanitisation hashes, tier,
-    n_distinct_families, demoted_for_tamper) wrapped in
-    ``<evidence-untrusted>``. The full Finding payload — including
-    ``audit_ids``, ``families``, ``hypothesis``, ``confirmation_basis``,
-    and ``reason_codes`` — is written to the offloaded payload file,
-    NOT the inline summary. The hypothesis string is agent-authored and
-    the offload boundary deliberately quarantines it from the inline
-    LLM-visible response.
+    confirmation_basis, n_distinct_families, demoted_for_tamper) wrapped
+    in ``<evidence-untrusted>``. ``confirmation_basis`` is a
+    server-computed ``Literal`` string (never agent-influenced) that lets
+    the agent understand *why* the tier was set without re-reading the
+    offloaded payload. The full Finding payload — including ``audit_ids``,
+    ``families``, ``hypothesis``, and ``reason_codes`` — is written to
+    the offloaded payload file, NOT the inline summary. The hypothesis
+    string is agent-authored and the offload boundary deliberately
+    quarantines it from the inline LLM-visible response.
 
     Refusal contracts (each surfaces an exception the agent observes):
 
@@ -786,6 +788,7 @@ async def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> 
             audit_id=audit_id,
             summary_extra={
                 "tier": evaluation.tier.value,
+                "confirmation_basis": evaluation.confirmation_basis,
                 "n_distinct_families": evaluation.n_distinct_families,
                 "demoted_for_tamper": evaluation.demoted_for_tamper,
             },

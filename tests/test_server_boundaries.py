@@ -940,13 +940,18 @@ async def test_claim_finding_inline_summary_keys_match_ac13_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC-13: claim_finding inline summary keys are EXACTLY the 11 listed.
+    """AC-13: claim_finding inline summary keys are EXACTLY the 12 listed.
 
     The AC-13 lock is structural: certain Finding fields (families, audit_ids,
-    hypothesis, confirmation_basis, reason_codes) MUST live only in the
-    on-disk payload because they (a) blow the byte budget at scale and
-    (b) carry agent-controlled strings (hypothesis) that the offload
-    boundary deliberately quarantines from the inline LLM-visible response.
+    hypothesis, reason_codes) MUST live only in the on-disk payload because they
+    (a) blow the byte budget at scale or (b) carry agent-controlled strings
+    (hypothesis) that the offload boundary deliberately quarantines.
+
+    ``confirmation_basis`` is NOT forbidden — it is a tiny (~20 char)
+    server-computed string that helps the agent understand whether the
+    corroboration gate fired.  It does not carry agent-controlled content and
+    is needed by the quickstart to prove the gate fired deterministically
+    (AC-QUICKSTART-2).
     """
     aid1, aid2 = _seed_two_family_ledger(monkeypatch, tmp_path)
     out = await server.claim_finding(
@@ -966,6 +971,7 @@ async def test_claim_finding_inline_summary_keys_match_ac13_lock(
         "pre_sanitization_sha256",
         "post_sanitization_sha256",
         "tier",
+        "confirmation_basis",
         "n_distinct_families",
         "demoted_for_tamper",
     }
@@ -973,7 +979,6 @@ async def test_claim_finding_inline_summary_keys_match_ac13_lock(
         "families",
         "audit_ids",
         "hypothesis",
-        "confirmation_basis",
         "reason_codes",
     }
 

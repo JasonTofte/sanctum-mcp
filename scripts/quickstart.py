@@ -135,11 +135,14 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="sanctum-quickstart-") as tmp:
         env = os.environ.copy()
+        output_root = Path(tmp) / "output"
+        output_root.mkdir()
         env.update(
             {
                 "SANCTUM_LEDGER_HMAC_KEY": secrets.token_hex(32),
                 "SANCTUM_LEDGER_PATH": str(Path(tmp) / "ledger.jsonl"),
                 "SANCTUM_CASES_ROOT": str(FIXTURE_CASES_ROOT),
+                "SANCTUM_OUTPUT_ROOT": str(output_root),
                 # Quickstart points at a writable repo path; bypass the
                 # production ro-mount check. Server emits a WARN so the
                 # bypass is never silent.

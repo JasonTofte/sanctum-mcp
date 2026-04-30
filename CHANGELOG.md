@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval framework completion (2026-04-30)
+
+**DFIR-Metric eval framework — now runnable end-to-end**:
+- `scripts/run_dfir_metric_eval.py`: `_FAMILY_TO_TOOL` now covers all 5 families (AppCompat→`get_amcache`, Explorer→`get_userassist`, BAM→`get_bam`, Sysmon→`get_sysmon_4688`, SysMain→`get_prefetch`). Added `hydrate_questions_from_corpus(corpus_path, subset)` which builds `Question` objects from the cached DFIR-Metric-CTF.json + SUBSET entries. Added `if __name__ == "__main__"` CLI entrypoint. Fixed `q_id` format to `f"dfir_metric_{offset}"` (was `dfir-metric-{offset}`).
+- `tests/benchmarks/test_dfir_metric_smoke.py`: `server_env` fixture now sets `SANCTUM_OUTPUT_ROOT` — root cause fix for all 5 smoke tests returning `<subprocess_crash>`.
+- `scripts/quickstart.py`: env dict now sets `SANCTUM_OUTPUT_ROOT` — same root cause fix; quickstart now boots the server successfully.
+- `src/sanctum/server.py`: `claim_finding` inline summary now includes `confirmation_basis` in `summary_extra`. The field is a server-computed `Literal` (not agent-controlled), allowing the agent and quickstart to observe why the gate fired without reading the offloaded payload. AC-13 docstring updated to reflect the content-quarantine vs size-budget distinction.
+- `tests/test_server_boundaries.py`: AC-13 lock updated — `confirmation_basis` moved from `forbidden_keys` to `expected_keys` (12 keys now); docstring updated to explain Category A (agent-controlled, always forbidden) vs Category B (server-computed, size-budget only).
+- `tests/benchmarks/test_dfir_metric_eval_driver.py` (new): 24 unit tests covering AC-HYDRATE-1/2/3, AC-FAMILY-1, AC-QUICKSTART-2, and a `ConfirmationBasis` Literal structural assertion.
+
 ### Added — submission prep (Phase 6, 2026-04-29)
 
 **Phase 6 — Submission prep**:
