@@ -129,7 +129,8 @@ def test_missing_case_raises_filenotfound(tmp_path: Path, monkeypatch: pytest.Mo
 # ─── T-7: AC-4 — evidence-wrapped assertion (fixture-mode rewrite) ────────────
 
 
-def test_get_amcache_output_is_evidence_wrapped(
+@pytest.mark.asyncio
+async def test_get_amcache_output_is_evidence_wrapped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -142,7 +143,7 @@ def test_get_amcache_output_is_evidence_wrapped(
     _make_case(tmp_path, monkeypatch)
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     assert out.startswith("<evidence-untrusted>")
     assert out.rstrip().endswith("</evidence-untrusted>")
 
@@ -150,7 +151,8 @@ def test_get_amcache_output_is_evidence_wrapped(
 # ─── T-8: AC-4 — audit_id round-trip (fixture-mode rewrite) ──────────────────
 
 
-def test_get_amcache_response_surfaces_audit_id(
+@pytest.mark.asyncio
+async def test_get_amcache_response_surfaces_audit_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -171,7 +173,7 @@ def test_get_amcache_response_surfaces_audit_id(
     monkeypatch.setenv(FIXTURE_ENV, "1")
     ledger_path = tmp_path / "ledger.jsonl"
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
 
     assert "audit_id" in body, "audit_id missing from response — claim_finding cannot cite"
@@ -190,7 +192,8 @@ def test_get_amcache_response_surfaces_audit_id(
 # ─── T-1: AC-1 — real parser rows shape, no stub keys ────────────────────────
 
 
-def test_get_amcache_rows_have_real_parser_shape_not_stub_shape(
+@pytest.mark.asyncio
+async def test_get_amcache_rows_have_real_parser_shape_not_stub_shape(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -205,7 +208,7 @@ def test_get_amcache_rows_have_real_parser_shape_not_stub_shape(
     _make_case(tmp_path, monkeypatch)
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
     # Real-parser shape lives in the on-disk payload under the offload contract.
     rows = _read_offloaded_payload(body)["rows"]
@@ -243,7 +246,8 @@ def test_parse_amcache_stub_is_absent_from_server_module(
 # ─── T-5: AC-3 — empty sidecar → rows==[] and rowcount==0 ───────────────────
 
 
-def test_get_amcache_empty_sidecar_returns_empty_rows_and_zero_rowcount(
+@pytest.mark.asyncio
+async def test_get_amcache_empty_sidecar_returns_empty_rows_and_zero_rowcount(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -257,7 +261,7 @@ def test_get_amcache_empty_sidecar_returns_empty_rows_and_zero_rowcount(
     monkeypatch.setenv(FIXTURE_ENV, "1")
     ledger_path = tmp_path / "ledger.jsonl"
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
     payload = _read_offloaded_payload(body)
 
@@ -280,7 +284,8 @@ def test_get_amcache_empty_sidecar_returns_empty_rows_and_zero_rowcount(
 # ─── T-10: AC-5 — JSON round-trip and ISO-8601 timestamp ─────────────────────
 
 
-def test_get_amcache_rows_are_json_serialisable_with_iso8601_timestamps(
+@pytest.mark.asyncio
+async def test_get_amcache_rows_are_json_serialisable_with_iso8601_timestamps(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,7 +300,7 @@ def test_get_amcache_rows_are_json_serialisable_with_iso8601_timestamps(
     _make_case(tmp_path, monkeypatch)
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
     # Reaching this test means the offload write already round-tripped through
     # ``json.dumps`` once; we re-check via the on-disk payload to keep the
@@ -332,7 +337,8 @@ def test_get_amcache_rows_are_json_serialisable_with_iso8601_timestamps(
 # ─── P1 tests ─────────────────────────────────────────────────────────────────
 
 
-def test_get_amcache_row_count_matches_sidecar_event_count(
+@pytest.mark.asyncio
+async def test_get_amcache_row_count_matches_sidecar_event_count(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -354,14 +360,14 @@ def test_get_amcache_row_count_matches_sidecar_event_count(
     _make_case(tmp_path, monkeypatch, case_name="two-event", events=two_events)
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("two-event")
+    out = await server.get_amcache("two-event")
     body = _unwrap_body(out)
     rows = _read_offloaded_payload(body)["rows"]
     assert len(rows) == 2, f"expected 2 rows, got {len(rows)}"
 
     # Second case (different case_name, same tmp_path): 0 events.
     _make_case(tmp_path, monkeypatch, case_name="zero-event", events=[])
-    out2 = server.get_amcache("zero-event")
+    out2 = await server.get_amcache("zero-event")
     body2 = _unwrap_body(out2)
     rows2 = _read_offloaded_payload(body2)["rows"]
     assert len(rows2) == 0, f"expected 0 rows, got {len(rows2)}"
@@ -382,7 +388,8 @@ def test_parse_amcache_stub_literal_absent_from_server_source() -> None:
     )
 
 
-def test_get_amcache_empty_sidecar_no_stub_shape_in_rows(
+@pytest.mark.asyncio
+async def test_get_amcache_empty_sidecar_no_stub_shape_in_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -398,14 +405,15 @@ def test_get_amcache_empty_sidecar_no_stub_shape_in_rows(
     _make_case(tmp_path, monkeypatch, events=[])
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
     payload = _read_offloaded_payload(body)
 
     assert payload["rows"] == [], "empty sidecar must yield empty rows, not a stub-fabricated row"
 
 
-def test_get_amcache_fixture_mode_off_raises_on_stub_bytes(
+@pytest.mark.asyncio
+async def test_get_amcache_fixture_mode_off_raises_on_stub_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -427,10 +435,11 @@ def test_get_amcache_fixture_mode_off_raises_on_stub_bytes(
     monkeypatch.delenv(FIXTURE_ENV, raising=False)
 
     with pytest.raises(ArtifactMalformedError):
-        server.get_amcache("smoke")
+        await server.get_amcache("smoke")
 
 
-def test_get_amcache_timestamp_is_semantically_valid_iso8601(
+@pytest.mark.asyncio
+async def test_get_amcache_timestamp_is_semantically_valid_iso8601(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -444,7 +453,7 @@ def test_get_amcache_timestamp_is_semantically_valid_iso8601(
     _make_case(tmp_path, monkeypatch)
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
     rows = _read_offloaded_payload(body)["rows"]
 
@@ -640,7 +649,8 @@ def _seed_two_family_ledger(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     return e1.audit_id, e2.audit_id
 
 
-def test_claim_finding_output_is_evidence_wrapped(
+@pytest.mark.asyncio
+async def test_claim_finding_output_is_evidence_wrapped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -654,7 +664,7 @@ def test_claim_finding_output_is_evidence_wrapped(
 
     aid1, aid2 = _seed_two_family_ledger(monkeypatch, tmp_path)
 
-    out = server.claim_finding(
+    out = await server.claim_finding(
         case_id="smoke",
         hypothesis="X ran",
         audit_ids=[aid1, aid2],
@@ -682,7 +692,8 @@ def test_claim_finding_output_is_evidence_wrapped(
     assert payload["confirmation_basis"] == "independent_artifacts"
 
 
-def test_claim_finding_refuses_empty_audit_ids(
+@pytest.mark.asyncio
+async def test_claim_finding_refuses_empty_audit_ids(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -695,10 +706,11 @@ def test_claim_finding_refuses_empty_audit_ids(
     monkeypatch.setenv("SANCTUM_LEDGER_HMAC_KEY", _secrets.token_hex(32))
 
     with pytest.raises(ClaimFindingError, match="empty"):
-        server.claim_finding(case_id="smoke", hypothesis="X ran", audit_ids=[])
+        await server.claim_finding(case_id="smoke", hypothesis="X ran", audit_ids=[])
 
 
-def test_claim_finding_refuses_fabricated_audit_id(
+@pytest.mark.asyncio
+async def test_claim_finding_refuses_fabricated_audit_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -718,14 +730,15 @@ def test_claim_finding_refuses_fabricated_audit_id(
     monkeypatch.setenv("SANCTUM_LEDGER_HMAC_KEY", _secrets.token_hex(32))
 
     with pytest.raises(ClaimFindingError, match="not found in ledger"):
-        server.claim_finding(
+        await server.claim_finding(
             case_id="smoke",
             hypothesis="X ran",
             audit_ids=["00000000-0000-0000-0000-000000000000"],
         )
 
 
-def test_claim_finding_rejects_unsafe_case_id(
+@pytest.mark.asyncio
+async def test_claim_finding_rejects_unsafe_case_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -740,14 +753,15 @@ def test_claim_finding_rejects_unsafe_case_id(
     monkeypatch.setenv("SANCTUM_LEDGER_HMAC_KEY", _secrets.token_hex(32))
 
     with pytest.raises(ValueError, match="unsafe"):
-        server.claim_finding(case_id="../etc", hypothesis="X ran", audit_ids=["x"])
+        await server.claim_finding(case_id="../etc", hypothesis="X ran", audit_ids=["x"])
 
     with pytest.raises(ValueError, match="unsafe"):
         # bidi-override codepoint inside an otherwise-safe-looking case_id
-        server.claim_finding(case_id="case‮id", hypothesis="X ran", audit_ids=["x"])
+        await server.claim_finding(case_id="case‮id", hypothesis="X ran", audit_ids=["x"])
 
 
-def test_claim_finding_writes_ledger_entry(
+@pytest.mark.asyncio
+async def test_claim_finding_writes_ledger_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -759,7 +773,7 @@ def test_claim_finding_writes_ledger_entry(
     from sanctum import audit
 
     aid1, aid2 = _seed_two_family_ledger(monkeypatch, tmp_path)
-    server.claim_finding(case_id="smoke", hypothesis="X ran", audit_ids=[aid1, aid2])
+    await server.claim_finding(case_id="smoke", hypothesis="X ran", audit_ids=[aid1, aid2])
 
     ledger_path = tmp_path / "ledger.jsonl"
     # Position 2 of verify_chain's return is "first_bad_line_1based" (None on
@@ -786,7 +800,8 @@ def test_claim_finding_writes_ledger_entry(
 # breaks ``verify_chain``. See ``.sherlock-plan.md`` AC-1 / AC-7..AC-14.
 
 
-def test_get_amcache_full_offload_round_trip(
+@pytest.mark.asyncio
+async def test_get_amcache_full_offload_round_trip(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -808,7 +823,7 @@ def test_get_amcache_full_offload_round_trip(
     monkeypatch.setenv(FIXTURE_ENV, "1")
     output_root = tmp_path / "output"
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     body = _unwrap_body(out)
 
     # Response shape: payload_ref carries the four offload-contract keys.
@@ -851,7 +866,8 @@ def test_get_amcache_full_offload_round_trip(
     assert ok is True and first_bad is None
 
 
-def test_get_amcache_summary_response_under_1024_bytes(
+@pytest.mark.asyncio
+async def test_get_amcache_summary_response_under_1024_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -879,7 +895,7 @@ def test_get_amcache_summary_response_under_1024_bytes(
     _make_case(tmp_path, monkeypatch, events=many_events)
     monkeypatch.setenv(FIXTURE_ENV, "1")
 
-    out = server.get_amcache("smoke")
+    out = await server.get_amcache("smoke")
     out_bytes = out.encode("utf-8")
     assert len(out_bytes) < 1024, (
         f"summary exceeds 1024-byte cap (got {len(out_bytes)} bytes) — "
@@ -893,7 +909,8 @@ def test_get_amcache_summary_response_under_1024_bytes(
     assert len(payload["rows"]) == 200
 
 
-def test_claim_finding_summary_response_under_1024_bytes(
+@pytest.mark.asyncio
+async def test_claim_finding_summary_response_under_1024_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -906,7 +923,7 @@ def test_claim_finding_summary_response_under_1024_bytes(
     is enforced even at scale.
     """
     aid1, aid2 = _seed_two_family_ledger(monkeypatch, tmp_path)
-    out = server.claim_finding(
+    out = await server.claim_finding(
         case_id="smoke",
         hypothesis="X ran on a host with a long-name signature",
         audit_ids=[aid1, aid2],
@@ -918,7 +935,8 @@ def test_claim_finding_summary_response_under_1024_bytes(
     )
 
 
-def test_claim_finding_inline_summary_keys_match_ac13_lock(
+@pytest.mark.asyncio
+async def test_claim_finding_inline_summary_keys_match_ac13_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -931,7 +949,7 @@ def test_claim_finding_inline_summary_keys_match_ac13_lock(
     boundary deliberately quarantines from the inline LLM-visible response.
     """
     aid1, aid2 = _seed_two_family_ledger(monkeypatch, tmp_path)
-    out = server.claim_finding(
+    out = await server.claim_finding(
         case_id="smoke",
         hypothesis="X ran",
         audit_ids=[aid1, aid2],
@@ -1045,7 +1063,8 @@ def test_validate_offload_root_missing_env_refused(
         server._validate_offload_root_distinct_from_cases_root()
 
 
-def test_get_amcache_orphan_payload_logs_error_on_append_failure(
+@pytest.mark.asyncio
+async def test_get_amcache_orphan_payload_logs_error_on_append_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1075,7 +1094,7 @@ def test_get_amcache_orphan_payload_logs_error_on_append_failure(
 
     with caplog.at_level(_logging.ERROR, logger="sanctum.server"):
         with pytest.raises(RuntimeError, match=r"simulated HMAC"):
-            server.get_amcache("smoke")
+            await server.get_amcache("smoke")
 
     orphan_records = [
         rec
@@ -1122,7 +1141,8 @@ def test_payload_ref_append_entry_called_through_universal_helper(
     )
 
 
-def test_lmax_cap_blocks_oversized_input_before_offload(
+@pytest.mark.asyncio
+async def test_lmax_cap_blocks_oversized_input_before_offload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1168,7 +1188,7 @@ def test_lmax_cap_blocks_oversized_input_before_offload(
     monkeypatch.setattr(server, "parse_amcache", lambda _path: [huge_event])
 
     with pytest.raises(InputTooLargeError):
-        server.get_amcache("smoke")
+        await server.get_amcache("smoke")
 
     # Absence assert #1: no payload file landed under SANCTUM_OUTPUT_ROOT.
     # Walk the entire subtree — a partial-write would create

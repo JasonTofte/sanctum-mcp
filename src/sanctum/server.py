@@ -1,13 +1,24 @@
-"""Sanctum MCP server — week-1 P0 skeleton.
+"""Sanctum MCP server — six typed tools for Windows execution-evidence families.
 
-Exposes exactly ONE typed tool: :func:`get_amcache`. The surface intentionally
-does not include any shell-passthrough or file-write capabilities. Expanding
-the tool surface is a week-2 activity; the P0 goal is proving the architecture
-closes end-to-end against one CFReDS case.
+All tools are ``async def`` (ARCH-001). Blocking I/O (registry hive parsing,
+fsync, file hashing) is offloaded via ``anyio.to_thread.run_sync`` so the
+event loop remains responsive for concurrent dispatch.
+
+Concurrency model (ARCH-004 / ARCH-001):
+- ``_ledger_write_lock``: ``asyncio.Lock`` serializing ledger writes inside
+  ``_emit_offloaded_response``.  Prevents HMAC-chain order corruption when
+  FastMCP dispatches multiple tools concurrently.
+- ``_tool_semaphore``: ``asyncio.Semaphore(1)`` gating the full body of every
+  tool call.  Active when ``SANCTUM_PARALLEL_TOOLS`` is unset or ``"0"``
+  (default).  When ``SANCTUM_PARALLEL_TOOLS=1`` the semaphore is bypassed and
+  FastMCP dispatches concurrently via its anyio task group.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -16,8 +27,9 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, AsyncIterator, TypedDict
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 
 # Imported as a module (not ``from sanctum.audit import append_entry``) so a
@@ -26,12 +38,18 @@ from mcp.server.fastmcp import FastMCP
 from sanctum import audit
 from sanctum.audit import require_hmac_key
 from sanctum.events import ExecutionEvent
-from sanctum.finding import (  # noqa: PLC2701 — _sha256_canonical is package-internal
+from sanctum.finding import (  # noqa: PLC2701 — private package-internal symbols
+    _CONFIDENCE_TO_C_SCALE,
     _sha256_canonical,
     evaluate_claim,
 )
 from sanctum.parsers._fixture_io import _safe_field
 from sanctum.parsers.amcache import parse_amcache
+from sanctum.parsers.appcompat import parse_shimcache
+from sanctum.parsers.bam import parse_bam
+from sanctum.parsers.prefetch import parse_prefetch
+from sanctum.parsers.sysmon import parse_sysmon
+from sanctum.parsers.userassist import parse_userassist
 
 # ``write_payload`` is aliased to ``_write_payload`` to keep the "write"
 # token off the module's public surface — the banned-verb tokenizer in
@@ -64,7 +82,7 @@ SKIP_MOUNT_CHECK_ENV = "SANCTUM_SKIP_MOUNT_CHECK"
 # the regression canary if a future migration forgot to apply the constant.
 
 # Conservative allowlist for ``case_id``. Rejects Unicode control characters
-# (bidi override \u202e, zero-width \u200b, etc.), shell metacharacters,
+# (bidi override ‮, zero-width ​, etc.), shell metacharacters,
 # whitespace, and path separators — defense in depth before the resolve-based
 # containment check. Real case IDs in this project look like
 # ``cfreds-hacking-case``; anything outside the allowlist is a bypass attempt.
@@ -72,12 +90,48 @@ _SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 mcp = FastMCP("sanctum")
 
+# ─── concurrency primitives (ARCH-001 / ARCH-004) ─────────────────────────────
+
+# Single-writer lock for ledger appends. Prevents HMAC-chain order corruption
+# when FastMCP dispatches multiple async tools concurrently (ARCH-004).
+# asyncio.Lock() created at module level is safe in Python 3.10+ — the lock
+# does NOT store a loop reference; it calls asyncio.get_running_loop() when
+# first acquired.
+_ledger_write_lock = asyncio.Lock()
+
+# Serialization semaphore for the full tool body.  Created once per
+# (parallel_mode: bool) value so the SAME Semaphore(1) is reused across calls
+# — a fresh Semaphore per call would not serialize anything.
+@functools.lru_cache(maxsize=None)
+def _get_tool_semaphore(*, parallel: bool) -> asyncio.Semaphore | None:
+    return None if parallel else asyncio.Semaphore(1)
+
+
+@contextlib.asynccontextmanager
+async def _serial_gate() -> AsyncIterator[None]:
+    """Acquire the per-call serialization gate unless ``SANCTUM_PARALLEL_TOOLS=1``.
+
+    When the env var is ``"1"``, this is a no-op and FastMCP's anyio task group
+    dispatches tools concurrently.  Otherwise, ``Semaphore(1)`` ensures at most
+    one tool body runs at a time (AC-5).
+    """
+    sem = _get_tool_semaphore(parallel=(os.environ.get("SANCTUM_PARALLEL_TOOLS") == "1"))
+    if sem is not None:
+        async with sem:
+            yield
+    else:
+        yield
+
 
 @dataclass(frozen=True)
 class CasePaths:
     case_id: str
     root: Path
     amcache_hve: Path
+    system_hve: Path    # SYSTEM hive: shimcache (AppCompat) + bam (Background-service)
+    ntuser_hve: Path    # NTUSER.DAT: userassist (Explorer/NTUSER)
+    prefetch_dir: Path  # Prefetch/ directory: one .pf file per executable (SysMain)
+    sysmon_evtx: Path   # Sysmon/Security EVTX: process-create events (Kernel-ETW)
 
 
 def _validate_evidence_mount(cases_root: Path) -> None:
@@ -162,14 +216,9 @@ def _resolve_case(case_id: str) -> CasePaths:
        operation runs.
     2. Explicit ``..`` string check — ``..`` is in the allowlist regex (``.``
        and ``.`` adjacent) but must never appear in a case_id.
-    3. Canonical-path containment: ``case_dir`` resolved via ``.resolve()``
-       must be rooted under ``CASES_ROOT_ENV``. Catches symlinked case
-       directories that point outside the cases root.
-
-    After the case directory is validated, the Amcache hive path is
-    independently resolved and checked — this catches symlinks *inside* the
-    case directory (e.g., ``<case>/registry/Amcache.hve -> /etc/shadow``) that
-    the case-dir check alone would miss.
+    3. Canonical-path containment: each resolved artifact path must be rooted
+       under the case directory. Catches symlinks pointing outside the case
+       (e.g., ``<case>/registry/Amcache.hve -> /etc/shadow``).
     """
 
     _validate_case_id_format(case_id)
@@ -181,11 +230,22 @@ def _resolve_case(case_id: str) -> CasePaths:
     if not case_dir.is_dir():
         raise FileNotFoundError(f"case directory not found: {case_dir}")
 
-    amcache = (case_dir / "registry" / "Amcache.hve").resolve()
-    if case_dir not in amcache.parents:
-        raise ValueError(f"Amcache path escapes case directory (symlink?): {amcache}")
+    def _check(rel: str) -> Path:
+        """Resolve a case-relative path; reject symlinks that escape the case dir."""
+        p = (case_dir / rel).resolve()
+        if case_dir not in p.parents:
+            raise ValueError(f"path escapes case directory (symlink?): {p}")
+        return p
 
-    return CasePaths(case_id=case_id, root=case_dir, amcache_hve=amcache)
+    return CasePaths(
+        case_id=case_id,
+        root=case_dir,
+        amcache_hve=_check("registry/Amcache.hve"),
+        system_hve=_check("registry/SYSTEM"),
+        ntuser_hve=_check("registry/NTUSER.DAT"),
+        prefetch_dir=_check("Prefetch"),
+        sysmon_evtx=_check("logs/Microsoft-Windows-Sysmon%4Operational.evtx"),
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -224,7 +284,7 @@ def _validate_offload_root_distinct_from_cases_root() -> None:
     )
 
 
-def _emit_offloaded_response(
+async def _emit_offloaded_response(
     *,
     case_id: str,
     tool: str,
@@ -235,70 +295,62 @@ def _emit_offloaded_response(
     audit_id: str,
     summary_extra: dict[str, Any] | None = None,
 ) -> str:
-    """Universal offload helper (AC-12). The single call site through
-    which a typed tool serialises a sanitized payload to disk write-once
-    AND extends the HMAC-chained ledger with a ``payload_ref``-bearing
-    entry.
+    """Universal offload helper (AC-12). Async so the lock can wrap the ledger write.
 
     Flow:
 
-    1. Sanitize ``full_payload`` (canonicalised JSON form). The cap is
-       raised to ``MAX_INPUT_BYTES`` (16 MiB) for the offloaded blob — the
-       64 KiB ``MAX_PAYLOAD_BYTES`` default is sized for inline LLM responses,
-       not on-disk files; truncating at 64 KiB would cut the JSON mid-structure
-       and break the round-trip read.
-    2. The payload writer lands the sanitised content under
-       ``$SANCTUM_OUTPUT_ROOT/<case_id>/<audit_id>/<tool>.json`` mode 0o444
-       via O_CREAT|O_EXCL.
-    3. ``audit.append_entry`` appends a ledger entry with a pre-minted
-       ``audit_id`` and a payload reference so the on-disk path and the
-       ledger entry share a key by construction (AC-7 architectural pre-mint).
-    4. Build the AC-13 inline summary (≤ 11 keys; rows / families /
-       hypothesis / audit_ids / confirmation_basis / reason_codes never
-       appear here — they live only in the offloaded file).
-    5. Sanitise + ``<evidence-untrusted>``-wrap the summary.
+    1. Sanitize ``full_payload`` (CPU-bound, inline — no blocking I/O).
+    2. Offload payload write to a thread (``anyio.to_thread.run_sync``) —
+       write-once to ``$SANCTUM_OUTPUT_ROOT/<case_id>/<audit_id>/<tool>.json``
+       mode 0o444 via O_CREAT|O_EXCL.
+    3. Under ``_ledger_write_lock``: offload ``audit.append_entry`` to a thread.
+       The lock holds for the full sync call (read-prev-hash + write) preventing
+       HMAC-chain order corruption across concurrent tool dispatches (ARCH-004).
+    4. Build and return the AC-13 inline summary wrapped in
+       ``<evidence-untrusted>``.
 
-    Crash window (AC-9): if ``append_entry`` raises after the payload write
-    succeeds, the file is an orphan (mode 0o444 — same-process rewrite is
-    impossible). Log ERROR with the orphan path before re-raising so the
-    operator can correlate.
+    Crash window (AC-9): if ``audit.append_entry`` raises after the payload
+    write succeeds, the file is an orphan (mode 0o444). Log ERROR before
+    re-raising so the operator can correlate.
     """
     raw = json.dumps(full_payload, ensure_ascii=False, sort_keys=False, indent=2)
-    # Offloaded blobs may legitimately exceed the 64 KiB inline LLM cap
-    # (e.g., 200 Amcache rows). Use MAX_INPUT_BYTES (16 MiB) here — the
-    # 64 KiB default is sized for the inline summary, not on-disk files;
-    # truncating at 64 KiB would cut the JSON mid-structure and break the
-    # round-trip read.
+    # Offloaded blobs may legitimately exceed the 64 KiB inline LLM cap.
+    # MAX_INPUT_BYTES (16 MiB) is sized for on-disk payloads, not the summary.
     sanitized = sanitize(raw, max_bytes=MAX_INPUT_BYTES)
 
-    payload_ref_obj = _write_payload(
-        case_id=case_id,
-        audit_id=audit_id,
-        tool=tool,
-        content=sanitized.payload,
+    payload_ref_obj = await anyio.to_thread.run_sync(
+        lambda: _write_payload(
+            case_id=case_id,
+            audit_id=audit_id,
+            tool=tool,
+            content=sanitized.payload,
+        )
     )
     payload_ref_dict = payload_ref_obj.to_json_dict()
 
-    try:
-        entry = audit.append_entry(
-            case_id=case_id,
-            tool=tool,
-            args=args,
-            input_ref=input_ref,
-            pre_sanitization_sha256=sanitized.pre_hash,
-            post_sanitization_sha256=sanitized.post_hash,
-            rowcount=rowcount,
-            payload_ref=payload_ref_dict,
-            audit_id=audit_id,
-        )
-    except Exception:
-        log.error(
-            "orphan payload at %s — ledger append failed (file is mode 0o444 "
-            "and cannot be rewritten by the same process; operator must "
-            "remove it manually if a retry with the same audit_id is desired)",
-            payload_ref_obj.path,
-        )
-        raise
+    async with _ledger_write_lock:
+        try:
+            entry = await anyio.to_thread.run_sync(
+                lambda: audit.append_entry(
+                    case_id=case_id,
+                    tool=tool,
+                    args=args,
+                    input_ref=input_ref,
+                    pre_sanitization_sha256=sanitized.pre_hash,
+                    post_sanitization_sha256=sanitized.post_hash,
+                    rowcount=rowcount,
+                    payload_ref=payload_ref_dict,
+                    audit_id=audit_id,
+                )
+            )
+        except Exception:
+            log.error(
+                "orphan payload at %s — ledger append failed (file is mode 0o444 "
+                "and cannot be rewritten by the same process; operator must "
+                "remove it manually if a retry with the same audit_id is desired)",
+                payload_ref_obj.path,
+            )
+            raise
 
     summary: dict[str, Any] = {
         "audit_id": entry.audit_id,
@@ -359,8 +411,11 @@ def _event_to_row(event: ExecutionEvent) -> AmcacheRow:
     }
 
 
+# ─── MCP tools — all async def (ARCH-001) ─────────────────────────────────────
+
+
 @mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
-def get_amcache(case_id: str) -> str:
+async def get_amcache(case_id: str) -> str:
     """Return structured Amcache rows for ``case_id``, quarantined for LLM consumption.
 
     Returns the standard offload-pattern summary (≤ ~800 B; bounded by AC-8
@@ -387,38 +442,253 @@ def get_amcache(case_id: str) -> str:
         which scrubs attacker-controlled byte/offset values from the
         exception text per ``feedback_error_channel_bypass.md``).
     """
-    paths = _resolve_case(case_id)
-    input_hash = _sha256_file(paths.amcache_hve) if paths.amcache_hve.exists() else None
+    async with _serial_gate():
+        paths = _resolve_case(case_id)
+        input_hash = await anyio.to_thread.run_sync(
+            lambda: _sha256_file(paths.amcache_hve) if paths.amcache_hve.exists() else None
+        )
 
-    rows = [_event_to_row(e) for e in parse_amcache(paths.amcache_hve)]
+        rows = await anyio.to_thread.run_sync(
+            lambda: [_event_to_row(e) for e in parse_amcache(paths.amcache_hve)]
+        )
 
-    # Pre-mint audit_id BEFORE the offload write so the on-disk path and
-    # the ledger entry share a key by construction (AC-7). Trying to
-    # round-trip the audit_id from a post-write append_entry would create
-    # a TOCTOU window between path commitment and ledger commitment.
-    audit_id = str(uuid.uuid4())
-    full_payload: dict[str, Any] = {
-        "audit_id": audit_id,
-        "case_id": case_id,
-        "rows": rows,
-    }
+        # Pre-mint audit_id BEFORE the offload write so the on-disk path and
+        # the ledger entry share a key by construction (AC-7). Trying to
+        # round-trip the audit_id from a post-write append_entry would create
+        # a TOCTOU window between path commitment and ledger commitment.
+        audit_id = str(uuid.uuid4())
+        full_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
+            "rows": rows,
+        }
 
-    return _emit_offloaded_response(
-        case_id=case_id,
-        tool="get_amcache",
-        args={"case_id": case_id},
-        input_ref={
-            "path": str(paths.amcache_hve),
-            "sha256": input_hash,
-        },
-        full_payload=full_payload,
-        rowcount=len(rows),
-        audit_id=audit_id,
-    )
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="get_amcache",
+            args={"case_id": case_id},
+            input_ref={
+                "path": str(paths.amcache_hve),
+                "sha256": input_hash,
+            },
+            full_payload=full_payload,
+            rowcount=len(rows),
+            audit_id=audit_id,
+        )
 
 
 @mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
-def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> str:
+async def get_shimcache(case_id: str) -> str:
+    """Return ShimCache (AppCompatCache) rows for ``case_id`` from the SYSTEM hive.
+
+    ShimCache records every executable that Windows AppCompatibility checked —
+    including executables that ran but left no Amcache entry, and executables
+    that were never run but were present on disk. Pairs with Amcache to form
+    the AppCompat family (CLAUDE.md invariant #5).
+    """
+    async with _serial_gate():
+        paths = _resolve_case(case_id)
+        input_hash = await anyio.to_thread.run_sync(
+            lambda: _sha256_file(paths.system_hve) if paths.system_hve.exists() else None
+        )
+
+        rows = await anyio.to_thread.run_sync(
+            lambda: [_event_to_row(e) for e in parse_shimcache(paths.system_hve)]
+        )
+
+        audit_id = str(uuid.uuid4())
+        full_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
+            "rows": rows,
+        }
+
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="get_shimcache",
+            args={"case_id": case_id},
+            input_ref={
+                "path": str(paths.system_hve),
+                "sha256": input_hash,
+            },
+            full_payload=full_payload,
+            rowcount=len(rows),
+            audit_id=audit_id,
+        )
+
+
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
+async def get_userassist(case_id: str) -> str:
+    """Return UserAssist execution-count rows for ``case_id`` from NTUSER.DAT.
+
+    UserAssist records GUI-launched programs via the ROT-13-encoded registry
+    key at ``NTUSER.DAT\\Software\\Microsoft\\Windows\\CurrentVersion\\
+    Explorer\\UserAssist``. Belongs to the Explorer/NTUSER family.
+    """
+    async with _serial_gate():
+        paths = _resolve_case(case_id)
+        input_hash = await anyio.to_thread.run_sync(
+            lambda: _sha256_file(paths.ntuser_hve) if paths.ntuser_hve.exists() else None
+        )
+
+        rows = await anyio.to_thread.run_sync(
+            lambda: [_event_to_row(e) for e in parse_userassist(paths.ntuser_hve)]
+        )
+
+        audit_id = str(uuid.uuid4())
+        full_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
+            "rows": rows,
+        }
+
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="get_userassist",
+            args={"case_id": case_id},
+            input_ref={
+                "path": str(paths.ntuser_hve),
+                "sha256": input_hash,
+            },
+            full_payload=full_payload,
+            rowcount=len(rows),
+            audit_id=audit_id,
+        )
+
+
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
+async def get_bam(case_id: str) -> str:
+    """Return Background Activity Moderator rows for ``case_id`` from the SYSTEM hive.
+
+    BAM records which executables were active in the background, with per-SID
+    last-execution timestamps, from ``SYSTEM\\CurrentControlSet\\Services\\bam\\
+    State\\UserSettings``. Belongs to the Background-service family.
+
+    Note: BAM and ShimCache share the SYSTEM hive as their source. A
+    ``{bam, shimcache}`` pair is documented as 'weakly corroborated' — they
+    share a trust root and can be defeated together. See
+    ``docs/THREAT_MODEL_TRIANGULATION.md`` §"Family coupling".
+    """
+    async with _serial_gate():
+        paths = _resolve_case(case_id)
+        input_hash = await anyio.to_thread.run_sync(
+            lambda: _sha256_file(paths.system_hve) if paths.system_hve.exists() else None
+        )
+
+        rows = await anyio.to_thread.run_sync(
+            lambda: [_event_to_row(e) for e in parse_bam(paths.system_hve)]
+        )
+
+        audit_id = str(uuid.uuid4())
+        full_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
+            "rows": rows,
+        }
+
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="get_bam",
+            args={"case_id": case_id},
+            input_ref={
+                "path": str(paths.system_hve),
+                "sha256": input_hash,
+            },
+            full_payload=full_payload,
+            rowcount=len(rows),
+            audit_id=audit_id,
+        )
+
+
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
+async def get_prefetch(case_id: str) -> str:
+    """Return Prefetch execution rows for all ``.pf`` files under ``<case>/Prefetch/``.
+
+    Prefetch files (``C:\\Windows\\Prefetch\\*.pf``) record executable names,
+    load-order traces, and eight most-recent execution timestamps. Belongs to
+    the SysMain (Prefetch) family. All ``.pf`` files in the case's
+    ``Prefetch/`` directory are parsed; events are concatenated.
+    """
+    async with _serial_gate():
+        paths = _resolve_case(case_id)
+
+        def _parse_all_pf() -> list[AmcacheRow]:
+            events: list[ExecutionEvent] = []
+            if paths.prefetch_dir.is_dir():
+                case_root = paths.root.resolve()
+                for pf in sorted(paths.prefetch_dir.glob("*.pf")):
+                    resolved = pf.resolve()
+                    if case_root not in resolved.parents:
+                        continue  # skip symlinks escaping the case directory
+                    events.extend(parse_prefetch(pf))
+            return [_event_to_row(e) for e in events]
+
+        rows = await anyio.to_thread.run_sync(_parse_all_pf)
+
+        audit_id = str(uuid.uuid4())
+        full_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
+            "rows": rows,
+        }
+
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="get_prefetch",
+            args={"case_id": case_id},
+            input_ref={
+                "path": str(paths.prefetch_dir),
+                "sha256": None,
+            },
+            full_payload=full_payload,
+            rowcount=len(rows),
+            audit_id=audit_id,
+        )
+
+
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
+async def get_sysmon_4688(case_id: str) -> str:
+    """Return Sysmon EID-1 and Security EID-4688 process-create events for ``case_id``.
+
+    Parses ``<case>/logs/Microsoft-Windows-Sysmon%4Operational.evtx``.
+    Records command lines, process GUIDs, and parent process paths. Belongs
+    to the Kernel-ETW (Sysmon/4688) family — the highest-fidelity execution
+    evidence family because Kernel-ETW events require kernel-level compromise
+    to forge retroactively.
+    """
+    async with _serial_gate():
+        paths = _resolve_case(case_id)
+        input_hash = await anyio.to_thread.run_sync(
+            lambda: _sha256_file(paths.sysmon_evtx) if paths.sysmon_evtx.exists() else None
+        )
+
+        rows = await anyio.to_thread.run_sync(
+            lambda: [_event_to_row(e) for e in parse_sysmon(paths.sysmon_evtx)]
+        )
+
+        audit_id = str(uuid.uuid4())
+        full_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
+            "rows": rows,
+        }
+
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="get_sysmon_4688",
+            args={"case_id": case_id},
+            input_ref={
+                "path": str(paths.sysmon_evtx),
+                "sha256": input_hash,
+            },
+            full_payload=full_payload,
+            rowcount=len(rows),
+            audit_id=audit_id,
+        )
+
+
+@mcp.tool(meta={"anthropic/maxResultSizeChars": 4096})
+async def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> str:
     """Gate a forensic claim through the family-corroboration check.
 
     The agent calls this after gathering evidence via ``get_*`` tools. The
@@ -458,54 +728,56 @@ def claim_finding(case_id: str, hypothesis: str, audit_ids: list[str]) -> str:
     - Unsafe ``case_id`` (Unicode/bidi/zero-width/path-traversal) →
       :class:`ValueError`.
     """
-    _validate_case_id_format(case_id)
+    async with _serial_gate():
+        _validate_case_id_format(case_id)
 
-    # Gate evaluation, no ledger I/O — the offload helper does the append
-    # so the on-disk path and the ledger entry share a pre-minted audit_id.
-    evaluation = evaluate_claim(
-        case_id=case_id,
-        hypothesis=hypothesis,
-        audit_ids=audit_ids,
-    )
+        # Gate evaluation, no ledger I/O — the offload helper does the append
+        # so the on-disk path and the ledger entry share a pre-minted audit_id.
+        evaluation = evaluate_claim(
+            case_id=case_id,
+            hypothesis=hypothesis,
+            audit_ids=audit_ids,
+        )
 
-    audit_id = str(uuid.uuid4())
-    finding_payload: dict[str, Any] = {
-        "audit_id": audit_id,
-        "case_id": case_id,
-        "hypothesis": hypothesis,
-        "tier": evaluation.tier.value,
-        "audit_ids": list(evaluation.audit_ids),
-        "families": list(evaluation.families),
-        "n_distinct_families": evaluation.n_distinct_families,
-        "confirmation_basis": evaluation.confirmation_basis,
-        "reason_codes": list(evaluation.reason_codes),
-        "demoted_for_tamper": evaluation.demoted_for_tamper,
-    }
-
-    # input_ref for claim_finding is a small content fingerprint (not the
-    # full Finding) so the inline summary stays under AC-8's 1024-byte cap.
-    # The full Finding lives in the offloaded payload, where size is
-    # bounded only by the 16 MiB sanitize cap.
-    finding_hash = _sha256_canonical(finding_payload)
-
-    return _emit_offloaded_response(
-        case_id=case_id,
-        tool="claim_finding",
-        args={
+        audit_id = str(uuid.uuid4())
+        finding_payload: dict[str, Any] = {
+            "audit_id": audit_id,
+            "case_id": case_id,
             "hypothesis": hypothesis,
-            "audit_ids": list(evaluation.audit_ids),
-            "deception_signal_count": 0,
-        },
-        input_ref={"finding_hash": finding_hash},
-        full_payload=finding_payload,
-        rowcount=len(evaluation.audit_ids),
-        audit_id=audit_id,
-        summary_extra={
             "tier": evaluation.tier.value,
+            "audit_ids": list(evaluation.audit_ids),
+            "families": list(evaluation.families),
             "n_distinct_families": evaluation.n_distinct_families,
+            "confirmation_basis": evaluation.confirmation_basis,
+            "reason_codes": list(evaluation.reason_codes),
             "demoted_for_tamper": evaluation.demoted_for_tamper,
-        },
-    )
+            "c_scale": _CONFIDENCE_TO_C_SCALE[evaluation.tier],
+        }
+
+        # input_ref for claim_finding is a small content fingerprint (not the
+        # full Finding) so the inline summary stays under AC-8's 1024-byte cap.
+        # The full Finding lives in the offloaded payload, where size is
+        # bounded only by the 16 MiB sanitize cap.
+        finding_hash = _sha256_canonical(finding_payload)
+
+        return await _emit_offloaded_response(
+            case_id=case_id,
+            tool="claim_finding",
+            args={
+                "hypothesis": hypothesis,
+                "audit_ids": list(evaluation.audit_ids),
+                "deception_signal_count": 0,
+            },
+            input_ref={"finding_hash": finding_hash},
+            full_payload=finding_payload,
+            rowcount=len(evaluation.audit_ids),
+            audit_id=audit_id,
+            summary_extra={
+                "tier": evaluation.tier.value,
+                "n_distinct_families": evaluation.n_distinct_families,
+                "demoted_for_tamper": evaluation.demoted_for_tamper,
+            },
+        )
 
 
 def main() -> None:
@@ -515,7 +787,6 @@ def main() -> None:
     )
     cases_root = Path(os.environ.get(CASES_ROOT_ENV, DEFAULT_CASES_ROOT))
     log.info("Sanctum MCP server starting; cases_root=%s", cases_root)
-    # Startup-time runtime guards. All fail-closed with actionable messages.
     _validate_evidence_mount(cases_root)
     _validate_offload_root_distinct_from_cases_root()  # AC-7 + AC-11
     log.info(

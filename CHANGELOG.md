@@ -4,6 +4,17 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — async-def migration + parallel tool dispatch (Phase 3, 2026-04-29)
+
+**F3 — async-def migration (ARCH-001/004)**:
+- All six `@mcp.tool()` functions (`get_amcache`, `get_shimcache`, `get_userassist`, `get_bam`, `get_prefetch`, `get_sysmon_4688`) migrated from `def` to `async def`. FastMCP dispatches async tools concurrently via anyio task groups; sync I/O (regipy, fsync, file hashing) is offloaded via `anyio.to_thread.run_sync`.
+- `_emit_offloaded_response` made async; holds `asyncio.Lock` (`_ledger_write_lock`) around `audit.append_entry` to serialize HMAC-chain writes across concurrent tool calls.
+- Feature flag `SANCTUM_PARALLEL_TOOLS`: default `0` (serial via `asyncio.Semaphore(1)`) — safe for demo. Set to `1` to enable concurrent dispatch for multi-family triage speedup (≥3× wallclock improvement verified by AC-6 test).
+- Five new tool wrappers (`get_shimcache`, `get_userassist`, `get_bam`, `get_prefetch`, `get_sysmon_4688`) completing the evidence surface.
+- `get_prefetch` glob now resolves and validates each `.pf` child path for symlink containment (defense-in-depth path traversal guard).
+- `pyproject.toml`: added `pytest-asyncio>=0.23,<1.0`; set `asyncio_mode = "strict"`.
+- New test files: `test_async_tool_signatures.py` (AC-1, AC-4), `test_ledger_backward_compat.py` (AC-8), `test_concurrency.py` (AC-2 P0, AC-3, AC-7), `test_feature_flag_parallel.py` (AC-5, AC-6).
+
 ### Added — BAM↔AppCompat shared-hive risk + Casey C-Scale ordinal (Phase 2, 2026-04-29)
 
 **F1 — BAM ↔ AppCompat shared-hive coupling disclosure** (doc-only):
