@@ -61,9 +61,8 @@ for the full mapping table.
   ledger entries the agent already legitimately produced.
 - **Detection**: the sanitization layer strips known patterns and hashes
   pre/post for audit; drift detectable by `sanctum.audit.verify_chain`.
-- **Recovery**: once `claim_finding` ships (week 4), single-source findings
-  are rejected, so a forged claim needs to produce ≥2 matching audit_ids —
-  materially harder.
+- **Recovery**: `claim_finding` (shipped) rejects single-source findings, so a
+  forged claim needs to produce ≥2 matching audit_ids — materially harder.
 - **Classification**: **silent corruption** without mitigation; **fail-closed**
   with sanitization + triangulation in place.
 - **Formal analysis**:

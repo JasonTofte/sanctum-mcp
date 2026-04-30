@@ -527,6 +527,39 @@ HMAC chain in
 [`docs/THREAT_MODEL_LEDGER.md`](THREAT_MODEL_LEDGER.md) is what makes
 that append-only invariant load-bearing.
 
+**Layer 3 — temporal-coupling demoter (ARCH-002, demote-only)**:
+
+Layer 2 grades by *which* families are present, but an attacker can
+satisfy the family-count gate while forging the evidence timestamps of
+one family — the MITRE ATT&CK technique T1070.006 (Timestomp). An
+adversary that manipulates `$STANDARD_INFORMATION` or Prefetch
+run-time fields can make a fabricated execution event appear to
+co-occur with a legitimate Amcache entry, clearing the corroboration
+bar without executing the binary at the claimed time.
+
+The temporal-coupling demoter defends against this without introducing
+a false-negative cost for legitimate clock skew: when the earliest
+`first_event_ts` values across the contributing families differ by
+more than a configurable window (default ±5 s, overridable via
+`SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS`), the gate demotes the
+tier one step (`FINAL → CORROBORATED`, `CORROBORATED → DRAFT`) and
+sets `demoted_for_temporal=True` in the ledger entry. The demoter is
+**strictly monotone-decreasing** — it never raises confidence (ARCH-002
+bright line). When fewer than two families have a `first_event_ts`
+(e.g., legacy ledger entries predating Phase 5), the demoter returns
+`"insufficient_data"` and the tier is unchanged: backward compatibility
+is a safety property, not a convenience.
+
+Temporal grounding of forensic claims against multi-source timeline
+evidence is the same research problem as the SoK survey on timeline
+reconstruction: Breitinger, Studiawan & Hargreaves,
+*A Survey of Timeline Reconstruction Methods in Digital Forensics*,
+[arXiv:2504.18131](https://arxiv.org/abs/2504.18131), 2025.
+The ±5 s default window is informed by the survey's treatment of
+clock-skew distributions in single-host evidence; §"Known limits
+and future work" below flags the copula refinement that would
+tighten this bound with empirical data.
+
 **Why the two-layer split matters for the FIND EVIL! Autonomous
 Execution Quality criterion.** The criterion rewards an agent that
 can self-correct in real time. Sanctum's design relocates the
@@ -605,16 +638,13 @@ per-failure-mode fail-safe-via-DRAFT counter) lives in
       inline the tier rules, so the threat-model doc and the gate
       cannot drift. Pinned by tier-boundary tests in
       `tests/test_audit.py`.
-- [ ] Wire `claim_finding` to the helper when it ships (week-4 per
-      README roadmap). The gate MUST operate on **distinct families**,
-      not raw subsystem counts — see "Family coupling and the
-      AppCompat correction" above. Reference mapping to apply to
-      each `audit_id`: look up the `tool` field of the ledger entry
-      and map `{get_shimcache, get_amcache}` → `"AppCompat"`,
-      `{get_userassist}` → `"Explorer"`, `{get_bam}` → `"BAM"`,
-      `{get_sysmon_4688}` → `"Sysmon"`,
-      `{get_prefetch}` → `"Prefetch"`. The count passed to
-      `classify_confidence` is `len(set(map(family, audit_ids)))`.
+- [x] **Shipped.** `claim_finding` wired to `classify_confidence` via
+      `sanctum.families.resolve_family` — the gate operates on
+      **distinct families**, not raw subsystem counts. Family mapping:
+      `{get_shimcache, get_amcache}` → `"AppCompat"`,
+      `{get_userassist}` → `"Explorer/NTUSER"`, `{get_bam}` → `"Background-service"`,
+      `{get_sysmon_4688}` → `"Kernel-ETW"`, `{get_prefetch}` → `"SysMain"`.
+      See `src/sanctum/families.py` and `src/sanctum/finding.py:evaluate_claim`.
 - [x] **Shipped.** Priors centralized in
       `scripts/threat_model_priors.py`; both validators import from
       there. `tests/test_threat_model_priors.py` pins the canonical

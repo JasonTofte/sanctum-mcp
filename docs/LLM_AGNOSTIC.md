@@ -32,7 +32,7 @@ enforced **in-process by the MCP server**:
 | Evidence quarantine | `sanctum.sanitize.sanitize()` + `wrap_evidence()` — every tool return wraps bytes in `<evidence-untrusted>` | None. Sanitization runs before the MCP response leaves the server. |
 | Audit-ledger UUID on every call | `sanctum.audit.append_entry()` invoked inside each tool | None. Pre-commit of the ledger entry happens before `return` in the tool body. |
 | Read-only evidence mount | `_validate_evidence_mount()` at `main()` startup; server refuses to start on a writable mount | None. Enforced by `os.statvfs` at OS level. |
-| ≥2 artifact families for findings | `claim_finding(hypothesis, audit_ids[])` typed function (week 4) — refuses single-family evidence | None. The gate is a typed function; the client cannot bypass it with free-text. |
+| ≥2 artifact families for findings | `claim_finding(hypothesis, audit_ids[])` typed function (shipped) — refuses single-family evidence | None. The gate is a typed function; the client cannot bypass it with free-text. |
 
 The server does not trust the client. This is the whole point of the
 architectural approach — a guardrail expressed as *"the typed function doesn't

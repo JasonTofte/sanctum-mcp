@@ -182,6 +182,11 @@ class LedgerEntry:
     payload_ref: dict[str, Any] | None = None
     elapsed_ms: int | None = None  # wall-clock milliseconds for the tool call
     token_estimate: dict[str, int] | None = None  # {"input": int, "output": int} LLM token counts
+    # Earliest/latest evidence event timestamps from the parsed rows (ISO-8601 UTC).
+    # Added Phase 5 for temporal-coupling demoter (ARCH-002). Omit-not-null so
+    # pre-feature ledger entries verify bytewise-identically with verify_chain.
+    first_event_ts: str | None = None
+    last_event_ts: str | None = None
 
     def __post_init__(self) -> None:
         # Construction-time invariants for instrumentation fields. Caught here so
@@ -216,6 +221,10 @@ class LedgerEntry:
             body["elapsed_ms"] = self.elapsed_ms
         if self.token_estimate is not None:
             body["token_estimate"] = self.token_estimate
+        if self.first_event_ts is not None:
+            body["first_event_ts"] = self.first_event_ts
+        if self.last_event_ts is not None:
+            body["last_event_ts"] = self.last_event_ts
         return json.dumps(body, ensure_ascii=False, sort_keys=True) + "\n"
 
 
@@ -313,6 +322,8 @@ def append_entry(
     audit_id: str | None = None,
     elapsed_ms: int | None = None,
     token_estimate: dict[str, int] | None = None,
+    first_event_ts: str | None = None,
+    last_event_ts: str | None = None,
 ) -> LedgerEntry:
     """Append one entry and return its populated :class:`LedgerEntry`.
 
@@ -361,6 +372,10 @@ def append_entry(
         raw["elapsed_ms"] = elapsed_ms
     if token_estimate is not None:
         raw["token_estimate"] = token_estimate
+    if first_event_ts is not None:
+        raw["first_event_ts"] = first_event_ts
+    if last_event_ts is not None:
+        raw["last_event_ts"] = last_event_ts
     raw["line_hash"] = _line_hash_for(raw, key=key)
     entry = LedgerEntry(**raw)
 

@@ -48,8 +48,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -83,12 +85,48 @@ ConfirmationBasis = Literal[
 # current tier set; C6 ("certain beyond any doubt") is theoretical.
 # Citation partially verified: C0–C6 labels convergent across 5+ secondary
 # sources; verbatim 3rd-ed wording is behind paywall — see docs/ACCURACY.md.
+DEFAULT_TEMPORAL_COUPLING_WINDOW_SECONDS: float = 5.0
+
 _CONFIDENCE_TO_C_SCALE: dict[FindingConfidence, str] = {
     FindingConfidence.DRAFT_TAMPER_SUSPECTED: "C0",
     FindingConfidence.DRAFT: "C2",
     FindingConfidence.CORROBORATED: "C4",
     FindingConfidence.FINAL: "C5",
 }
+
+
+_TEMPORAL_DEMOTION: dict[FindingConfidence, FindingConfidence] = {
+    FindingConfidence.FINAL: FindingConfidence.CORROBORATED,
+    FindingConfidence.CORROBORATED: FindingConfidence.DRAFT,
+    # DRAFT_TAMPER_SUSPECTED is the floor — tier cannot go lower, but
+    # demoted_for_temporal=True is still correct so the audit trail reflects
+    # that the temporal check also fired (separate from the tamper signal).
+    FindingConfidence.DRAFT_TAMPER_SUSPECTED: FindingConfidence.DRAFT_TAMPER_SUSPECTED,
+}
+
+
+def _check_temporal_coherence(
+    family_timestamps: dict[str, str | None],
+    window_seconds: float,
+) -> Literal["coherent", "incoherent", "insufficient_data"]:
+    """Compare earliest evidence-event timestamps across families.
+
+    Returns 'insufficient_data' when fewer than two families have a timestamp
+    (no demotion applied by the caller in that case).
+    Returns 'incoherent' when max − min > window_seconds (demote).
+    Returns 'coherent' when max − min <= window_seconds (preserve tier).
+
+    ARCH-002 bright line: this function NEVER raises confidence.
+    It is pure-function on the supplied dict — no file I/O.
+    """
+    parsed: list[datetime] = []
+    for ts in family_timestamps.values():
+        if ts is not None:
+            parsed.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+    if len(parsed) < 2:
+        return "insufficient_data"
+    span = (max(parsed) - min(parsed)).total_seconds()
+    return "coherent" if span <= window_seconds else "incoherent"
 
 
 class ClaimFindingError(ValueError):
@@ -115,6 +153,7 @@ class Finding:
     reason_codes: tuple[str, ...]  # TamperReason values from deception_signals
     demoted_for_tamper: bool
     c_scale: str  # Casey C-Scale ordinal per _CONFIDENCE_TO_C_SCALE
+    demoted_for_temporal: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +177,7 @@ class FindingEvaluation:
     confirmation_basis: ConfirmationBasis
     reason_codes: tuple[str, ...]
     demoted_for_tamper: bool
+    demoted_for_temporal: bool = False
 
 
 def evaluate_claim(
@@ -197,6 +237,26 @@ def evaluate_claim(
         "independent_artifacts" if len(families) >= 2 else "single_family"
     )
 
+    # Layer 3 — temporal-coupling demoter (ARCH-002: demote-only, never promote).
+    # Build family→first_event_ts from the first audit_id per family.
+    family_ts: dict[str, str | None] = {}
+    for aid in deduped_ids:
+        fam = resolve_family(entries[aid]["tool"])
+        if fam not in family_ts:
+            family_ts[fam] = entries[aid].get("first_event_ts")
+
+    window = float(
+        os.environ.get(
+            "SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS",
+            DEFAULT_TEMPORAL_COUPLING_WINDOW_SECONDS,
+        )
+    )
+    coherence = _check_temporal_coherence(family_ts, window_seconds=window)
+    demoted_for_temporal = False
+    if coherence == "incoherent" and tier in _TEMPORAL_DEMOTION:
+        tier = _TEMPORAL_DEMOTION[tier]
+        demoted_for_temporal = True
+
     return FindingEvaluation(
         case_id=case_id,
         hypothesis=hypothesis,
@@ -207,6 +267,7 @@ def evaluate_claim(
         confirmation_basis=confirmation_basis,
         reason_codes=reason_codes,
         demoted_for_tamper=signal_present,
+        demoted_for_temporal=demoted_for_temporal,
     )
 
 
@@ -248,6 +309,7 @@ def claim_finding(
         "confirmation_basis": evaluation.confirmation_basis,
         "reason_codes": list(evaluation.reason_codes),
         "demoted_for_tamper": evaluation.demoted_for_tamper,
+        "demoted_for_temporal": evaluation.demoted_for_temporal,
         "c_scale": _CONFIDENCE_TO_C_SCALE[evaluation.tier],
     }
     finding_hash = _sha256_canonical(finding_payload)
@@ -282,6 +344,7 @@ def claim_finding(
         reason_codes=evaluation.reason_codes,
         demoted_for_tamper=evaluation.demoted_for_tamper,
         c_scale=_CONFIDENCE_TO_C_SCALE[evaluation.tier],
+        demoted_for_temporal=evaluation.demoted_for_temporal,
     )
 
 

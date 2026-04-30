@@ -328,6 +328,16 @@ async def _emit_offloaded_response(
     )
     payload_ref_dict = payload_ref_obj.to_json_dict()
 
+    # Extract evidence-event timestamp bounds from rows for temporal demoter (AC-5).
+    # ISO-8601 UTC strings sort lexicographically, so min/max over strings is correct.
+    _ts_values = [
+        row["timestamp"]
+        for row in full_payload.get("rows", [])
+        if isinstance(row, dict) and "timestamp" in row
+    ]
+    _first_event_ts: str | None = min(_ts_values) if _ts_values else None
+    _last_event_ts: str | None = max(_ts_values) if _ts_values else None
+
     async with _ledger_write_lock:
         try:
             entry = await anyio.to_thread.run_sync(
@@ -341,6 +351,8 @@ async def _emit_offloaded_response(
                     rowcount=rowcount,
                     payload_ref=payload_ref_dict,
                     audit_id=audit_id,
+                    first_event_ts=_first_event_ts,
+                    last_event_ts=_last_event_ts,
                 )
             )
         except Exception:

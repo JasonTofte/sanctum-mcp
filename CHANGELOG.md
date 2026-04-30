@@ -4,6 +4,17 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — temporal-coupling demoter (Phase 5, 2026-04-29)
+
+**F4 — Temporal-coupling demoter (ARCH-002: demote-only)**:
+- `src/sanctum/audit.py`: `LedgerEntry` gains `first_event_ts: str | None` and `last_event_ts: str | None` (omit-not-null, omitted when `None` so pre-Phase-5 ledgers verify bytewise-identically). `append_entry()` accepts and records these fields.
+- `src/sanctum/server.py`: `_emit_offloaded_response` extracts ISO-8601 min/max from `full_payload["rows"][*]["timestamp"]` and passes them to `audit.append_entry` as evidence-event timestamp bounds.
+- `src/sanctum/finding.py`: `_check_temporal_coherence(family_timestamps, window_seconds)` pure function returns `"coherent" | "incoherent" | "insufficient_data"`. `evaluate_claim()` uses it as Layer 3 of the gate — if `"incoherent"` it demotes one tier (`FINAL → CORROBORATED`, `CORROBORATED → DRAFT`) and sets `demoted_for_temporal=True`. The demoter never raises confidence (ARCH-002 bright line). Configurable via `SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS` (default 5.0 s).
+- `Finding` and `FindingEvaluation` gain `demoted_for_temporal: bool = False` field (backward-compatible default).
+- Defends against MITRE ATT&CK T1070.006 (Timestomp): an attacker cannot forge corroboration by manipulating one family's timestamps while leaving others intact, because the cross-family timestamp spread triggers demotion.
+- `docs/THREAT_MODEL_TRIANGULATION.md`: Layer 3 demoter section added, citing T1070.006 and arXiv:2504.18131 (Breitinger, Studiawan & Hargreaves 2025 SoK timeline reconstruction survey).
+- New tests: `tests/test_temporal_coupling_demoter.py` (12 tests, AC-1/2/4/8), `tests/test_no_temporal_promote_path.py` (3 absence tests, AC-3/5/7). Baseline: 441 passing.
+
 ### Added — wallclock measurement + Pareto frontier (Phase 4, 2026-04-29)
 
 **F2 — Wallclock performance measurement (per-MB normalization)**:
