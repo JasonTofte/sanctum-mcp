@@ -4,9 +4,10 @@
 # to a public repo. settings.local.json, skills, hooks, agents all stay local.
 .claude/
 
-# Evidence / case data — never ships with source
-cases/
-evidence/
+# Evidence / case data — never ships with source.
+# Root-anchored so tests/fixtures/accuracy_corpus/cases/ is not excluded.
+/cases/
+/evidence/
 
 # Evidence-image extensions — globbed so they apply EVERYWHERE. Without
 # `**/`, a smuggled `tests/fixtures/<something>/disk.e01` could slip past
@@ -71,9 +72,9 @@ Thumbs.db
 .vscode/
 *.swp
 
-# Logs
+# Logs — root-anchored so tests/fixtures/accuracy_corpus/cases/smoke/logs/ is not excluded.
 *.log
-logs/
+/logs/
 
 # Private content — drafts, scratch notes, hackathon scoring/ground-truth,
 # demo takes, copyrighted screenshots, transcripts, anything not for the

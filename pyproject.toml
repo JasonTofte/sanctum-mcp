@@ -89,6 +89,9 @@ dev = [
   # validates. Runtime install path uses the lockfile; this dep exists
   # only for the regen step. Dev-only — kept off the runtime tree.
   "pip-tools>=7.4",
+  # Chart generation for scripts/plot_pareto.py (F2 Pareto frontier, Phase 4).
+  # Dev-only: not a runtime dep of the MCP server itself.
+  "matplotlib>=3.8",
 ]
 # Optional extra for the LLM-injection eval driver (scripts/eval_llm_injection.py).
 # Kept out of [dev] so the test suite stays SDK-free and contributors who don't

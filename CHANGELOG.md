@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — wallclock measurement + Pareto frontier (Phase 4, 2026-04-29)
+
+**F2 — Wallclock performance measurement (per-MB normalization)**:
+- `scripts/measure_wallclock.py`: measurement harness that runs all five `get_*` tool calls against a fixture corpus in serial (`C1`) and parallel (`C2`) mode; reports `ms_per_mb` (wallclock normalized by declared `evidence_mb` from `corpus_manifest.json`). Denomination from the manifest, not stub file sizes, removes fixture-size manipulation as an attack surface.
+- `scripts/plot_pareto.py`: generates `docs/figures/pareto.png` — a Pareto frontier chart plotting (ms/MB, accuracy) for C1 and C2 configurations, with GPT-4.1 TUS@4 = 38.52% reference line (Cherif et al., arXiv:2505.19973). Accuracy values are marked "pending" until the first eval run populates the Numbers table.
+- `tests/fixtures/accuracy_corpus/`: reproducible benchmark corpus (stub artifacts + sidecar fixtures + `corpus_manifest.json`) checked into the repo. Any judge can reproduce the wallclock numbers on a clean checkout without external downloads.
+- `tests/test_wallclock_script_smoke.py`: P0 smoke tests verifying per-MB normalization formula and corpus-manifest round-trip.
+- `docs/ACCURACY.md`: new §"Wallclock performance" section with Pareto chart embed, methodology notes (Kapoor & Narayanan arXiv:2407.01502 §2.2), fixture-size-manipulation defense explanation, and Phase 5 regeneration command.
+- `pyproject.toml`: added `matplotlib>=3.8` to `[dev]` extras for chart generation.
+
 ### Added — async-def migration + parallel tool dispatch (Phase 3, 2026-04-29)
 
 **F3 — async-def migration (ARCH-001/004)**:

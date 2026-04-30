@@ -1,0 +1,6 @@
+{
+  "case_name": "smoke",
+  "evidence_mb": 0.01,
+  "description": "Minimal accuracy corpus for wallclock benchmarking. Stub artifacts with sidecar fixtures. 0.01 MB declared; actual stub files are byte-level stubs — per-MB normalization uses this declared value, not on-disk sizes, to avoid fixture-size manipulation.",
+  "families": ["AppCompat", "Background-service", "Explorer/NTUSER", "Kernel-ETW", "SysMain"]
+}
