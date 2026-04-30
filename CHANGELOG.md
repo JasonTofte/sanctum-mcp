@@ -4,6 +4,17 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — submission prep (Phase 6, 2026-04-29)
+
+**Phase 6 — Submission prep**:
+- `docs/ADR_TEMPORAL_DEMOTER.md`: Architecture Decision Record for ARCH-002 (temporal demoter demote-only bright line and Option A timestamp storage decision).
+- Version bump `0.3.0 → 0.4.0`: Phases 3 (F3 async), 4 (F2 wallclock), and 5 (F4 temporal demoter) collectively constitute a feature-level release.
+- **Flag flip decision — `SANCTUM_PARALLEL_TOOLS` default stays `0`**: Phase 3 was merged 2026-04-29; the "≥1 week green" criterion for flipping the default is not met as of submission date. The default remains `0` (serial, safe). Demo recordings and operator deployments that want the parallel speedup (F3, ≥3× wallclock improvement on 5-family triage) should set `SANCTUM_PARALLEL_TOOLS=1` explicitly. This flag will be re-evaluated for default flip in v0.5.0 after sustained green.
+- `docs/DEMO.md`: Four-moment demo script for screencast recording.
+- SANS rubric refresh 2026-04-29: criteria expanded from 5 to 6 (new "Breadth and Depth of Analysis" criterion; "Adversarial Manipulation" folded into Criterion 4). Devpost source: [findevil.devpost.com](https://findevil.devpost.com/).
+
+## [0.4.0] — 2026-04-29
+
 ### Added — temporal-coupling demoter (Phase 5, 2026-04-29)
 
 **F4 — Temporal-coupling demoter (ARCH-002: demote-only)**:
