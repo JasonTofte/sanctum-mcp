@@ -75,6 +75,11 @@ dependencies = [
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
+  # Async test support for Phase 3 async-def tool migration (ARCH-001).
+  # Pinned to 0.23.x series: 1.x dropped asyncio_mode="strict" default
+  # behavior in ways that break fixture isolation. asyncio_mode="strict"
+  # is set in [tool.pytest.ini_options] below.
+  "pytest-asyncio>=0.23,<1.0",
   "ruff>=0.6",
   "black>=24.0",
   "mypy>=1.10",
@@ -126,6 +131,9 @@ target-version = ["py310"]
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --cov=sanctum --cov-report=term-missing -m 'not benchmark'"
+# strict mode: tests must explicitly mark @pytest.mark.asyncio — no implicit
+# co-routine detection, which hides missing markers until CI runs on a cold env.
+asyncio_mode = "strict"
 markers = [
   # AC-8/AC-10 — opt-in marker for the DFIR-Metric eval driver smoke tests
   # and any test that requires the cached upstream JSON (under .cache/dfir-metric/).
