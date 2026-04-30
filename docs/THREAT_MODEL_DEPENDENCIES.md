@@ -89,7 +89,8 @@ What the attacker wants to compromise:
 
 The asset hierarchy is **ledger key > evidence integrity > host
 pivot** in terms of incident severity, because key compromise
-falsifies all chain-of-custody claims, evidence fabrication can be
+invalidates the tamper-evident ledger, allowing fabrication of audit records;
+evidence fabrication can be
 caught by the family-corroboration gate (one library cannot fabricate
 two families' worth of corroborating events), and host pivot is
 recoverable via the read-only mount + audit ledger (CLAUDE.md
@@ -231,6 +232,70 @@ Three concrete properties the rung-2 defense provides:
    raises a hash-mismatch (good — operator notices). The "I rebuilt
    the venv and now nothing works" failure mode of `>=` pinning is
    absent at rung 2.
+
+## MCP ecosystem CVE coverage
+
+Two CVEs in the broader MCP ecosystem document the attack classes Sanctum's
+architecture defends against at the tool-boundary layer.  Both records were
+verified against NVD primary sources on 2026-04-29; CVSS scores below are
+submitter-assigned CVSS 4.0 (NVD enrichment pending for both).
+
+### CVE-2025-49596 — MCP Inspector unauthenticated command injection
+
+**Product**: MCP Inspector < 0.14.1 | **Published**: 2025-06-13
+
+> "Versions of MCP Inspector below 0.14.1 are vulnerable to remote code
+> execution due to lack of authentication between the Inspector client and
+> proxy, allowing unauthenticated requests to launch MCP commands over stdio."
+> — NVD description
+
+**CVSS 4.0 vector** (submitter-assigned):
+`AV:N/AC:L/AT:N/PR:N/UI:P/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H`
+
+**Attack class relevant to Sanctum**: An attacker exploiting CVE-2025-49596
+could inject content through an unauthenticated MCP channel — embedding
+LLM-injection frames (e.g., `ignore previous instructions`, `[[SYSTEM]]`
+authority claims) in what appears to be tool output.
+
+**Sanctum's architectural coverage**: The typed-tool surface rejects
+structurally invalid inputs before any evidence parsing runs.  Evidence-path
+output that reaches the parser layer is processed through
+`sanctum.sanitize.strip_known_injection_patterns()` before the LLM sees it;
+`<evidence-untrusted>` quarantine wraps every return.  The error-channel
+corollary ensures `_safe_field()` applies the same delimiter inventory on the
+FastMCP `isError` path.
+
+**Coverage test**: `tests/test_mcp_cve_coverage.py::test_cve_2025_49596_patterns_are_stripped`
+and `test_cve_2025_49596_payload_is_quarantined_in_evidence_tags`.
+
+---
+
+### CVE-2025-53109 — MCP Filesystem symlink path-traversal
+
+**Product**: MCP Filesystem Servers < 0.6.4 or < 2025.7.01 | **Published**: 2025-07-02
+
+> "Versions of Filesystem prior to 0.6.4 or 2025.7.01 could allow access to
+> unintended files via symlinks within allowed directories."
+> — NVD description
+
+**CVSS 4.0** (submitter-assigned, GitHub, Inc.): **7.3 HIGH**
+`AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:H/SI:H/SA:H`
+
+**Attack class relevant to Sanctum**: Symlinks inside a permitted case
+directory pointing to files outside the cases root — attacker places a
+symlink as `<case>/registry/Amcache.hve -> /etc/shadow`.
+
+**Sanctum's architectural coverage**: `_resolve_case()` calls `.resolve()` on
+every artifact path and checks parent-containment against both the cases root
+and the case directory.  A symlink resolving outside its expected parent raises
+`ValueError` before any read occurs.  This is a deterministic, path-typed check
+with no file-content parsing; it is enforced independently of the VFS read-only
+mount check.
+
+**Coverage test**: `tests/test_mcp_cve_coverage.py::test_cve_2025_53109_symlink_escape_is_refused`
+and `test_cve_2025_53109_case_dir_symlink_escape_is_refused`.
+
+---
 
 ## Cross-references
 

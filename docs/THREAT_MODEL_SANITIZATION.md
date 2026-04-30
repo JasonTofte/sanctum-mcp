@@ -216,3 +216,11 @@ can assess what the bypass suite does and does not establish.
 
 If any of those tests are ever relaxed, this proof stops applying —
 review the tests and this doc together.
+
+**Named-incident coverage tests** (assert specific published attack classes are covered):
+- [`test_sygnia_attack_coverage.py`](../tests/test_sygnia_attack_coverage.py) — Sygnia
+  August 2025 Mimikatz mis-narration pattern; dual-path (success: `sanitize` +
+  `wrap_evidence`; error: `_safe_field` exception-channel scrubber).
+- [`test_mcp_cve_coverage.py`](../tests/test_mcp_cve_coverage.py) — CVE-2025-49596
+  (MCP Inspector unauth injection class) and CVE-2025-53109 (symlink path-traversal);
+  both verified against NVD primary 2026-04-29.

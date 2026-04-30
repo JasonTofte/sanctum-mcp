@@ -115,8 +115,8 @@ fingerprint also matches a legitimate operator action:
   state = `Stopped` (not `Disabled`). An admin running a perf test
   produces this; an attacker typically also disables to survive reboot.
 
-Surfacing ambiguity rather than collapsing it to a positive is a
-chain-of-custody discipline — `claim_finding` records the ambiguity
+Surfacing ambiguity rather than collapsing it to a positive is an
+IR-accuracy discipline — `claim_finding` records the ambiguity
 code in the ledger, and the analyst (human or LLM) must justify the
 confidence assignment.
 

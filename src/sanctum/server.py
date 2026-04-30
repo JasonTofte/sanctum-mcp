@@ -201,7 +201,7 @@ def _validate_offload_root_distinct_from_cases_root() -> None:
 
     AC-11: Refuses if ``SANCTUM_OUTPUT_ROOT`` is unset (no silent default
     to ``/tmp`` or to the cwd — the offload location is operator-controlled
-    and load-bearing for chain-of-custody, so an unset value is a
+    and load-bearing for evidence-path integrity, so an unset value is a
     configuration error, not a hint to invent a path).
 
     AC-7: Refuses if ``SANCTUM_OUTPUT_ROOT`` resolves under
