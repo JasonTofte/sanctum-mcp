@@ -262,6 +262,38 @@ reviewer can spot-check by reading the audit ledger directly (see
 
 <!-- END pasted fragment -->
 
+## Casey C-Scale alignment
+
+Sanctum's `FindingConfidence` tiers are aligned to the forensic
+certainty ordinal from Casey, E., *Digital Evidence and Computer Crime*,
+3rd ed., Elsevier/Academic Press, 2011. The C-Scale (C0–C6) provides
+a vocabulary forensic examiners recognize, independent of Sanctum's
+architectural naming.
+
+| `FindingConfidence` tier | `c_scale` | Casey label (3rd ed.) | Notes |
+|---|---|---|---|
+| `DRAFT_TAMPER_SUSPECTED` | `C0` | No evidentiary value | Tamper signal present; evidence integrity compromised. |
+| `DRAFT` | `C2` | Unconfirmed | Single-family; corroboration pending. |
+| `CORROBORATED` | `C4` | Corroborated | ≥2 distinct families; trust-root-disjoint corroboration. |
+| `FINAL` | `C5` | Beyond reasonable doubt | ≥3 distinct families; high forgery-resistance. |
+
+C1 and C3 have no mapping to the current tier set (they correspond to
+intermediate evidence states that the binary deception-flag design does
+not produce). C6 ("beyond any doubt — absolute certainty") is considered
+theoretical for digital evidence; v1 does not map to it.
+
+**Partial-verification notice.** C0–C6 label names are convergent across
+five or more secondary academic sources (including arXiv:2412.12814 and
+IFIP-published chapters citing Casey 2011). Verbatim 3rd-edition wording
+is behind publisher paywall and dead mirrors; the label mapping above may
+not reproduce the exact phrasing from the primary text. If you have the
+3rd edition available, verify against Chapter 3 (Evidence Assessment) and
+correct this table if the C-Scale notation differs.
+
+The `c_scale` field is present on every `Finding` returned by
+`claim_finding()` and is determined by `_CONFIDENCE_TO_C_SCALE` in
+`src/sanctum/finding.py`. Tests: `tests/test_finding.py::test_*_maps_to_c*`.
+
 ## Honest limits
 
 1. **N=3.** Three runs per question is the smallest sample that

@@ -77,6 +77,19 @@ ConfirmationBasis = Literal[
     "single_family_strong_signal",
 ]
 
+# Casey C-Scale mapping — ties each FindingConfidence tier to the forensic
+# certainty ordinal from Casey, E., *Digital Evidence and Computer Crime*,
+# 3rd ed., 2011. C1/C3/C6 are unused: C1 and C3 have no mapping to the
+# current tier set; C6 ("certain beyond any doubt") is theoretical.
+# Citation partially verified: C0–C6 labels convergent across 5+ secondary
+# sources; verbatim 3rd-ed wording is behind paywall — see docs/ACCURACY.md.
+_CONFIDENCE_TO_C_SCALE: dict[FindingConfidence, str] = {
+    FindingConfidence.DRAFT_TAMPER_SUSPECTED: "C0",
+    FindingConfidence.DRAFT: "C2",
+    FindingConfidence.CORROBORATED: "C4",
+    FindingConfidence.FINAL: "C5",
+}
+
 
 class ClaimFindingError(ValueError):
     """Raised when ``claim_finding`` refuses a claim.
@@ -101,6 +114,7 @@ class Finding:
     confirmation_basis: ConfirmationBasis  # v1: single_family | independent_artifacts
     reason_codes: tuple[str, ...]  # TamperReason values from deception_signals
     demoted_for_tamper: bool
+    c_scale: str  # Casey C-Scale ordinal per _CONFIDENCE_TO_C_SCALE
 
 
 @dataclass(frozen=True)
@@ -234,6 +248,7 @@ def claim_finding(
         "confirmation_basis": evaluation.confirmation_basis,
         "reason_codes": list(evaluation.reason_codes),
         "demoted_for_tamper": evaluation.demoted_for_tamper,
+        "c_scale": _CONFIDENCE_TO_C_SCALE[evaluation.tier],
     }
     finding_hash = _sha256_canonical(finding_payload)
 
@@ -266,6 +281,7 @@ def claim_finding(
         confirmation_basis=evaluation.confirmation_basis,
         reason_codes=evaluation.reason_codes,
         demoted_for_tamper=evaluation.demoted_for_tamper,
+        c_scale=_CONFIDENCE_TO_C_SCALE[evaluation.tier],
     )
 
 
