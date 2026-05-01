@@ -4,6 +4,15 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval helper scripts (2026-04-30)
+
+**Maintenance tooling for eval claim-defense (deep-r R1, R4):**
+- `scripts/expand_subset.py` (new): two-pass Anthropic-API-driven expansion of `tests/benchmarks/dfir_metric_subset.py` from the seed 5 entries to ~45 (≥5 per Sanctum family). Pass 1 batch-classifies upstream records into one of the 5 families (`temperature=0`, structured JSON output); Pass 2 drafts `scoring_pattern` + `justification` per record with inline Jaccard < 0.30 validation and retry-on-failure (up to 3 attempts with sharper "rewrite from a different angle" prompts). Cost-budgeted via `--max-cost-usd` (default $1.50; halts mid-run rather than overshooting). Safe-by-default writes to `<subset>.proposed` for diff review; `--write` overwrites the live file. Seed entries preserved by default.
+- `scripts/compute_cis.py` (new): pure-Python Wilson 95% confidence intervals over an `EvalReport` JSON (no scipy dependency; closed-form Wilson formula). Emits per-arm + per-arm×family CI tables in markdown form for direct paste into `docs/ACCURACY.md`. Includes an arm-difference interpretation block with the standard "non-overlap is sufficient but not necessary for significance" caveat. Supports 90/95/99% levels.
+- `.gitignore`: added `*.proposed` to prevent accidental commits of stale `expand_subset.py` proposals.
+
+Closes the manual-effort bottleneck on Step C (SUBSET expansion 5→45) and Step E (Wilson CIs are CRITICAL for accuracy claim defense at N=45 — Wald-interval breakdown from ICML 2025 Spotlight `arXiv:2503.01747`, recommended by Brown, Cai & DasGupta in *Statistical Science* 2001).
+
 ### Added — eval framework completion (2026-04-30)
 
 **DFIR-Metric eval framework — now runnable end-to-end**:
