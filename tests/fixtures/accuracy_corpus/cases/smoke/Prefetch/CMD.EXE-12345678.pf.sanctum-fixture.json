@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "family": "SysMain",
+  "tool": "get_prefetch",
+  "generated_by": "manual:smoke-case (Track B arch-property fixture)",
+  "generated_at": "2026-05-01T00:00:00+00:00",
+  "source_artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "events": [
+    {
+      "program_path": "C:\\Windows\\System32\\cmd.exe",
+      "timestamp": "2024-01-15T10:30:00+00:00",
+      "evidence_size_bytes": 4096,
+      "extras": {
+        "executable_name": "CMD.EXE",
+        "path_hash": "12345678",
+        "run_count": "3"
+      }
+    }
+  ]
+}

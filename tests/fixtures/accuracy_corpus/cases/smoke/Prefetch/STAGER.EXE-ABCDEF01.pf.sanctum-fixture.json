@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "family": "SysMain",
+  "tool": "get_prefetch",
+  "generated_by": "manual:smoke-case (Track B arch-property fixture)",
+  "generated_at": "2026-05-01T00:00:00+00:00",
+  "source_artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "events": [
+    {
+      "program_path": "C:\\Temp\\stager.exe",
+      "timestamp": "2024-01-15T08:21:00+00:00",
+      "evidence_size_bytes": 32768,
+      "extras": {
+        "executable_name": "STAGER.EXE",
+        "path_hash": "ABCDEF01",
+        "run_count": "1"
+      }
+    }
+  ]
+}

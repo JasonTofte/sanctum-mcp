@@ -66,17 +66,17 @@ def test_false_confidence_warning_on_nonzero(caplog: pytest.LogCaptureFixture) -
 def test_estimate_cost_usd_matches_published_pricing() -> None:
     """Hand-computed expected for Opus 4.7 pricing — pinning the formula.
 
-    Pricing (from CLAUDE.md / per-message context):
+    Pricing verified 2026-05-01 against platform.claude.com/docs/en/about-claude/pricing:
       input          = $5.00 / MTok
       cache_write    = $6.25 / MTok
-      cache_read     = $0.30 / MTok
+      cache_read     = $0.50 / MTok  (10% of $5 input base)
       output         = $25.00 / MTok
 
     Usage: 1_000_000 input, 500_000 cache_write, 200_000 cache_read, 100_000 output.
-    Expected = 5.00 + 3.125 + 0.06 + 2.50 = $10.685
+    Expected = 5.00 + 3.125 + 0.10 + 2.50 = $10.725
     """
     usage = {"input": 1_000_000, "cache_write": 500_000, "cache_read": 200_000, "output": 100_000}
-    assert eval_driver._estimate_cost_usd(usage) == pytest.approx(10.685, rel=1e-9)
+    assert eval_driver._estimate_cost_usd(usage) == pytest.approx(10.725, rel=1e-9)
 
 
 def test_estimate_cost_usd_handles_missing_keys() -> None:
@@ -148,6 +148,7 @@ def test_eval_report_schema_keys() -> None:
         "aggregates",
         "partial",
         "halt_reason",
+        "dep_versions",
     }
     actual = {f.name for f in dataclasses.fields(eval_driver.EvalReport)}
     assert actual == expected, f"schema drift: missing={expected - actual} extra={actual - expected}"

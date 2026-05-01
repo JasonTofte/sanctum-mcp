@@ -94,15 +94,14 @@ hackathon submission.
 OPUS_4_7_PRICING: dict[str, float] = {
     "input": 5.00,  # USD per million input tokens
     "cache_write": 6.25,  # USD per million tokens written to cache
-    "cache_read": 0.30,  # USD per million tokens read from cache
+    "cache_read": 0.50,  # USD per million tokens read from cache (10% of $5 input)
     "output": 25.00,  # USD per million output tokens
 }
 """AC-6 — Opus 4.7 pricing.
 
-UNVERIFIED_CLAIM: cache multipliers track Opus 4 ratios at the $5/MTok
-input base. Verify against the Anthropic prompt-caching docs at
-``docs.claude.com/en/docs/build-with-claude/prompt-caching`` before
-publishing the Numbers table in ``docs/ACCURACY.md``.
+Verified 2026-05-01 against platform.claude.com/docs/en/about-claude/pricing.
+cache_read = $0.50/MTok (0.10 × $5 input base, same ratio as Sonnet but higher
+absolute because Opus input is $5 vs Sonnet's $3).
 """
 
 
@@ -193,6 +192,7 @@ class EvalReport:
     aggregates: Mapping[str, ArmAggregate]  # key = arm name; frozen post-init
     partial: bool = False
     halt_reason: str | None = None
+    dep_versions: str = ""  # pip freeze snapshot for judge reproducibility
 
     def __post_init__(self) -> None:
         # `frozen=True` only blocks rebinding `self.aggregates`; the underlying
@@ -314,6 +314,7 @@ class Question:
     text: str
     scoring_pattern: str
     bare_evidence: bytes  # raw bytes for the bare arm; sanctum arm reads via tools
+    bare_evidence_format: str = "hex"  # "hex" (binary artifacts) or "text" (sidecar JSON)
 
     def __post_init__(self) -> None:
         if not self.q_id:
@@ -322,6 +323,10 @@ class Question:
             raise ValueError("text must be non-empty")
         if not self.scoring_pattern:
             raise ValueError("scoring_pattern must be non-empty")
+        if self.bare_evidence_format not in ("hex", "text"):
+            raise ValueError(
+                f"bare_evidence_format must be 'hex' or 'text', got {self.bare_evidence_format!r}"
+            )
 
 
 # --- Question hydration from corpus -------------------------------------
@@ -829,9 +834,16 @@ def _run_one_bare_question(
     """Bare-arm: raw evidence bytes wrapped in evidence-untrusted, no MCP."""
     t0 = time.monotonic()
     cumulative: dict[str, int] = _zero_usage()
-    hex_evidence = question.bare_evidence.hex() if question.bare_evidence else ""
-    # Conservative pre-flight: each hex char ≈ 0.5 byte → ~1 token per 4 chars.
-    rough_tokens = len(hex_evidence) // 4
+    # Encode evidence for the bare-arm prompt.  Binary artifacts (registry
+    # hives, EVTX) are hex-encoded to stay prompt-safe.  Sidecar JSON (plain
+    # UTF-8 text from Track B fixture questions) is passed as-is — hex-encoding
+    # a 500-byte sidecar produces 1000 chars that the LLM cannot read as JSON.
+    if question.bare_evidence_format == "text" and question.bare_evidence:
+        evidence_str = question.bare_evidence.decode("utf-8", errors="replace")
+    else:
+        evidence_str = question.bare_evidence.hex() if question.bare_evidence else ""
+    # Conservative pre-flight: each char ≈ 0.25–1 token; use 4-char/token.
+    rough_tokens = len(evidence_str) // 4
     if rough_tokens > BARE_ARM_TOKEN_LIMIT:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         return (
@@ -852,7 +864,7 @@ def _run_one_bare_question(
             cumulative,
         )
     user_content = (
-        f"{question.text}\n\n" f"<evidence-untrusted>\n{hex_evidence}\n</evidence-untrusted>"
+        f"{question.text}\n\n" f"<evidence-untrusted>\n{evidence_str}\n</evidence-untrusted>"
     )
     try:
         resp = anthropic_client.messages.create(
@@ -1103,6 +1115,7 @@ def run_eval(
     per_q_timeout_s: float = 120.0,
     output_filename: str | None = None,
     dfir_metric_commit_sha: str = "unknown",
+    dep_versions: str = "",
 ) -> EvalReport:
     """Drive the eval. See module docstring for AC mapping.
 
@@ -1216,6 +1229,7 @@ def run_eval(
         aggregates=aggregates,
         partial=partial,
         halt_reason=halt_reason,
+        dep_versions=dep_versions,
     )
     out_name = output_filename or f"{run_id}.json"
     (output_dir / out_name).write_text(
@@ -1295,62 +1309,104 @@ if __name__ == "__main__":
         default="claude-opus-4-7",
         help="Model ID for both arms (default: claude-opus-4-7).",
     )
+    parser.add_argument(
+        "--track",
+        choices=["dfir-metric", "fixture", "both"],
+        default="dfir-metric",
+        help=(
+            "Which question track to run (default: dfir-metric). "
+            "'dfir-metric' uses the upstream DFIR-Metric corpus subset. "
+            "'fixture' uses the architectural-property questions grounded in "
+            "tests/fixtures/ sidecars — no upstream corpus required. "
+            "'both' runs both tracks together."
+        ),
+    )
     args = parser.parse_args()
 
-    corpus_path = args.corpus_cache / "DFIR-Metric-CTF.json"
-    provenance_path = args.corpus_cache / "PROVENANCE.json"
+    # --- Question hydration ------------------------------------------------
 
-    if not corpus_path.exists():
-        if args.sha256 is None:
-            print(
-                "ERROR: corpus not cached and --sha256 not provided.\n"
-                "Run with --sha256 <hex> to fetch and verify the upstream corpus.\n"
-                "Get the SHA-256 with:\n"
-                "  python3 -c \""
-                "import urllib.request, hashlib; "
-                "r=urllib.request.urlopen('https://raw.githubusercontent.com/DFIR-Metric/"
-                "DFIR-Metric/main/DFIR-Metric-CTF.json'); "
-                "print(hashlib.sha256(r.read()).hexdigest())\"",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        print(f"Fetching upstream corpus → {corpus_path} ...")
-        fetch_upstream(expected_sha256=args.sha256, cache_dir=args.corpus_cache)
-        print("Fetch OK.")
-    else:
-        # Re-verify the cached file if --sha256 was given.
-        if args.sha256 is not None:
-            import hashlib
+    questions: list[Question] = []
 
-            actual = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
-            if actual != args.sha256:
+    # Track A: DFIR-Metric corpus subset (skip when --track fixture).
+    dfir_metric_commit_sha = "unknown"
+    if args.track in ("dfir-metric", "both"):
+        corpus_path = args.corpus_cache / "DFIR-Metric-CTF.json"
+        provenance_path = args.corpus_cache / "PROVENANCE.json"
+
+        if not corpus_path.exists():
+            if args.sha256 is None:
                 print(
-                    f"ERROR: cached corpus SHA-256 mismatch.\n"
-                    f"  expected: {args.sha256}\n"
-                    f"  actual:   {actual}\n"
-                    "Delete .cache/dfir-metric/ and re-run to re-fetch.",
+                    "ERROR: corpus not cached and --sha256 not provided.\n"
+                    "Run with --sha256 <hex> to fetch and verify the upstream corpus.\n"
+                    "Get the SHA-256 with:\n"
+                    "  python3 -c \""
+                    "import urllib.request, hashlib; "
+                    "r=urllib.request.urlopen('https://raw.githubusercontent.com/DFIR-Metric/"
+                    "DFIR-Metric/main/DFIR-Metric-CTF.json'); "
+                    "print(hashlib.sha256(r.read()).hexdigest())\"",
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            print(f"Fetching upstream corpus → {corpus_path} ...")
+            fetch_upstream(expected_sha256=args.sha256, cache_dir=args.corpus_cache)
+            print("Fetch OK.")
+        else:
+            if args.sha256 is not None:
+                import hashlib
 
-    dfir_metric_commit_sha = "unknown"
-    if provenance_path.exists():
-        try:
-            prov = json.loads(provenance_path.read_text(encoding="utf-8"))
-            dfir_metric_commit_sha = prov.get("sha256", "unknown")[:12]
-        except Exception:
-            pass
+                actual = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
+                if actual != args.sha256:
+                    print(
+                        f"ERROR: cached corpus SHA-256 mismatch.\n"
+                        f"  expected: {args.sha256}\n"
+                        f"  actual:   {actual}\n"
+                        "Delete .cache/dfir-metric/ and re-run to re-fetch.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
 
-    print(f"Hydrating {len(SUBSET)} questions from corpus ...")
-    questions = hydrate_questions_from_corpus(corpus_path, SUBSET)
-    print(f"  {len(questions)} questions across families: "
-          f"{sorted({q.family for q in questions})}")
+        if provenance_path.exists():
+            try:
+                prov = json.loads(provenance_path.read_text(encoding="utf-8"))
+                dfir_metric_commit_sha = prov.get("sha256", "unknown")[:12]
+            except Exception:
+                pass
+
+        print(f"Hydrating {len(SUBSET)} DFIR-Metric questions from corpus ...")
+        questions.extend(hydrate_questions_from_corpus(corpus_path, SUBSET))
+
+    # Track B: architectural-property questions grounded in fixture sidecars.
+    if args.track in ("fixture", "both"):
+        from tests.benchmarks.arch_property_questions import (
+            ARCH_QUESTIONS,
+            hydrate_arch_questions,
+        )
+
+        fixture_root = Path("tests/fixtures")
+        print(f"Hydrating {len(ARCH_QUESTIONS)} fixture-grounded arch-property questions ...")
+        questions.extend(hydrate_arch_questions(ARCH_QUESTIONS, fixture_root))
+
+    questions_tuple = tuple(questions)
+    print(
+        f"  {len(questions_tuple)} total questions across families: "
+        f"{sorted({q.family for q in questions_tuple})}"
+    )
 
     case_root = args.case_root.resolve()
     print(f"Case root: {case_root}")
-    print(f"Arm: {args.arm}  n_runs: {args.n_runs}  max_cost: ${args.max_cost_usd}")
+    print(f"Track: {args.track}  arm: {args.arm}  n_runs: {args.n_runs}  "
+          f"max_cost: ${args.max_cost_usd}")
     print(f"Output dir: {args.output_dir}")
     print()
+
+    # Capture dep versions for judge reproducibility (REC-3).
+    _dep_versions = ""
+    try:
+        _dep_versions = subprocess.check_output(
+            [sys.executable, "-m", "pip", "freeze"], text=True, timeout=30
+        )
+    except Exception:
+        pass
 
     server_env = dict(os.environ)
     import secrets as _secrets
@@ -1368,7 +1424,7 @@ if __name__ == "__main__":
 
     report = run_eval(
         arm=args.arm,  # type: ignore[arg-type]
-        questions=questions,
+        questions=questions_tuple,
         n_runs=args.n_runs,
         max_cost_usd=args.max_cost_usd,
         output_dir=args.output_dir,
@@ -1376,6 +1432,7 @@ if __name__ == "__main__":
         case_root=case_root,
         server_env=server_env,
         dfir_metric_commit_sha=dfir_metric_commit_sha,
+        dep_versions=_dep_versions,
     )
 
     out_path = args.output_dir / f"{report.run_id}.json"
