@@ -4,6 +4,13 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed — eval claim-defense docs (deep-r R2/R4/R5, 2026-04-30)
+
+**Pre-eval claim-defense documentation updates** (deep-r investigation 2026-04-30 — recommendations for defending eval claims to critical judges):
+- `tests/benchmarks/dfir_metric_subset.py`: added explicit Inclusion (4 conditions) and Exclusion (3 disqualifiers) selection criteria to the module docstring (R4). The criteria are auditable inline without reading `scripts/expand_subset.py`. The opt-in Jaccard test enforces criterion 4.
+- `scripts/expand_subset.py`: kept the rendered-module `MODULE_HEADER` in lockstep with the live SUBSET docstring so a future `python3 -m scripts.expand_subset --write` does not silently drop the criteria block.
+- `docs/ACCURACY.md`: added §"What this eval compares — and what it does not" subsection (R5) explicitly excluding direct comparison to DFIR-Metric paper baselines (model-version confound — paper used 2025 GPT-4.1/4o/Sonnet snapshots; we run Opus 4.7 in 2026). The Pareto-chart GPT-4.1 reference line is now positioned consistently as a "benchmark anchor" across both sections. Added "Methodology note (auto-filled at eval time)" placeholder above the Numbers table (R2) so a judge can confirm model version, DFIR-Metric commit, Sanctum version, run count, arm parity, and CI method without scrolling. Added a placeholder Wilson-CI table block below the existing Numbers tables for direct paste from `scripts/compute_cis.py`.
+
 ### Added — eval helper scripts (2026-04-30)
 
 **Maintenance tooling for eval claim-defense (deep-r R1, R4):**
