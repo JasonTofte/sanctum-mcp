@@ -4,6 +4,15 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — Track B architectural-property eval + eval driver hardening (deep-r REC-1/3/4, 2026-05-01)
+
+**Track B eval redesign** — replaces accuracy-estimation framing with an architectural-enforcement scorecard grounded in fixture sidecars (deep-r recommendation, arXiv:2505.19973 Wilson CI power analysis: N=16 cannot resolve a 10pp delta; reframing as boolean gate-checks is the statistically honest design):
+- `tests/benchmarks/arch_property_questions.py` (new): 16 fixture-grounded questions across all 5 Sanctum families (12 single-family, 2 multi-family gate-enforcement). Pre-registered framing in module docstring per NeurIPS reproducibility norms. `hydrate_arch_questions()` builds `Question` objects with sidecar JSON as readable UTF-8 text evidence.
+- `tests/fixtures/accuracy_corpus/cases/smoke/Prefetch/CMD.EXE-12345678.pf.sanctum-fixture.json` (new): smoke-case Prefetch sidecar for System32 cmd.exe.
+- `tests/fixtures/accuracy_corpus/cases/smoke/Prefetch/STAGER.EXE-ABCDEF01.pf.sanctum-fixture.json` (new): smoke-case Prefetch sidecar for C:\\Temp\\stager.exe (suspicious path).
+- `scripts/run_dfir_metric_eval.py`: added `--track {dfir-metric,fixture,both}` CLI flag; `--track fixture` skips upstream corpus fetch entirely. Added `dep_versions` parameter to `run_eval()`, wired to `pip freeze` capture in `main()` for judge reproducibility. Fixed `OPUS_4_7_PRICING.cache_read`: `0.30` → `0.50` (verified against Anthropic pricing 2026-05-01; stale `UNVERIFIED_CLAIM` comment removed). Added `bare_evidence_format: str = "hex"` field to `Question` dataclass; bare arm passes sidecar JSON as readable UTF-8 text (`"text"` format) instead of unreadable hex, preventing false `<context_overflow>` short-circuits on small fixtures. Added `dep_versions: str = ""` field to `EvalReport`.
+- `tests/test_eval_driver_unit.py`: updated cost assertion to match corrected cache-read price ($10.725 ← was $10.685); added `dep_versions` to EvalReport schema key set.
+
 ## [0.4.1] — 2026-04-30
 
 ### Changed — eval claim-defense docs (deep-r R2/R4/R5, 2026-04-30)
