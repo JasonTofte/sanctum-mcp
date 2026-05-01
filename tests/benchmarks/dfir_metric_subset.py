@@ -21,10 +21,31 @@ Subset shape — each ``SubsetEntry``:
     test (``tests/benchmarks/test_subset_jaccard_similarity.py``,
     opt-in) enforces this with token-set overlap < 0.30.
 
+Selection criteria (deep-r R4 — make rubric reviewable without
+reading ``scripts/expand_subset.py``).
+
+Inclusion (a question is in the subset iff all four hold):
+  1. Answerable from exactly one of the 5 Sanctum artifact families.
+  2. Family tag is verifiable from the artifact description alone —
+     no cross-family inference needed.
+  3. ``scoring_pattern`` is achievable without verbatim copy of the
+     upstream answer text (license-clean derivative metadata only).
+  4. ``Jaccard(justification, upstream_question_text) < 0.30`` — the
+     opt-in test ``test_subset_jaccard_similarity.py`` enforces this.
+
+Exclusion (any of the following disqualifies a question):
+  - Requires cross-family synthesis (ambiguous family tag).
+  - About a Windows event/artifact not in any Sanctum family — no
+    ground-truth coverage in v1.
+  - Has a free-text answer not reducible to a substring or regex
+    pattern. Promote to TUS@m for paper-grade multi-criterion
+    scoring (see ``docs/ACCURACY.md`` § "AC-12 disclaimer").
+
 Phase B status: 5 entries (proof of life). Phase B post-REFACTOR
-expands to ~45 entries. Each family must end up with multiple entries
-so single-author tagging bias surfaces in the per-family
-``tagged_count`` column of the Numbers table (AC-9).
+expands to ~45 entries via ``scripts/expand_subset.py``. Each family
+must end up with multiple entries so single-author tagging bias
+surfaces in the per-family ``tagged_count`` column of the Numbers
+table (AC-9).
 """
 
 from __future__ import annotations

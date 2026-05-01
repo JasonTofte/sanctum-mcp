@@ -69,6 +69,38 @@ reproducible (see
 [`tests/benchmarks/test_subset_jaccard_similarity.py`](../tests/benchmarks/test_subset_jaccard_similarity.py),
 opt-in).
 
+The selection rubric — Inclusion (4 conditions) and Exclusion (3
+disqualifiers) — is documented inline in
+[`tests/benchmarks/dfir_metric_subset.py`](../tests/benchmarks/dfir_metric_subset.py)
+so a reviewer can audit the gate without reading the helper script.
+
+### What this eval compares — and what it does not
+
+The Sanctum eval is a **controlled within-model comparison**: same
+SUBSET, same fixture bytes, same model (Opus 4.7), same scoring
+pattern, same N — Sanctum-mediated arm vs. bare-LLM arm. That is the
+only comparison the Numbers table reports.
+
+We deliberately do **not** publish a column comparing Sanctum's
+accuracy to the DFIR-Metric paper's reported baselines (Cherif et
+al., arXiv:2505.19973, Table 3). The paper's published baselines
+were measured against specific model snapshots — typically GPT-4.1,
+GPT-4o, Claude 3.5 Sonnet — at the time of the paper's evaluation
+window. Our Sanctum and bare arms run **Opus 4.7** in 2026. A direct
+comparison would conflate two distinct effects:
+
+- Tool-effectiveness delta (what Sanctum's gate adds), which is what
+  we want to measure.
+- Model-capability delta (what a 2026 frontier model adds over a
+  2025 snapshot), which has nothing to do with Sanctum.
+
+The Pareto chart's GPT-4.1 reference line (Wallclock performance §)
+is therefore positioned as a **benchmark anchor**, not a head-to-head
+result. A judge wanting to make the cross-model comparison must run
+their own bare-LLM arm against an Opus 4.7 baseline — which is
+exactly what our `bare` arm provides. See `docs/ACCURACY.md` §
+"Honest limits" → "Model coupling" for the same rule restated.
+
 ### Bare-arm fairness
 
 The "bare" arm gives the same model the same question against the
@@ -240,6 +272,28 @@ reviewer can spot-check by reading the audit ledger directly (see
 > the table below is a placeholder and the absence of numbers is
 > the message** — the methodology is the artifact.
 
+### Methodology note (auto-filled at eval time)
+
+A judge reading the Numbers table should be able to confirm the
+following five facts inline, without scrolling to the upstream
+methodology section. The first eval run populates this block from
+the EvalReport JSON:
+
+| Fact | Value | Source-of-truth |
+|---|---|---|
+| Model version | `pending` (e.g., `claude-opus-4-7-20260301`) | `EvalReport.model_id` |
+| DFIR-Metric commit | `pending` (40-char SHA) | `EvalReport.dfir_metric_commit_sha` |
+| Sanctum version | `pending` (e.g., `0.4.0`) | `EvalReport.sanctum_version` |
+| Run count per question | `N=3` (majority vote across runs) | `EvalReport.n_runs_per_q` |
+| Arm parity | identical prompts, fixtures, scoring pattern; arms differ only in MCP tool availability | `scripts/run_dfir_metric_eval.py` |
+| Confidence intervals | Wilson score, 95% level | `scripts/compute_cis.py` |
+
+Confidence-interval reporting follows the small-N proportion
+recommendation in Brown, Cai & DasGupta, *Statistical Science*
+2001 — Wilson score intervals are preferred over CLT-based
+intervals at N=45. CIs are emitted by `scripts/compute_cis.py`
+and pasted in the per-arm and per-arm × per-family tables below.
+
 <!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-*.json` -->
 
 | Arm | accuracy_mean ± std | abstention_rate | false_confidence_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
@@ -259,6 +313,33 @@ reviewer can spot-check by reading the audit ledger directly (see
 | `bare`    | `BAM`       | `pending` | `pending` | `pending` |
 | `bare`    | `Sysmon`    | `pending` | `pending` | `pending` |
 | `bare`    | `SysMain`   | `pending` | `pending` | `pending` |
+
+<!-- END pasted fragment -->
+
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-*.json` -->
+
+| Arm | k / n | accuracy | Wilson 95% CI |
+|---|---|---|---|
+| `sanctum` | `pending` | `pending` | `pending` |
+| `bare`    | `pending` | `pending` | `pending` |
+
+| Arm | Family | k / n | accuracy | Wilson 95% CI |
+|---|---|---|---|---|
+| `sanctum` | `AppCompat` | `pending` | `pending` | `pending` |
+| `sanctum` | `Explorer`  | `pending` | `pending` | `pending` |
+| `sanctum` | `BAM`       | `pending` | `pending` | `pending` |
+| `sanctum` | `Sysmon`    | `pending` | `pending` | `pending` |
+| `sanctum` | `SysMain`   | `pending` | `pending` | `pending` |
+| `bare`    | `AppCompat` | `pending` | `pending` | `pending` |
+| `bare`    | `Explorer`  | `pending` | `pending` | `pending` |
+| `bare`    | `BAM`       | `pending` | `pending` | `pending` |
+| `bare`    | `Sysmon`    | `pending` | `pending` | `pending` |
+| `bare`    | `SysMain`   | `pending` | `pending` | `pending` |
+
+**Arm-difference interpretation** (auto-filled by `compute_cis.py`):
+non-overlap of arm CIs is sufficient but not necessary for
+significance; overlap does not rule out a real difference (the
+narrower-overlap rule applies — see `scripts/compute_cis.py`).
 
 <!-- END pasted fragment -->
 
