@@ -89,3 +89,9 @@ Thumbs.db
 # `feedback_framework_integration_strategy.md`).
 .sherlock-plan.md
 .test-matrix.md
+
+# Proposal output from `scripts/expand_subset.py` — reviewer diffs the
+# proposed module against the live one, then either renames-into-place
+# manually or re-runs with --write. The .proposed file itself never
+# belongs in git.
+*.proposed
