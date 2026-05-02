@@ -286,6 +286,81 @@ recommendation in Brown, Cai & DasGupta, *Statistical Science*
 2001 — Wilson score intervals are preferred over CLT-based
 intervals at N=45.
 
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260502T053601-c159b11b.json` -->
+
+### Run `eval-20260502T053601-c159b11b` — sanctum_partial_credit_accuracy
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `local-v1`
+- Window: `2026-05-02T05:12:50Z` → `2026-05-02T05:36:01Z` · N_questions=30 · N_runs=1 · arms=['sanctum', 'bare'] · cost=$1.6458
+
+> ⚠ **high variance — interpret with caution** (`bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
+
+**Per-arm summary**
+
+| Arm | accuracy_mean ± std | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
+|---|---|---|---|---|---|---|---|---|
+| `sanctum` | 100.0% ± 0.0% | 90.0% | 0.0% | n/a | 29818 | 7476 | 534 | $1.5220 |
+| `bare` | 23.3% ± 42.3% ⚠ | n/a | n/a | 100.0% | 2924 | 189 | 127 | $0.1238 |
+
+**Per-family breakdown** (single-author tagging bias is visible here)
+
+| Arm | Family | tagged_count | correct_count | accuracy |
+|---|---|---|---|---|
+| `sanctum` | `AppCompat` | 8 | 8 | 100.0% |
+| `sanctum` | `BAM` | 5 | 5 | 100.0% |
+| `sanctum` | `Explorer` | 5 | 5 | 100.0% |
+| `sanctum` | `SysMain` | 7 | 7 | 100.0% |
+| `sanctum` | `Sysmon` | 5 | 5 | 100.0% |
+| `bare` | `AppCompat` | 8 | 2 | 25.0% |
+| `bare` | `BAM` | 5 | 0 | 0.0% |
+| `bare` | `Explorer` | 5 | 1 | 20.0% |
+| `bare` | `SysMain` | 7 | 3 | 42.9% |
+| `bare` | `Sysmon` | 5 | 1 | 20.0% |
+
+_Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
+
+<!-- END pasted fragment -->
+
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260502T053601-c159b11b.json` -->
+
+**Wilson 95% confidence intervals**
+
+_At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recommended small-N method (Brown, Cai & DasGupta, Statistical Science 2001)._
+
+**Per-arm accuracy**
+
+| Arm | n | accuracy | Wilson 95% CI |
+|---|---|---|---|
+| `sanctum` | 30 | 100.0% | [88.6%, 100.0%] |
+| `bare` | 30 | 23.3% | [11.8%, 40.9%] |
+
+**Per-arm × per-family**
+
+| Arm | Family | n | accuracy | Wilson 95% CI |
+|---|---|---|---|---|
+| `sanctum` | `AppCompat` | 8 | 100.0% | [67.6%, 100.0%] |
+| `sanctum` | `BAM` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `Explorer` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `SysMain` | 7 | 100.0% | [64.6%, 100.0%] |
+| `sanctum` | `Sysmon` | 5 | 100.0% | [56.6%, 100.0%] |
+| `bare` | `AppCompat` | 8 | 25.0% | [7.1%, 59.1%] |
+| `bare` | `BAM` | 5 | 0.0% | [0.0%, 43.4%] |
+| `bare` | `Explorer` | 5 | 20.0% | [3.6%, 62.4%] |
+| `bare` | `SysMain` | 7 | 42.9% | [15.8%, 75.0%] |
+| `bare` | `Sysmon` | 5 | 20.0% | [3.6%, 62.4%] |
+
+**Arm-difference interpretation**
+
+- sanctum: 100.0% [88.6%, 100.0%]  ·  bare: 23.3% [11.8%, 40.9%]
+- Point-estimate gap: `sanctum − bare = 76.7%`
+- Per-arm CIs do NOT overlap, which is a sufficient (but not necessary) condition for a statistically significant difference at the α corresponding to this confidence level.
+
+<!-- END pasted fragment -->
+
+---
+
+_Prior run (N=25, before multi-family + adversarial questions added):_
+
 <!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260502T021842-68272d44.json` -->
 
 ### Run `eval-20260502T021842-68272d44` — sanctum_partial_credit_accuracy
