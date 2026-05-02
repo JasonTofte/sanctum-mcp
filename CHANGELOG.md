@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval v2: multi-family corroboration + adversarial questions + bare_confident_rate (2026-05-01)
+
+**Unlocks the CORROBORATED path in eval and adds honest-limits documentation**:
+- `tests/benchmarks/dfir_metric_subset.py`: added `question_type` (`"factual"` | `"adversarial_single_family"`), `extra_families`, `synthetic_text`, and `case_id_override` fields to `SubsetEntry`. Added 3 synthetic multi-family questions (AppCompat+SysMain, AppCompat+Sysmon, SysMain+Sysmon) against the new `mf_c2agent_001` case — these exercise the `CORROBORATED` path for the first time. Added 2 adversarial single-family questions (smoke case) that expect `DRAFT` as the correct answer.
+- `tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/`: new fixture case with Amcache (AppCompat), Prefetch (SysMain), and Sysmon (Kernel-ETW) sidecars all showing `C:\Temp\c2agent.exe`.
+- `scripts/run_dfir_metric_eval.py`: `Question` now carries `question_type`, `extra_families`, `case_id_override`. `hydrate_questions_from_corpus` handles `synthetic_text` overrides (no upstream corpus lookup needed). `_run_one_sanctum_question` uses per-question `case_id_override` and exposes multi-family tool surfaces via updated `_tool_definitions_for`. Adversarial questions score `correct=True` when `claim_status ∈ {DRAFT, DRAFT_TAMPER_SUSPECTED}`. `ArmAggregate` gains `bare_confident_rate` (fraction of bare-arm rows with non-marker responses); `_compute_bare_confident_rate` implements it.
+- `scripts/summarize_eval.py`: Per-arm summary table adds `bare_confident_rate` column.
+- `tests/test_eval_driver_unit.py`: 13 new tests covering adversarial scoring dispatch, multi-family tool definitions (including dedup), `bare_confident_rate` computation and validation, synthetic entry invariants. Updated `test_arm_aggregate_schema_keys` to include `bare_confident_rate`.
+- `docs/ACCURACY.md`: Honest Limits §7–10 added (abstention_rate=100% corpus artifact; corpus tests tool I/O not gate behavior; AURC/RS@k degenerate until CORROBORATED fires; BAM Tier D source caveat + PSEXESVC implication). Followups reorganized into Eval corpus expansion / Selective-abstention metrics / Statistical rigor subsections.
+
 ### Added — Track B architectural-property eval + eval driver hardening (deep-r REC-1/3/4, 2026-05-01)
 
 **Track B eval redesign** — replaces accuracy-estimation framing with an architectural-enforcement scorecard grounded in fixture sidecars (deep-r recommendation, arXiv:2505.19973 Wilson CI power analysis: N=16 cannot resolve a 10pp delta; reframing as boolean gate-checks is the statistically honest design):
