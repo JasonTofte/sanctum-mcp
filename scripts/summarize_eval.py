@@ -187,3 +187,12 @@ def summarize(report_path: Path) -> str:
     out.append("")
 
     return "\n".join(out)
+
+
+if __name__ == "__main__":
+    import sys as _sys
+
+    if len(_sys.argv) != 2:
+        print("usage: python -m scripts.summarize_eval <report.json>", file=_sys.stderr)
+        _sys.exit(1)
+    print(summarize(Path(_sys.argv[1])))

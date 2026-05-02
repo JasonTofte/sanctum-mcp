@@ -48,6 +48,7 @@ import os
 import re
 import statistics
 import subprocess
+import sys
 import time
 import types
 import uuid
@@ -78,7 +79,7 @@ _leaked_pids: set[int] = set()
 
 # --- Module-level constants (test pins) ---------------------------------
 
-DEFAULT_MCP_SUBPROCESS_ARGS: tuple[str, ...] = ("python", "-m", "sanctum.server")
+DEFAULT_MCP_SUBPROCESS_ARGS: tuple[str, ...] = (sys.executable, "-m", "sanctum.server")
 """Default args for spawning the MCP server subprocess. Pinned by AC-2b."""
 
 SCORING_METRIC_NAME: str = "sanctum_partial_credit_accuracy"
@@ -734,7 +735,9 @@ def _run_one_sanctum_question(
         # Anthropic message loop: send the question + tool surface; on
         # tool_use blocks, dispatch to MCP and append the tool_result;
         # stop on text-only responses.
-        messages: list[dict[str, Any]] = [{"role": "user", "content": question.text}]
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": f"[Case under investigation: {case_id}]\n\n{question.text}"}
+        ]
         tool_defs = _tool_definitions_for(question.family)
         for _turn in range(8):  # bounded loop — typed tools converge fast
             if time.monotonic() > deadline:

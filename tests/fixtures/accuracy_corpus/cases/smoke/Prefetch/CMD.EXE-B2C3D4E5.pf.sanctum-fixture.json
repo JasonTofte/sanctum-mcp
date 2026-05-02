@@ -1,0 +1,1 @@
+{"family": "SysMain", "tool": "get_prefetch", "events": [{"program_path": "C:\\Windows\\System32\\cmd.exe", "timestamp": "2024-01-15T11:01:00+00:00", "evidence_size_bytes": 1024, "extras": {"row_index": "0"}}]}

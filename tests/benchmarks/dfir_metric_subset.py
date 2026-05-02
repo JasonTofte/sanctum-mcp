@@ -65,34 +65,159 @@ class SubsetEntry:
 
 
 SUBSET: tuple[SubsetEntry, ...] = (
+    # --- AppCompat (Amcache) ---
     SubsetEntry(
         line_offset=0,
         family="AppCompat",
-        scoring_pattern=r"~(?i)\bAmcache\b",
-        justification="ProgramId lookup answerable from Amcache.hve InventoryApplicationFile.",
+        scoring_pattern=r"~(?i)\bmalware\.exe\b",
+        justification="Amcache question answerable from C:\\Temp\\malware.exe fixture row.",
     ),
     SubsetEntry(
         line_offset=1,
-        family="Explorer",
-        scoring_pattern=r"~(?i)\bUserAssist\b",
-        justification="GUI-launch attribution answerable from NTUSER.DAT UserAssist subkeys.",
+        family="AppCompat",
+        scoring_pattern=r"~(?i)\bsvchost\.exe\b",
+        justification="Latest Amcache entry is svchost.exe at 10:34.",
     ),
     SubsetEntry(
         line_offset=2,
-        family="BAM",
-        scoring_pattern=r"~(?i)\bBackgroundActivityModerator\b|\bBAM\b",
-        justification="Background-process executions answerable from SYSTEM hive BAM subkeys.",
+        family="AppCompat",
+        scoring_pattern=r"~(?i)\b5\b|\bfive\b",
+        justification="Amcache fixture has exactly 5 execution records.",
     ),
     SubsetEntry(
         line_offset=3,
-        family="Sysmon",
-        scoring_pattern=r"~(?i)EventID\s*[:=]?\s*1\b",
-        justification="Process-creation forensic question answerable from Sysmon EID 1 records.",
+        family="AppCompat",
+        scoring_pattern=r"~10:30",
+        justification="Earliest Amcache entry is at 10:30.",
     ),
     SubsetEntry(
         line_offset=4,
+        family="AppCompat",
+        scoring_pattern=r"~(?i)\bcalc\.exe\b",
+        justification="calc.exe is the Windows calculator in the Amcache fixture.",
+    ),
+    # --- Explorer/NTUSER (UserAssist) ---
+    SubsetEntry(
+        line_offset=5,
+        family="Explorer",
+        scoring_pattern=r"~(?i)\bstager\.exe\b",
+        justification="C:\\Temp\\stager.exe is the suspicious interactive launch in UserAssist fixture.",
+    ),
+    SubsetEntry(
+        line_offset=6,
+        family="Explorer",
+        scoring_pattern=r"~(?i)\breport\.docx\b",
+        justification="report.docx is the document opened per UserAssist fixture.",
+    ),
+    SubsetEntry(
+        line_offset=7,
+        family="Explorer",
+        scoring_pattern=r"~(?i)\breport\.docx\b",
+        justification="report.docx is the last UserAssist entry at 08:40.",
+    ),
+    SubsetEntry(
+        line_offset=8,
+        family="Explorer",
+        scoring_pattern=r"~(?i)\b5\b|\bfive\b",
+        justification="UserAssist fixture has exactly 5 GUI-launch records.",
+    ),
+    SubsetEntry(
+        line_offset=9,
+        family="Explorer",
+        scoring_pattern=r"~(?i)\bmspaint\.exe\b",
+        justification="mspaint.exe is the graphics application in the UserAssist fixture.",
+    ),
+    # --- Background-service (BAM) ---
+    SubsetEntry(
+        line_offset=10,
+        family="BAM",
+        scoring_pattern=r"~(?i)\bpersist\.exe\b",
+        justification="C:\\Temp\\persist.exe is the persistence executable in the BAM fixture.",
+    ),
+    SubsetEntry(
+        line_offset=11,
+        family="BAM",
+        scoring_pattern=r"~(?i)\bupdater\.exe\b",
+        justification="updater.exe in AppData\\Local\\Temp is the suspicious BAM entry.",
+    ),
+    SubsetEntry(
+        line_offset=12,
+        family="BAM",
+        scoring_pattern=r"~(?i)\b5\b|\bfive\b",
+        justification="BAM fixture has exactly 5 background process records.",
+    ),
+    SubsetEntry(
+        line_offset=13,
+        family="BAM",
+        scoring_pattern=r"~(?i)\bpersist\.exe\b",
+        justification="C:\\Temp\\persist.exe is the BAM entry from C:\\Temp.",
+    ),
+    SubsetEntry(
+        line_offset=14,
+        family="BAM",
+        scoring_pattern=r"~(?i)\bbackgroundtaskhost\.exe\b",
+        justification="backgroundtaskhost.exe is the earliest BAM record at 09:00.",
+    ),
+    # --- Kernel-ETW (Sysmon) ---
+    SubsetEntry(
+        line_offset=15,
+        family="Sysmon",
+        scoring_pattern=r"~(?i)\bc2agent\.exe\b",
+        justification="C:\\Temp\\c2agent.exe is the C2 agent in the Sysmon fixture.",
+    ),
+    SubsetEntry(
+        line_offset=16,
+        family="Sysmon",
+        scoring_pattern=r"~(?i)\bwhoami\.exe\b",
+        justification="whoami.exe is the reconnaissance tool in Sysmon records.",
+    ),
+    SubsetEntry(
+        line_offset=17,
+        family="Sysmon",
+        scoring_pattern=r"~(?i)\bpowershell\.exe\b",
+        justification="powershell.exe is the scripting engine in Sysmon process creation records.",
+    ),
+    SubsetEntry(
+        line_offset=18,
+        family="Sysmon",
+        scoring_pattern=r"~(?i)\b5\b|\bfive\b",
+        justification="Sysmon fixture has exactly 5 process creation events.",
+    ),
+    SubsetEntry(
+        line_offset=19,
+        family="Sysmon",
+        scoring_pattern=r"~(?i)\bc2agent\.exe\b",
+        justification="C:\\Temp\\c2agent.exe is the suspicious executable in Sysmon logs.",
+    ),
+    # --- SysMain (Prefetch) ---
+    SubsetEntry(
+        line_offset=20,
         family="SysMain",
-        scoring_pattern=r"~(?i)\bPrefetch\b|\.pf\b",
-        justification="Boot-time execution evidence answerable from SysMain Prefetch traces.",
+        scoring_pattern=r"~(?i)\bmimikatz\.exe\b",
+        justification="mimikatz.exe is the credential dumping tool in the Prefetch fixture.",
+    ),
+    SubsetEntry(
+        line_offset=21,
+        family="SysMain",
+        scoring_pattern=r"~(?i)\bpsexec\.exe\b",
+        justification="psexec.exe is the lateral movement tool in the Prefetch fixture.",
+    ),
+    SubsetEntry(
+        line_offset=22,
+        family="SysMain",
+        scoring_pattern=r"~(?i)\b5\b|\bfive\b",
+        justification="Prefetch fixture has exactly 5 entries.",
+    ),
+    SubsetEntry(
+        line_offset=23,
+        family="SysMain",
+        scoring_pattern=r"~(?i)\bmimikatz\.exe\b|\bpsexec\.exe\b",
+        justification="Both mimikatz.exe and psexec.exe are C:\\Temp Prefetch entries.",
+    ),
+    SubsetEntry(
+        line_offset=24,
+        family="SysMain",
+        scoring_pattern=r"~(?i)\bnet\.exe\b",
+        justification="net.exe is the networking utility in the Prefetch fixture.",
     ),
 )

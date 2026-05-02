@@ -1,0 +1,1 @@
+{"family": "SysMain", "tool": "get_prefetch", "events": [{"program_path": "C:\\Temp\\mimikatz.exe", "timestamp": "2024-01-15T11:02:00+00:00", "evidence_size_bytes": 98304, "extras": {"row_index": "0"}}]}

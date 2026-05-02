@@ -268,78 +268,92 @@ reviewer can spot-check by reading the audit ledger directly (see
 
 ## Numbers
 
-> The first eval run will paste here. **Until that run completes,
-> the table below is a placeholder and the absence of numbers is
-> the message** — the methodology is the artifact.
+### Methodology note
 
-### Methodology note (auto-filled at eval time)
-
-A judge reading the Numbers table should be able to confirm the
-following five facts inline, without scrolling to the upstream
-methodology section. The first eval run populates this block from
-the EvalReport JSON:
+A judge reading the Numbers table can confirm the following facts inline:
 
 | Fact | Value | Source-of-truth |
 |---|---|---|
-| Model version | `pending` (e.g., `claude-opus-4-7-20260301`) | `EvalReport.model_id` |
-| DFIR-Metric commit | `pending` (40-char SHA) | `EvalReport.dfir_metric_commit_sha` |
-| Sanctum version | `pending` (e.g., `0.4.0`) | `EvalReport.sanctum_version` |
-| Run count per question | `N=3` (majority vote across runs) | `EvalReport.n_runs_per_q` |
+| Model version | `claude-opus-4-7` | `EvalReport.model_id` |
+| DFIR-Metric corpus | local-v1 (25-question self-contained corpus, see §Subset-selection rationale) | `EvalReport.dfir_metric_commit_sha` |
+| Sanctum version | `0.4.1` | `EvalReport.sanctum_version` |
+| Run count per question | N=1 (single-run; N=3 deferred to v2 per Honest limits §N=3) | `EvalReport.n_runs_per_q` |
 | Arm parity | identical prompts, fixtures, scoring pattern; arms differ only in MCP tool availability | `scripts/run_dfir_metric_eval.py` |
 | Confidence intervals | Wilson score, 95% level | `scripts/compute_cis.py` |
 
 Confidence-interval reporting follows the small-N proportion
 recommendation in Brown, Cai & DasGupta, *Statistical Science*
 2001 — Wilson score intervals are preferred over CLT-based
-intervals at N=45. CIs are emitted by `scripts/compute_cis.py`
-and pasted in the per-arm and per-arm × per-family tables below.
+intervals at N=45.
 
-<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-*.json` -->
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260502T021842-68272d44.json` -->
+
+### Run `eval-20260502T021842-68272d44` — sanctum_partial_credit_accuracy
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `local-v1`
+- Window: `2026-05-02T02:14:11Z` → `2026-05-02T02:18:42Z` · N_questions=25 · N_runs=1 · arms=['sanctum', 'bare'] · cost=$1.2805
+
+> ⚠ **high variance — interpret with caution** (`bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
+
+**Per-arm summary**
 
 | Arm | accuracy_mean ± std | abstention_rate | false_confidence_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
 |---|---|---|---|---|---|---|---|
-| `sanctum` | `pending` | `pending` | `pending` | `pending` | `pending` | `pending` | `pending` |
-| `bare`    | `pending` | n/a | n/a | `pending` | `pending` | `pending` | `pending` |
+| `sanctum` | 100.0% ± 0.0% | 100.0% | n/a | 8978 | 7353 | 478 | $1.2177 |
+| `bare` | 24.0% ± 42.7% ⚠ | n/a | n/a | 1851 | 187 | 63 | $0.0629 |
+
+**Per-family breakdown** (single-author tagging bias is visible here)
 
 | Arm | Family | tagged_count | correct_count | accuracy |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | `pending` | `pending` | `pending` |
-| `sanctum` | `Explorer`  | `pending` | `pending` | `pending` |
-| `sanctum` | `BAM`       | `pending` | `pending` | `pending` |
-| `sanctum` | `Sysmon`    | `pending` | `pending` | `pending` |
-| `sanctum` | `SysMain`   | `pending` | `pending` | `pending` |
-| `bare`    | `AppCompat` | `pending` | `pending` | `pending` |
-| `bare`    | `Explorer`  | `pending` | `pending` | `pending` |
-| `bare`    | `BAM`       | `pending` | `pending` | `pending` |
-| `bare`    | `Sysmon`    | `pending` | `pending` | `pending` |
-| `bare`    | `SysMain`   | `pending` | `pending` | `pending` |
+| `sanctum` | `AppCompat` | 5 | 5 | 100.0% |
+| `sanctum` | `BAM` | 5 | 5 | 100.0% |
+| `sanctum` | `Explorer` | 5 | 5 | 100.0% |
+| `sanctum` | `SysMain` | 5 | 5 | 100.0% |
+| `sanctum` | `Sysmon` | 5 | 5 | 100.0% |
+| `bare` | `AppCompat` | 5 | 1 | 20.0% |
+| `bare` | `BAM` | 5 | 0 | 0.0% |
+| `bare` | `Explorer` | 5 | 1 | 20.0% |
+| `bare` | `SysMain` | 5 | 3 | 60.0% |
+| `bare` | `Sysmon` | 5 | 1 | 20.0% |
+
+_Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
 
 <!-- END pasted fragment -->
 
-<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-*.json` -->
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260502T021842-68272d44.json` -->
 
-| Arm | k / n | accuracy | Wilson 95% CI |
+**Wilson 95% confidence intervals**
+
+_At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recommended small-N method (Brown, Cai & DasGupta, Statistical Science 2001)._
+
+**Per-arm accuracy**
+
+| Arm | n | accuracy | Wilson 95% CI |
 |---|---|---|---|
-| `sanctum` | `pending` | `pending` | `pending` |
-| `bare`    | `pending` | `pending` | `pending` |
+| `sanctum` | 25 | 100.0% | [86.7%, 100.0%] |
+| `bare` | 25 | 24.0% | [11.5%, 43.4%] |
 
-| Arm | Family | k / n | accuracy | Wilson 95% CI |
+**Per-arm × per-family**
+
+| Arm | Family | n | accuracy | Wilson 95% CI |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | `pending` | `pending` | `pending` |
-| `sanctum` | `Explorer`  | `pending` | `pending` | `pending` |
-| `sanctum` | `BAM`       | `pending` | `pending` | `pending` |
-| `sanctum` | `Sysmon`    | `pending` | `pending` | `pending` |
-| `sanctum` | `SysMain`   | `pending` | `pending` | `pending` |
-| `bare`    | `AppCompat` | `pending` | `pending` | `pending` |
-| `bare`    | `Explorer`  | `pending` | `pending` | `pending` |
-| `bare`    | `BAM`       | `pending` | `pending` | `pending` |
-| `bare`    | `Sysmon`    | `pending` | `pending` | `pending` |
-| `bare`    | `SysMain`   | `pending` | `pending` | `pending` |
+| `sanctum` | `AppCompat` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `BAM` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `Explorer` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `SysMain` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `Sysmon` | 5 | 100.0% | [56.6%, 100.0%] |
+| `bare` | `AppCompat` | 5 | 20.0% | [3.6%, 62.4%] |
+| `bare` | `BAM` | 5 | 0.0% | [0.0%, 43.4%] |
+| `bare` | `Explorer` | 5 | 20.0% | [3.6%, 62.4%] |
+| `bare` | `SysMain` | 5 | 60.0% | [23.1%, 88.2%] |
+| `bare` | `Sysmon` | 5 | 20.0% | [3.6%, 62.4%] |
 
-**Arm-difference interpretation** (auto-filled by `compute_cis.py`):
-non-overlap of arm CIs is sufficient but not necessary for
-significance; overlap does not rule out a real difference (the
-narrower-overlap rule applies — see `scripts/compute_cis.py`).
+**Arm-difference interpretation**
+
+- sanctum: 100.0% [86.7%, 100.0%]  ·  bare: 24.0% [11.5%, 43.4%]
+- Point-estimate gap: `sanctum − bare = 76.0%`
+- Per-arm CIs do NOT overlap, which is a sufficient (but not necessary) condition for a statistically significant difference at the α corresponding to this confidence level.
 
 <!-- END pasted fragment -->
 
@@ -483,7 +497,7 @@ together so the chart remains reproducible from the stored measurements.
 
 ## Followups
 
-- [ ] Run the first eval; populate the Numbers table.
+- [x] Run the first eval; populate the Numbers table. (`eval-20260502T021842-68272d44`: sanctum 100%, bare 24%, N=25)
 - [ ] Populate accuracy in the Pareto chart once the Numbers table is filled.
 - [ ] Phase 5: add C3 (parallel + F4 temporal-coupling demoter) to the chart.
 - [ ] Multi-model matrix (v2) — re-run against Sonnet 4.6 and

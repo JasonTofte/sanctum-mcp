@@ -199,7 +199,8 @@ def test_run_eval_default_subprocess_args_unchanged() -> None:
     against a future contributor adding a CLI shim that would let an
     attacker inject arbitrary commands.
     """
-    assert eval_driver.DEFAULT_MCP_SUBPROCESS_ARGS == ("python", "-m", "sanctum.server")
+    import sys
+    assert eval_driver.DEFAULT_MCP_SUBPROCESS_ARGS == (sys.executable, "-m", "sanctum.server")
 
 
 # --- AC-9: high-variance flag --------------------------------------------
