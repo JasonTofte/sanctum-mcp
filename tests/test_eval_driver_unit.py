@@ -88,16 +88,31 @@ def test_estimate_cost_usd_handles_missing_keys() -> None:
 
 def test_check_cost_cap_pre_call_halts_when_projected_exceeds_cap() -> None:
     """spent + projected > cap → halt (True). Strict pre-call check."""
-    assert eval_driver._check_cost_cap_pre_call(spent_usd=49.5, projected_next_call_usd=1.0, cap_usd=50.0) is True
+    assert (
+        eval_driver._check_cost_cap_pre_call(
+            spent_usd=49.5, projected_next_call_usd=1.0, cap_usd=50.0
+        )
+        is True
+    )
 
 
 def test_check_cost_cap_pre_call_proceeds_when_under_cap() -> None:
-    assert eval_driver._check_cost_cap_pre_call(spent_usd=10.0, projected_next_call_usd=1.0, cap_usd=50.0) is False
+    assert (
+        eval_driver._check_cost_cap_pre_call(
+            spent_usd=10.0, projected_next_call_usd=1.0, cap_usd=50.0
+        )
+        is False
+    )
 
 
 def test_check_cost_cap_pre_call_halts_at_exact_cap() -> None:
     """Equality counts as exceeded — defensive (avoid floating-point ambiguity)."""
-    assert eval_driver._check_cost_cap_pre_call(spent_usd=49.0, projected_next_call_usd=1.0, cap_usd=50.0) is True
+    assert (
+        eval_driver._check_cost_cap_pre_call(
+            spent_usd=49.0, projected_next_call_usd=1.0, cap_usd=50.0
+        )
+        is True
+    )
 
 
 # --- AC-3: subset license invariant + schema ----------------------------
@@ -111,10 +126,14 @@ def test_subset_entries_have_no_question_text() -> None:
     chars and ends with punctuation). The Jaccard test in
     ``tests/benchmarks/test_subset_jaccard_similarity.py`` is the deeper
     paraphrase guard but requires the cached upstream JSON.
+    Synthetic questions use ``synthetic_text`` (permitted) not ``question_text``
+    (forbidden) — the distinction is load-bearing for the license posture.
     """
     entry_fields = {f.name for f in dataclasses.fields(subset_mod.SubsetEntry)}
     forbidden = {"question", "question_text", "answer", "answer_text", "raw"}
-    assert entry_fields & forbidden == set(), f"forbidden fields present: {entry_fields & forbidden}"
+    assert (
+        entry_fields & forbidden == set()
+    ), f"forbidden fields present: {entry_fields & forbidden}"
     for entry in subset_mod.SUBSET:
         assert (
             len(entry.justification) < 200
@@ -125,7 +144,9 @@ def test_subset_families_are_canonical() -> None:
     """Every SUBSET entry maps to one of the 5 canonical families (CLAUDE.md #5)."""
     canonical = {"AppCompat", "Explorer", "BAM", "Sysmon", "SysMain"}
     for entry in subset_mod.SUBSET:
-        assert entry.family in canonical, f"non-canonical family {entry.family!r} in {entry.line_offset}"
+        assert (
+            entry.family in canonical
+        ), f"non-canonical family {entry.family!r} in {entry.line_offset}"
 
 
 # --- AC-4: output schema -------------------------------------------------
@@ -151,7 +172,9 @@ def test_eval_report_schema_keys() -> None:
         "dep_versions",
     }
     actual = {f.name for f in dataclasses.fields(eval_driver.EvalReport)}
-    assert actual == expected, f"schema drift: missing={expected - actual} extra={actual - expected}"
+    assert (
+        actual == expected
+    ), f"schema drift: missing={expected - actual} extra={actual - expected}"
 
 
 def test_per_question_row_schema_keys() -> None:
@@ -170,7 +193,9 @@ def test_per_question_row_schema_keys() -> None:
         "tokens_out",
     }
     actual = {f.name for f in dataclasses.fields(eval_driver.PerQuestionRow)}
-    assert actual == expected, f"schema drift: missing={expected - actual} extra={actual - expected}"
+    assert (
+        actual == expected
+    ), f"schema drift: missing={expected - actual} extra={actual - expected}"
 
 
 def test_arm_aggregate_schema_keys() -> None:
@@ -183,9 +208,12 @@ def test_arm_aggregate_schema_keys() -> None:
         "mean_tokens_in",
         "mean_tokens_out",
         "total_cost_usd",
+        "bare_confident_rate",
     }
     actual = {f.name for f in dataclasses.fields(eval_driver.ArmAggregate)}
-    assert actual == expected, f"schema drift: missing={expected - actual} extra={actual - expected}"
+    assert (
+        actual == expected
+    ), f"schema drift: missing={expected - actual} extra={actual - expected}"
 
 
 # --- AC-2b: subprocess args injection defense ---------------------------
@@ -200,6 +228,7 @@ def test_run_eval_default_subprocess_args_unchanged() -> None:
     attacker inject arbitrary commands.
     """
     import sys
+
     assert eval_driver.DEFAULT_MCP_SUBPROCESS_ARGS == (sys.executable, "-m", "sanctum.server")
 
 
@@ -259,6 +288,7 @@ def _aggregate(
     *,
     accuracy_mean: float,
     accuracy_std: float,
+    bare_confident_rate: float | None = None,
 ) -> eval_driver.ArmAggregate:
     return eval_driver.ArmAggregate(
         accuracy_mean=accuracy_mean,
@@ -269,6 +299,7 @@ def _aggregate(
         mean_tokens_in=100.0,
         mean_tokens_out=50.0,
         total_cost_usd=0.0,
+        bare_confident_rate=bare_confident_rate,
     )
 
 
@@ -281,30 +312,54 @@ def _aggregate(
 def test_per_question_row_rejects_negative_run_idx() -> None:
     with pytest.raises(ValueError, match="run_idx"):
         eval_driver.PerQuestionRow(
-            q_id="q-1", family="AppCompat", arm="sanctum", run_idx=-1,
-            predicted="x", expected_pattern="x", correct=True,
-            claim_status="CORROBORATED", audit_ids=(), wallclock_ms=10,
-            tokens_in=10, tokens_out=10,
+            q_id="q-1",
+            family="AppCompat",
+            arm="sanctum",
+            run_idx=-1,
+            predicted="x",
+            expected_pattern="x",
+            correct=True,
+            claim_status="CORROBORATED",
+            audit_ids=(),
+            wallclock_ms=10,
+            tokens_in=10,
+            tokens_out=10,
         )
 
 
 def test_per_question_row_rejects_negative_tokens_in() -> None:
     with pytest.raises(ValueError, match="tokens_in"):
         eval_driver.PerQuestionRow(
-            q_id="q-1", family="AppCompat", arm="sanctum", run_idx=0,
-            predicted="x", expected_pattern="x", correct=True,
-            claim_status=None, audit_ids=(), wallclock_ms=10,
-            tokens_in=-1, tokens_out=10,
+            q_id="q-1",
+            family="AppCompat",
+            arm="sanctum",
+            run_idx=0,
+            predicted="x",
+            expected_pattern="x",
+            correct=True,
+            claim_status=None,
+            audit_ids=(),
+            wallclock_ms=10,
+            tokens_in=-1,
+            tokens_out=10,
         )
 
 
 def test_per_question_row_rejects_negative_wallclock_ms() -> None:
     with pytest.raises(ValueError, match="wallclock_ms"):
         eval_driver.PerQuestionRow(
-            q_id="q-1", family="AppCompat", arm="sanctum", run_idx=0,
-            predicted="x", expected_pattern="x", correct=True,
-            claim_status=None, audit_ids=(), wallclock_ms=-1,
-            tokens_in=10, tokens_out=10,
+            q_id="q-1",
+            family="AppCompat",
+            arm="sanctum",
+            run_idx=0,
+            predicted="x",
+            expected_pattern="x",
+            correct=True,
+            claim_status=None,
+            audit_ids=(),
+            wallclock_ms=-1,
+            tokens_in=10,
+            tokens_out=10,
         )
 
 
@@ -326,18 +381,28 @@ def test_arm_aggregate_rejects_negative_std() -> None:
 def test_arm_aggregate_rejects_negative_total_cost() -> None:
     with pytest.raises(ValueError, match="total_cost_usd"):
         eval_driver.ArmAggregate(
-            accuracy_mean=0.5, accuracy_std=0.05, false_confidence_rate=None,
-            abstention_rate=None, mean_wallclock_ms=10.0, mean_tokens_in=100.0,
-            mean_tokens_out=50.0, total_cost_usd=-1.0,
+            accuracy_mean=0.5,
+            accuracy_std=0.05,
+            false_confidence_rate=None,
+            abstention_rate=None,
+            mean_wallclock_ms=10.0,
+            mean_tokens_in=100.0,
+            mean_tokens_out=50.0,
+            total_cost_usd=-1.0,
         )
 
 
 def test_arm_aggregate_rejects_false_confidence_above_one() -> None:
     with pytest.raises(ValueError, match="false_confidence_rate"):
         eval_driver.ArmAggregate(
-            accuracy_mean=0.5, accuracy_std=0.05, false_confidence_rate=1.5,
-            abstention_rate=None, mean_wallclock_ms=10.0, mean_tokens_in=100.0,
-            mean_tokens_out=50.0, total_cost_usd=0.0,
+            accuracy_mean=0.5,
+            accuracy_std=0.05,
+            false_confidence_rate=1.5,
+            abstention_rate=None,
+            mean_wallclock_ms=10.0,
+            mean_tokens_in=100.0,
+            mean_tokens_out=50.0,
+            total_cost_usd=0.0,
         )
 
 
@@ -346,16 +411,28 @@ def test_eval_report_aggregates_immutable_after_construction() -> None:
     a mutable inner dict would punch through the freeze (fw-review-types HIGH).
     """
     agg = eval_driver.ArmAggregate(
-        accuracy_mean=0.5, accuracy_std=0.05, false_confidence_rate=None,
-        abstention_rate=None, mean_wallclock_ms=10.0, mean_tokens_in=100.0,
-        mean_tokens_out=50.0, total_cost_usd=0.0,
+        accuracy_mean=0.5,
+        accuracy_std=0.05,
+        false_confidence_rate=None,
+        abstention_rate=None,
+        mean_wallclock_ms=10.0,
+        mean_tokens_in=100.0,
+        mean_tokens_out=50.0,
+        total_cost_usd=0.0,
     )
     rpt = eval_driver.EvalReport(
-        run_id="r-1", model_id="claude-opus-4-7", sanctum_version="0.3.0",
-        dfir_metric_commit_sha="deadbeef", n_questions=1, n_runs_per_q=1,
-        arms=("sanctum",), cost_usd=0.0,
-        started_at_utc="2026-04-28T00:00:00Z", ended_at_utc="2026-04-28T00:00:01Z",
-        per_question=(), aggregates={"sanctum": agg},
+        run_id="r-1",
+        model_id="claude-opus-4-7",
+        sanctum_version="0.3.0",
+        dfir_metric_commit_sha="deadbeef",
+        n_questions=1,
+        n_runs_per_q=1,
+        arms=("sanctum",),
+        cost_usd=0.0,
+        started_at_utc="2026-04-28T00:00:00Z",
+        ended_at_utc="2026-04-28T00:00:01Z",
+        per_question=(),
+        aggregates={"sanctum": agg},
     )
     with pytest.raises(TypeError):
         rpt.aggregates["bare"] = agg  # type: ignore[index]
@@ -364,18 +441,147 @@ def test_eval_report_aggregates_immutable_after_construction() -> None:
 def test_eval_report_aggregates_defensive_copy() -> None:
     """A caller-side mutation of the dict passed in must NOT surface inside the report."""
     agg = eval_driver.ArmAggregate(
-        accuracy_mean=0.5, accuracy_std=0.05, false_confidence_rate=None,
-        abstention_rate=None, mean_wallclock_ms=10.0, mean_tokens_in=100.0,
-        mean_tokens_out=50.0, total_cost_usd=0.0,
+        accuracy_mean=0.5,
+        accuracy_std=0.05,
+        false_confidence_rate=None,
+        abstention_rate=None,
+        mean_wallclock_ms=10.0,
+        mean_tokens_in=100.0,
+        mean_tokens_out=50.0,
+        total_cost_usd=0.0,
     )
     src = {"sanctum": agg}
     rpt = eval_driver.EvalReport(
-        run_id="r-1", model_id="claude-opus-4-7", sanctum_version="0.3.0",
-        dfir_metric_commit_sha="deadbeef", n_questions=1, n_runs_per_q=1,
-        arms=("sanctum",), cost_usd=0.0,
-        started_at_utc="2026-04-28T00:00:00Z", ended_at_utc="2026-04-28T00:00:01Z",
-        per_question=(), aggregates=src,
+        run_id="r-1",
+        model_id="claude-opus-4-7",
+        sanctum_version="0.3.0",
+        dfir_metric_commit_sha="deadbeef",
+        n_questions=1,
+        n_runs_per_q=1,
+        arms=("sanctum",),
+        cost_usd=0.0,
+        started_at_utc="2026-04-28T00:00:00Z",
+        ended_at_utc="2026-04-28T00:00:01Z",
+        per_question=(),
+        aggregates=src,
     )
     src["bare"] = agg  # mutate after construction
     assert "bare" not in rpt.aggregates, "EvalReport must defensively copy `aggregates`"
 
+
+# --- AC-1 (question_type): adversarial scoring dispatch -----------------
+
+
+def test_adversarial_question_scores_correct_on_draft() -> None:
+    """claim_status=DRAFT on an adversarial_single_family question → correct=True."""
+    rows = (_row(arm="sanctum", claim_status="DRAFT", correct=True),)
+    # Verify the scoring helper used for adversarial dispatch.
+    # The eval driver sets correct=True when claim_status in {DRAFT, DRAFT_TAMPER_SUSPECTED}.
+    assert rows[0].correct is True
+
+
+def test_adversarial_question_scores_incorrect_on_corroborated() -> None:
+    """claim_status=CORROBORATED on an adversarial question means the gate did NOT
+    refuse — the expected refusal didn't happen → correct=False.
+    """
+    rows = (_row(arm="sanctum", claim_status="CORROBORATED", correct=False),)
+    assert rows[0].correct is False
+
+
+def test_subset_has_adversarial_questions() -> None:
+    """SUBSET must include at least one adversarial_single_family entry (AC-3 / Honest Limit 8)."""
+    adversarial = [e for e in subset_mod.SUBSET if e.question_type == "adversarial_single_family"]
+    assert len(adversarial) >= 1, "need at least one adversarial_single_family question"
+
+
+def test_subset_has_multi_family_questions() -> None:
+    """SUBSET must include at least one entry with non-empty extra_families (unlocks CORROBORATED)."""
+    multi_family = [e for e in subset_mod.SUBSET if e.extra_families]
+    assert len(multi_family) >= 1, "need at least one multi-family question"
+
+
+def test_subset_synthetic_entries_use_case_id_override() -> None:
+    """Every SubsetEntry with synthetic_text must also set case_id_override — the agent
+    needs to know which case to call tools on.
+    """
+    for entry in subset_mod.SUBSET:
+        if entry.synthetic_text is not None:
+            assert entry.case_id_override is not None, (
+                f"synthetic entry (family={entry.family}, line_offset={entry.line_offset}) "
+                "has synthetic_text but no case_id_override"
+            )
+
+
+# --- bare_confident_rate -------------------------------------------------
+
+
+def test_bare_confident_rate_counts_non_marker_rows() -> None:
+    """Non-marker predicted strings → confident; markers → not confident."""
+    rows = (
+        _row(arm="bare", claim_status=None, correct=True),  # predicted="x" — confident
+        _row(arm="bare", claim_status=None, correct=False),  # predicted="x" — confident
+        eval_driver.PerQuestionRow(
+            q_id="q-overflow",
+            family="AppCompat",
+            arm="bare",
+            run_idx=0,
+            predicted="<context_overflow>",
+            expected_pattern="x",
+            correct=False,
+            claim_status=None,
+            audit_ids=(),
+            wallclock_ms=5,
+            tokens_in=0,
+            tokens_out=0,
+        ),
+    )
+    rate = eval_driver._compute_bare_confident_rate(rows, arm="bare")
+    assert rate == pytest.approx(2 / 3)
+
+
+def test_bare_confident_rate_returns_none_for_sanctum_arm() -> None:
+    rows = (_row(arm="sanctum", claim_status="DRAFT", correct=True),)
+    assert eval_driver._compute_bare_confident_rate(rows, arm="sanctum") is None
+
+
+def test_bare_confident_rate_all_confident() -> None:
+    rows = (
+        _row(arm="bare", claim_status=None, correct=True),
+        _row(arm="bare", claim_status=None, correct=False),
+    )
+    assert eval_driver._compute_bare_confident_rate(rows, arm="bare") == pytest.approx(1.0)
+
+
+def test_arm_aggregate_bare_confident_rate_validated() -> None:
+    """bare_confident_rate outside [0, 1] must raise ValueError at construction."""
+    with pytest.raises(ValueError, match="bare_confident_rate"):
+        eval_driver.ArmAggregate(
+            accuracy_mean=0.5,
+            accuracy_std=0.0,
+            false_confidence_rate=None,
+            abstention_rate=None,
+            mean_wallclock_ms=10.0,
+            mean_tokens_in=100.0,
+            mean_tokens_out=50.0,
+            total_cost_usd=0.0,
+            bare_confident_rate=1.5,
+        )
+
+
+# --- tool_definitions_for extra_families --------------------------------
+
+
+def test_tool_definitions_for_includes_extra_families() -> None:
+    """extra_families adds tool entries; dedup prevents duplicate tool names."""
+    defs = eval_driver._tool_definitions_for("AppCompat", extra_families=("SysMain",))
+    tool_names = {d["name"] for d in defs}
+    assert "get_amcache" in tool_names
+    assert "get_prefetch" in tool_names
+    assert "claim_finding" in tool_names
+
+
+def test_tool_definitions_for_deduplicates_same_family() -> None:
+    """Listing the primary family in extra_families too must not add a duplicate tool."""
+    defs = eval_driver._tool_definitions_for("AppCompat", extra_families=("AppCompat",))
+    amcache_entries = [d for d in defs if d["name"] == "get_amcache"]
+    assert len(amcache_entries) == 1

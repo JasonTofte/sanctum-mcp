@@ -50,10 +50,11 @@ table (AC-9).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 Family = Literal["AppCompat", "Explorer", "BAM", "Sysmon", "SysMain"]
+QuestionType = Literal["factual", "adversarial_single_family"]
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,20 @@ class SubsetEntry:
     family: Family
     scoring_pattern: str
     justification: str
+    question_type: QuestionType = "factual"
+    # Additional families whose tools are exposed to the agent for multi-family
+    # corroboration questions. The `family` field remains the primary tag for
+    # reporting; `extra_families` extends the tool surface without changing it.
+    extra_families: tuple[str, ...] = field(default_factory=tuple)
+    # When set, the eval driver uses this text directly instead of fetching
+    # from the upstream DFIR-Metric corpus via `line_offset`. Enables
+    # synthetic questions that are license-clean (no upstream text quoted)
+    # and do not require the upstream corpus cache.
+    synthetic_text: str | None = None
+    # When set, overrides the eval run's default case_id so the agent calls
+    # tools against this specific case (fixture sidecars must exist under
+    # `tests/fixtures/accuracy_corpus/cases/<case_id_override>/`).
+    case_id_override: str | None = None
 
 
 SUBSET: tuple[SubsetEntry, ...] = (
@@ -219,5 +234,75 @@ SUBSET: tuple[SubsetEntry, ...] = (
         family="SysMain",
         scoring_pattern=r"~(?i)\bnet\.exe\b",
         justification="net.exe is the networking utility in the Prefetch fixture.",
+    ),
+    # --- Multi-family corroboration (synthetic, no upstream corpus lookup) ---
+    # These questions require the agent to call tools from ≥2 families and then
+    # call claim_finding with both audit_ids → fires the CORROBORATED path.
+    # Fixture sidecars live under tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/.
+    SubsetEntry(
+        line_offset=-1,  # synthetic — no upstream corpus lookup (synthetic_text set)
+        family="AppCompat",
+        extra_families=("SysMain",),
+        scoring_pattern=r"~(?i)\bc2agent\.exe\b",
+        justification="c2agent.exe appears in both Amcache and Prefetch in mf_c2agent_001.",
+        synthetic_text=(
+            "Call get_amcache and get_prefetch for this case, then call claim_finding "
+            "citing both audit_ids. What suspicious executable from C:\\Temp appears "
+            "in both Amcache execution records and Prefetch entries?"
+        ),
+        case_id_override="mf_c2agent_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="AppCompat",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bc2agent\.exe\b",
+        justification="c2agent.exe appears in both Amcache and Sysmon in mf_c2agent_001.",
+        synthetic_text=(
+            "Call get_amcache and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What executable from C:\\Temp appears in both "
+            "Amcache records and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_c2agent_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="SysMain",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bc2agent\.exe\b",
+        justification="c2agent.exe appears in both Prefetch and Sysmon in mf_c2agent_001.",
+        synthetic_text=(
+            "Call get_prefetch and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What suspicious executable from C:\\Temp appears "
+            "in both Prefetch entries and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_c2agent_001",
+    ),
+    # --- Adversarial single-family (correct answer = DRAFT, gate must refuse) ---
+    # The agent has only one family's tool available and is asked to corroborate.
+    # claim_finding with a single-family audit_id must return DRAFT — not CORROBORATED.
+    SubsetEntry(
+        line_offset=-1,
+        family="AppCompat",
+        scoring_pattern=r"~(?i)\bdraft\b",  # fallback; adversarial scoring ignores this
+        question_type="adversarial_single_family",
+        justification="Single Amcache audit_id cannot satisfy the two-family gate.",
+        synthetic_text=(
+            "Call get_amcache for this case, then immediately call claim_finding "
+            "citing only that audit_id. What verdict tier does claim_finding return?"
+        ),
+        case_id_override="smoke",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="SysMain",
+        scoring_pattern=r"~(?i)\bdraft\b",
+        question_type="adversarial_single_family",
+        justification="Single Prefetch audit_id cannot satisfy the two-family gate.",
+        synthetic_text=(
+            "Call get_prefetch for this case, then immediately call claim_finding "
+            "citing only that audit_id. What verdict tier does claim_finding return?"
+        ),
+        case_id_override="smoke",
     ),
 )

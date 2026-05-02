@@ -286,6 +286,81 @@ recommendation in Brown, Cai & DasGupta, *Statistical Science*
 2001 — Wilson score intervals are preferred over CLT-based
 intervals at N=45.
 
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260502T053601-c159b11b.json` -->
+
+### Run `eval-20260502T053601-c159b11b` — sanctum_partial_credit_accuracy
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `local-v1`
+- Window: `2026-05-02T05:12:50Z` → `2026-05-02T05:36:01Z` · N_questions=30 · N_runs=1 · arms=['sanctum', 'bare'] · cost=$1.6458
+
+> ⚠ **high variance — interpret with caution** (`bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
+
+**Per-arm summary**
+
+| Arm | accuracy_mean ± std | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
+|---|---|---|---|---|---|---|---|---|
+| `sanctum` | 100.0% ± 0.0% | 90.0% | 0.0% | n/a | 29818 | 7476 | 534 | $1.5220 |
+| `bare` | 23.3% ± 42.3% ⚠ | n/a | n/a | 100.0% | 2924 | 189 | 127 | $0.1238 |
+
+**Per-family breakdown** (single-author tagging bias is visible here)
+
+| Arm | Family | tagged_count | correct_count | accuracy |
+|---|---|---|---|---|
+| `sanctum` | `AppCompat` | 8 | 8 | 100.0% |
+| `sanctum` | `BAM` | 5 | 5 | 100.0% |
+| `sanctum` | `Explorer` | 5 | 5 | 100.0% |
+| `sanctum` | `SysMain` | 7 | 7 | 100.0% |
+| `sanctum` | `Sysmon` | 5 | 5 | 100.0% |
+| `bare` | `AppCompat` | 8 | 2 | 25.0% |
+| `bare` | `BAM` | 5 | 0 | 0.0% |
+| `bare` | `Explorer` | 5 | 1 | 20.0% |
+| `bare` | `SysMain` | 7 | 3 | 42.9% |
+| `bare` | `Sysmon` | 5 | 1 | 20.0% |
+
+_Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
+
+<!-- END pasted fragment -->
+
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260502T053601-c159b11b.json` -->
+
+**Wilson 95% confidence intervals**
+
+_At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recommended small-N method (Brown, Cai & DasGupta, Statistical Science 2001)._
+
+**Per-arm accuracy**
+
+| Arm | n | accuracy | Wilson 95% CI |
+|---|---|---|---|
+| `sanctum` | 30 | 100.0% | [88.6%, 100.0%] |
+| `bare` | 30 | 23.3% | [11.8%, 40.9%] |
+
+**Per-arm × per-family**
+
+| Arm | Family | n | accuracy | Wilson 95% CI |
+|---|---|---|---|---|
+| `sanctum` | `AppCompat` | 8 | 100.0% | [67.6%, 100.0%] |
+| `sanctum` | `BAM` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `Explorer` | 5 | 100.0% | [56.6%, 100.0%] |
+| `sanctum` | `SysMain` | 7 | 100.0% | [64.6%, 100.0%] |
+| `sanctum` | `Sysmon` | 5 | 100.0% | [56.6%, 100.0%] |
+| `bare` | `AppCompat` | 8 | 25.0% | [7.1%, 59.1%] |
+| `bare` | `BAM` | 5 | 0.0% | [0.0%, 43.4%] |
+| `bare` | `Explorer` | 5 | 20.0% | [3.6%, 62.4%] |
+| `bare` | `SysMain` | 7 | 42.9% | [15.8%, 75.0%] |
+| `bare` | `Sysmon` | 5 | 20.0% | [3.6%, 62.4%] |
+
+**Arm-difference interpretation**
+
+- sanctum: 100.0% [88.6%, 100.0%]  ·  bare: 23.3% [11.8%, 40.9%]
+- Point-estimate gap: `sanctum − bare = 76.7%`
+- Per-arm CIs do NOT overlap, which is a sufficient (but not necessary) condition for a statistically significant difference at the α corresponding to this confidence level.
+
+<!-- END pasted fragment -->
+
+---
+
+_Prior run (N=25, before multi-family + adversarial questions added):_
+
 <!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260502T021842-68272d44.json` -->
 
 ### Run `eval-20260502T021842-68272d44` — sanctum_partial_credit_accuracy
@@ -421,6 +496,51 @@ The `c_scale` field is present on every `Finding` returned by
    correctness-preserving choice (we report what happened) but
    means very large evidence files systematically penalise the
    bare arm in the comparison.
+7. **abstention_rate = 100% is a corpus artifact, not a gate defect.**
+   All 25 Sanctum-arm rows returned `DRAFT` (single-family claims).
+   `abstention_rate = 1.0` means the gate correctly categorizes
+   single-family inputs as unconfirmed — that is the gate working as
+   designed. It does not mean the gate is broken or that Sanctum
+   never produces `CORROBORATED` output. The eval corpus was
+   deliberately constructed as single-family questions to test tool
+   I/O accuracy; none of the 25 questions require multi-family
+   corroboration to answer. Add multi-family questions (see
+   §Followups) to exercise the `DRAFT → CORROBORATED` promotion path.
+8. **Corpus tests tool I/O, not gate behavior.** All 25 questions are
+   single-family by design: they prove the data-extraction and
+   pattern-matching layers work (100% accuracy), but they do not
+   demonstrate the `CORROBORATED` or `FINAL` paths. A judge asking
+   "does the gate ever promote a claim to CORROBORATED?" must add
+   multi-family questions whose fixture sidecars span ≥2 families.
+   The `claim_finding` gate is separately demonstrated via the
+   quickstart (`scripts/quickstart.py`), which fires `DRAFT` on a
+   single-family claim deterministically without an LLM in the loop.
+9. **AURC and RS@k are degenerate on current data.** With all 25
+   Sanctum-arm rows returning `DRAFT` (abstentions), the RS@k
+   score (skip=0, correct=+1, wrong=−2) is 0/25 = 0.0 on current
+   data. The risk-coverage curve is a single point at (coverage=1.0,
+   risk=0.0) so AURC = 0.0. Both metrics are structurally sound but
+   require at least one `CORROBORATED` row to become non-degenerate.
+   They will produce informative numbers once multi-family questions
+   are added (§Followups). RS@k also applies semantics from
+   multiple-choice QA (Cherif et al. §RS@k); Sanctum uses open-ended
+   tool-mediated IR so the "skip" concept maps to forced abstention
+   (DRAFT) rather than voluntary skip — this structural difference
+   must be disclosed when citing the metric.
+10. **BAM exclusion of SYSTEM-context processes — Tier D source only.**
+    The claim that BAM does not record processes running under the
+    Windows SYSTEM account (e.g., `PSEXESVC.exe`, service-hosted
+    executables) is documented only in community Tier D material
+    (kacos2000, Psmths research blogs). No Tier A/B Microsoft
+    documentation explicitly defines BAM's per-user SID recording
+    behavior or its exclusion of SYSTEM-context processes. Practical
+    implication: a finding that cites BAM for a process known to run
+    as SYSTEM (lateral-movement service components such as `PSEXESVC.exe`)
+    should carry a footnote that the BAM entry may be absent. The
+    client-side launcher (`psexec.exe`, running in the attacker's
+    user session) does appear in Prefetch (SysMain) and potentially
+    AppCompat; only the remote service component is affected. Upgrade
+    to Tier A if Microsoft publishes BAM internals documentation.
 
 ## Wallclock performance
 
@@ -500,6 +620,44 @@ together so the chart remains reproducible from the stored measurements.
 - [x] Run the first eval; populate the Numbers table. (`eval-20260502T021842-68272d44`: sanctum 100%, bare 24%, N=25)
 - [ ] Populate accuracy in the Pareto chart once the Numbers table is filled.
 - [ ] Phase 5: add C3 (parallel + F4 temporal-coupling demoter) to the chart.
+
+### Eval corpus expansion (unlocks gate-behavior testing)
+
+- [ ] **Multi-family questions (v2, Priority 1)** — add 3–5 questions
+      whose fixture sidecars span ≥2 families (e.g., AppCompat + SysMain,
+      or BAM + Sysmon). These are the only questions that can fire
+      the `CORROBORATED` path and produce non-degenerate RS@k / AURC
+      scores. Implementation requires: new `SubsetEntry` rows in
+      `dfir_metric_subset.py`, new fixture sidecars under
+      `tests/fixtures/accuracy_corpus/cases/`, and a `question_type`
+      field (`"factual"` | `"adversarial_single_family"`) on
+      `SubsetEntry` so the eval driver can score adversarial questions
+      correctly (DRAFT = correct for adversarial questions, without
+      breaking the existing 25-question scores).
+- [ ] **bare_arm_confident_answer_rate metric (v2, Priority 2)** —
+      measure the rate at which the bare arm produces a confident
+      (non-abstaining) answer. This makes the bare-arm failure mode
+      visible in the Numbers table rather than asserted in prose. Add
+      to `ArmAggregate` and `summarize_eval.py`.
+
+### Selective-abstention metrics (requires corpus expansion above)
+
+- [ ] **RS@k metric (v2, after multi-family questions)** — add
+      `_compute_rs_at_k` to the eval driver. Mapping: DRAFT = skip (0),
+      CORROBORATED + correct = +1, CORROBORATED + wrong = −2. Note
+      the structural difference from Cherif et al. §RS@k (multiple-choice
+      QA vs. open-ended tool-mediated IR; "skip" is forced abstention
+      here, not voluntary) — disclose in the Numbers table header.
+- [ ] **AURC / AUGRC (v2, after multi-family questions)** — add
+      `compute_aurc.py` that builds the risk-coverage curve from
+      the three discrete tiers (DRAFT / CORROBORATED / FINAL) using
+      the trapezoid rule, following the AURC formulation in Galil
+      et al. NeurIPS 2024. Three points is low resolution; report
+      the Wilson CI at each tier-point alongside the AURC estimate
+      so the CI width is visible to the reader.
+
+### Statistical rigor (v2 promotions)
+
 - [ ] Multi-model matrix (v2) — re-run against Sonnet 4.6 and
       Haiku 4.5 to surface the model-quality dependence.
 - [ ] Multi-author family tagging (v2) — adjudicate disagreements,

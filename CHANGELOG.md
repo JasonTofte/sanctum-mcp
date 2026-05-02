@@ -4,6 +4,28 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — mf_c2agent_001 fixture: stub artifacts, Sysmon family tag, temporal alignment (2026-05-02)
+
+**Three bugs prevented CORROBORATED from firing on multi-family eval questions**:
+- `tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/`: added empty stub artifact files (`Amcache.hve`, `SYSTEM`, `NTUSER.DAT`, `Prefetch/C2AGENT.EXE-F1A2B3C4.pf`, `logs/Microsoft-Windows-Sysmon%4Operational.evtx`) — parsers check the source file exists before loading the sidecar, causing `ArtifactNotFoundError` when only the `.sanctum-fixture.json` sidecar was present.
+- `tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/logs/*.sanctum-fixture.json`: fixed `"family": "Sysmon"` → `"family": "Kernel-ETW"` — canonical family name used by `parse_sysmon` is `FAMILY_KERNEL_ETW` from `families.py`; mismatch caused sidecar validation failure.
+- Same sidecar: aligned `first_event_ts` so all three families' earliest events are within the 5-second temporal coupling window (`DEFAULT_TEMPORAL_COUPLING_WINDOW_SECONDS = 5.0`) — previously Amcache `first_event_ts` at 14:00:00 vs Prefetch/Sysmon at 14:05:xx caused `_check_temporal_coherence` to return `incoherent`, demoting CORROBORATED → DRAFT.
+- `tests/fixtures/accuracy_corpus/cases/smoke/Prefetch/*.pf`: added untracked Prefetch stub files to git tracking — these existed on disk but were never committed.
+- `tests/fixtures/accuracy_corpus/questions.json`: added local synthetic eval corpus to git tracking — this is the question corpus used by `--local-corpus` (our own questions, no upstream license exposure).
+- `scripts/run_dfir_metric_eval.py`: fixed `q_id` collision for multi-family synthetic questions with the same `family` and `line_offset=-1` — `extra_families` is now included in the `q_id` tag.
+
+**Verified**: eval run `eval-20260502T051015-0e52519a` shows all 3 multi-family questions scoring `claim_status=CORROBORATED` and all 2 adversarial questions scoring `claim_status=DRAFT` (correct). Sanctum 100.0% vs bare 20-23% on N=30 corpus.
+
+### Added — eval v2: multi-family corroboration + adversarial questions + bare_confident_rate (2026-05-01)
+
+**Unlocks the CORROBORATED path in eval and adds honest-limits documentation**:
+- `tests/benchmarks/dfir_metric_subset.py`: added `question_type` (`"factual"` | `"adversarial_single_family"`), `extra_families`, `synthetic_text`, and `case_id_override` fields to `SubsetEntry`. Added 3 synthetic multi-family questions (AppCompat+SysMain, AppCompat+Sysmon, SysMain+Sysmon) against the new `mf_c2agent_001` case — these exercise the `CORROBORATED` path for the first time. Added 2 adversarial single-family questions (smoke case) that expect `DRAFT` as the correct answer.
+- `tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/`: new fixture case with Amcache (AppCompat), Prefetch (SysMain), and Sysmon (Kernel-ETW) sidecars all showing `C:\Temp\c2agent.exe`.
+- `scripts/run_dfir_metric_eval.py`: `Question` now carries `question_type`, `extra_families`, `case_id_override`. `hydrate_questions_from_corpus` handles `synthetic_text` overrides (no upstream corpus lookup needed). `_run_one_sanctum_question` uses per-question `case_id_override` and exposes multi-family tool surfaces via updated `_tool_definitions_for`. Adversarial questions score `correct=True` when `claim_status ∈ {DRAFT, DRAFT_TAMPER_SUSPECTED}`. `ArmAggregate` gains `bare_confident_rate` (fraction of bare-arm rows with non-marker responses); `_compute_bare_confident_rate` implements it.
+- `scripts/summarize_eval.py`: Per-arm summary table adds `bare_confident_rate` column.
+- `tests/test_eval_driver_unit.py`: 13 new tests covering adversarial scoring dispatch, multi-family tool definitions (including dedup), `bare_confident_rate` computation and validation, synthetic entry invariants. Updated `test_arm_aggregate_schema_keys` to include `bare_confident_rate`.
+- `docs/ACCURACY.md`: Honest Limits §7–10 added (abstention_rate=100% corpus artifact; corpus tests tool I/O not gate behavior; AURC/RS@k degenerate until CORROBORATED fires; BAM Tier D source caveat + PSEXESVC implication). Followups reorganized into Eval corpus expansion / Selective-abstention metrics / Statistical rigor subsections.
+
 ### Added — Track B architectural-property eval + eval driver hardening (deep-r REC-1/3/4, 2026-05-01)
 
 **Track B eval redesign** — replaces accuracy-estimation framing with an architectural-enforcement scorecard grounded in fixture sidecars (deep-r recommendation, arXiv:2505.19973 Wilson CI power analysis: N=16 cannot resolve a 10pp delta; reframing as boolean gate-checks is the statistically honest design):

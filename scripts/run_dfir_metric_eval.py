@@ -80,7 +80,11 @@ _leaked_pids: set[int] = set()
 # --- Module-level constants (test pins) ---------------------------------
 
 DEFAULT_MCP_SUBPROCESS_ARGS: tuple[str, ...] = (sys.executable, "-m", "sanctum.server")
-"""Default args for spawning the MCP server subprocess. Pinned by AC-2b."""
+"""Default args for spawning the MCP server subprocess. Pinned by AC-2b.
+
+Uses ``sys.executable`` (the running interpreter) so the default works on
+macOS/Linux regardless of whether ``python`` or ``python3`` is in PATH.
+"""
 
 SCORING_METRIC_NAME: str = "sanctum_partial_credit_accuracy"
 """AC-12 — honest naming. Not TUS@m (which is averaged-over-criteria)."""
@@ -95,14 +99,15 @@ hackathon submission.
 OPUS_4_7_PRICING: dict[str, float] = {
     "input": 5.00,  # USD per million input tokens
     "cache_write": 6.25,  # USD per million tokens written to cache
-    "cache_read": 0.50,  # USD per million tokens read from cache (10% of $5 input)
+    "cache_read": 0.30,  # USD per million tokens read from cache
     "output": 25.00,  # USD per million output tokens
 }
 """AC-6 — Opus 4.7 pricing.
 
-Verified 2026-05-01 against platform.claude.com/docs/en/about-claude/pricing.
-cache_read = $0.50/MTok (0.10 × $5 input base, same ratio as Sonnet but higher
-absolute because Opus input is $5 vs Sonnet's $3).
+UNVERIFIED_CLAIM: cache multipliers track Opus 4 ratios at the $5/MTok
+input base. Verify against the Anthropic prompt-caching docs at
+``docs.claude.com/en/docs/build-with-claude/prompt-caching`` before
+publishing the Numbers table in ``docs/ACCURACY.md``.
 """
 
 
@@ -148,6 +153,10 @@ class ArmAggregate:
     mean_tokens_in: float
     mean_tokens_out: float
     total_cost_usd: float
+    bare_confident_rate: float | None = None
+    # Fraction of bare-arm rows where the model produced a non-empty, non-marker
+    # response (i.e., not <context_overflow>, <api_error>, etc.).  None for the
+    # sanctum arm (which has explicit claim_status tiers for abstention).
 
     def __post_init__(self) -> None:
         # Range guards. accuracy_* ∈ [0, 1]; counts/cost ≥ 0; rates (when
@@ -175,6 +184,10 @@ class ArmAggregate:
             raise ValueError(
                 f"abstention_rate must be in [0, 1] or None, got {self.abstention_rate}"
             )
+        if self.bare_confident_rate is not None and not 0.0 <= self.bare_confident_rate <= 1.0:
+            raise ValueError(
+                f"bare_confident_rate must be in [0, 1] or None, got {self.bare_confident_rate}"
+            )
 
 
 @dataclass(frozen=True)
@@ -193,7 +206,6 @@ class EvalReport:
     aggregates: Mapping[str, ArmAggregate]  # key = arm name; frozen post-init
     partial: bool = False
     halt_reason: str | None = None
-    dep_versions: str = ""  # pip freeze snapshot for judge reproducibility
 
     def __post_init__(self) -> None:
         # `frozen=True` only blocks rebinding `self.aggregates`; the underlying
@@ -315,7 +327,15 @@ class Question:
     text: str
     scoring_pattern: str
     bare_evidence: bytes  # raw bytes for the bare arm; sanctum arm reads via tools
-    bare_evidence_format: str = "hex"  # "hex" (binary artifacts) or "text" (sidecar JSON)
+    question_type: str = "factual"
+    # "factual": correct iff scoring_pattern matches predicted
+    # "adversarial_single_family": correct iff claim_status is DRAFT/DRAFT_TAMPER_SUSPECTED
+    extra_families: tuple[str, ...] = ()
+    # Additional families whose tools are exposed to the agent alongside the
+    # primary family.  Used for multi-family corroboration questions.
+    case_id_override: str | None = None
+    # When set, overrides the eval run's default case_id in the agent prompt
+    # so the agent calls tools against this specific fixture case.
 
     def __post_init__(self) -> None:
         if not self.q_id:
@@ -324,10 +344,6 @@ class Question:
             raise ValueError("text must be non-empty")
         if not self.scoring_pattern:
             raise ValueError("scoring_pattern must be non-empty")
-        if self.bare_evidence_format not in ("hex", "text"):
-            raise ValueError(
-                f"bare_evidence_format must be 'hex' or 'text', got {self.bare_evidence_format!r}"
-            )
 
 
 # --- Question hydration from corpus -------------------------------------
@@ -338,8 +354,8 @@ _EVIDENCE_KEYS = ("evidence", "artifact", "data", "content", "raw")
 
 def hydrate_questions_from_corpus(
     corpus_path: Path,
-    subset: "Sequence[Any]",  # Sequence[SubsetEntry] — import deferred to avoid circular
-) -> tuple["Question", ...]:
+    subset: Sequence[Any],  # Sequence[SubsetEntry] — import deferred to avoid circular
+) -> tuple[Question, ...]:
     """Build Question objects from the cached DFIR-Metric corpus + SUBSET.
 
     The corpus JSON is a list of records.  Each SubsetEntry's ``line_offset``
@@ -352,48 +368,79 @@ def hydrate_questions_from_corpus(
     key is found, so bad SUBSET entries surface loudly rather than silently
     producing wrong questions.
     """
-    records: list[dict[str, Any]] = json.loads(corpus_path.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
+    raw = json.loads(corpus_path.read_text(encoding="utf-8"))
+    # The corpus may be a top-level list or a dict with a "questions" (or
+    # equivalent) wrapper key — handle both shapes.
+    if isinstance(raw, list):
+        records: list[dict[str, Any]] = raw
+    elif isinstance(raw, dict):
+        for key in ("questions", "templates", "challenges", "items", "tasks"):
+            if key in raw and isinstance(raw[key], list):
+                records = raw[key]
+                break
+        else:
+            raise ValueError(
+                f"corpus is a JSON object but has no recognised list key "
+                f"(tried questions/templates/challenges/items/tasks); "
+                f"top-level keys: {sorted(raw.keys())}"
+            )
+    else:
         raise ValueError(
-            f"expected DFIR-Metric corpus to be a JSON array; got {type(records).__name__}"
+            f"expected DFIR-Metric corpus to be a JSON array or object; "
+            f"got {type(raw).__name__}"
         )
 
     questions: list[Question] = []
     for entry in subset:
         offset: int = entry.line_offset
-        if offset >= len(records):
-            raise ValueError(
-                f"SUBSET line_offset {offset} is out of range; corpus has {len(records)} records"
-            )
-        rec = records[offset]
+        synthetic: str | None = getattr(entry, "synthetic_text", None)
 
-        # Extract question text — fail loudly if no key matches.
-        q_text: str | None = None
-        for key in _QUESTION_TEXT_KEYS:
-            if key in rec and isinstance(rec[key], str):
-                q_text = rec[key]
-                break
-        if q_text is None:
-            raise ValueError(
-                f"corpus record at line_offset {offset} has no question-text key; "
-                f"tried {_QUESTION_TEXT_KEYS!r}; observed keys: {sorted(rec.keys())}"
-            )
+        if synthetic is not None:
+            # Synthetic question: bypass the upstream corpus lookup entirely.
+            # The question text is self-contained so no upstream license issue.
+            q_text = synthetic
+            bare_evidence = b""
+            extra_tag = ("_" + "_".join(entry.extra_families)) if entry.extra_families else ""
+            q_id = f"synthetic_{entry.family}{extra_tag}_{abs(offset)}_{entry.question_type}"
+        else:
+            if offset >= len(records):
+                raise ValueError(
+                    f"SUBSET line_offset {offset} is out of range; "
+                    f"corpus has {len(records)} records"
+                )
+            rec = records[offset]
 
-        # Extract evidence bytes — fall back to empty (knowledge-only bare arm).
-        bare_evidence = b""
-        for key in _EVIDENCE_KEYS:
-            val = rec.get(key)
-            if isinstance(val, (bytes, str)):
-                bare_evidence = val.encode("utf-8") if isinstance(val, str) else val
-                break
+            # Extract question text — fail loudly if no key matches.
+            q_text = None
+            for key in _QUESTION_TEXT_KEYS:
+                if key in rec and isinstance(rec[key], str):
+                    q_text = rec[key]
+                    break
+            if q_text is None:
+                raise ValueError(
+                    f"corpus record at line_offset {offset} has no question-text key; "
+                    f"tried {_QUESTION_TEXT_KEYS!r}; observed keys: {sorted(rec.keys())}"
+                )
+
+            # Extract evidence bytes — fall back to empty (knowledge-only bare arm).
+            bare_evidence = b""
+            for key in _EVIDENCE_KEYS:
+                val = rec.get(key)
+                if isinstance(val, (bytes, str)):
+                    bare_evidence = val.encode("utf-8") if isinstance(val, str) else val
+                    break
+            q_id = f"dfir_metric_{offset}"
 
         questions.append(
             Question(
-                q_id=f"dfir_metric_{offset}",
+                q_id=q_id,
                 family=entry.family,
                 text=q_text,
                 scoring_pattern=entry.scoring_pattern,
                 bare_evidence=bare_evidence,
+                question_type=getattr(entry, "question_type", "factual"),
+                extra_families=tuple(getattr(entry, "extra_families", ())),
+                case_id_override=getattr(entry, "case_id_override", None),
             )
         )
     return tuple(questions)
@@ -729,6 +776,9 @@ def _run_one_sanctum_question(
     claim_status: str | None = None
     predicted = ""
     cumulative: dict[str, int] = _zero_usage()
+    # Per-question case_id: synthetic/multi-family questions can override the
+    # eval run's default case_id so the agent calls tools on the right fixture.
+    effective_case_id = question.case_id_override or case_id
     try:
         client.initialize()
         client.list_tools()
@@ -736,9 +786,12 @@ def _run_one_sanctum_question(
         # tool_use blocks, dispatch to MCP and append the tool_result;
         # stop on text-only responses.
         messages: list[dict[str, Any]] = [
-            {"role": "user", "content": f"[Case under investigation: {case_id}]\n\n{question.text}"}
+            {
+                "role": "user",
+                "content": f"[Case under investigation: {effective_case_id}]\n\n{question.text}",
+            }
         ]
-        tool_defs = _tool_definitions_for(question.family)
+        tool_defs = _tool_definitions_for(question.family, question.extra_families)
         for _turn in range(8):  # bounded loop — typed tools converge fast
             if time.monotonic() > deadline:
                 raise _MCPSubprocessError("timeout", "per-question deadline")
@@ -807,7 +860,13 @@ def _run_one_sanctum_question(
         client.close()
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     is_marker = predicted.startswith("<")
-    correct = False if is_marker else _score_predicted(predicted, question.scoring_pattern)
+    if question.question_type == "adversarial_single_family":
+        # Correct iff the gate returned DRAFT (or DRAFT_TAMPER_SUSPECTED).
+        # A marker (timeout/crash) scores as incorrect — the test infrastructure
+        # failed, not the gate.
+        correct = claim_status in {"DRAFT", "DRAFT_TAMPER_SUSPECTED"}
+    else:
+        correct = False if is_marker else _score_predicted(predicted, question.scoring_pattern)
     row = PerQuestionRow(
         q_id=question.q_id,
         family=question.family,
@@ -837,16 +896,9 @@ def _run_one_bare_question(
     """Bare-arm: raw evidence bytes wrapped in evidence-untrusted, no MCP."""
     t0 = time.monotonic()
     cumulative: dict[str, int] = _zero_usage()
-    # Encode evidence for the bare-arm prompt.  Binary artifacts (registry
-    # hives, EVTX) are hex-encoded to stay prompt-safe.  Sidecar JSON (plain
-    # UTF-8 text from Track B fixture questions) is passed as-is — hex-encoding
-    # a 500-byte sidecar produces 1000 chars that the LLM cannot read as JSON.
-    if question.bare_evidence_format == "text" and question.bare_evidence:
-        evidence_str = question.bare_evidence.decode("utf-8", errors="replace")
-    else:
-        evidence_str = question.bare_evidence.hex() if question.bare_evidence else ""
-    # Conservative pre-flight: each char ≈ 0.25–1 token; use 4-char/token.
-    rough_tokens = len(evidence_str) // 4
+    hex_evidence = question.bare_evidence.hex() if question.bare_evidence else ""
+    # Conservative pre-flight: each hex char ≈ 0.5 byte → ~1 token per 4 chars.
+    rough_tokens = len(hex_evidence) // 4
     if rough_tokens > BARE_ARM_TOKEN_LIMIT:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         return (
@@ -867,7 +919,7 @@ def _run_one_bare_question(
             cumulative,
         )
     user_content = (
-        f"{question.text}\n\n" f"<evidence-untrusted>\n{evidence_str}\n</evidence-untrusted>"
+        f"{question.text}\n\n" f"<evidence-untrusted>\n{hex_evidence}\n</evidence-untrusted>"
     )
     try:
         resp = anthropic_client.messages.create(
@@ -947,12 +999,15 @@ def _serialize_assistant_blocks(blocks: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _tool_definitions_for(family: str) -> list[dict[str, Any]]:
-    """Anthropic tool definitions the model can choose from for a family.
+def _tool_definitions_for(
+    family: str,
+    extra_families: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """Anthropic tool definitions the model can choose from for a question.
 
-    Phase C ships AppCompat → ``get_amcache`` and the universal
-    ``claim_finding``. Other families add their typed tool here as the
-    parser bodies land.
+    Always includes ``claim_finding`` plus one typed tool per family listed
+    in ``family`` + ``extra_families``.  Deduplication ensures a family
+    that appears in both lists only gets one tool entry.
     """
     tools: list[dict[str, Any]] = [
         {
@@ -979,21 +1034,25 @@ def _tool_definitions_for(family: str) -> list[dict[str, Any]]:
         "get_sysmon_4688": "Return Sysmon EID 1 / Security EID 4688 process-create rows (Kernel-ETW family).",
         "get_prefetch": "Return SysMain Prefetch execution rows (SysMain family).",
     }
-    if family in _FAMILY_TO_TOOL:
-        tool_name = _FAMILY_TO_TOOL[family]
-        tools.append(
-            {
-                "name": tool_name,
-                "description": _TOOL_DESCRIPTIONS.get(
-                    tool_name, f"Return structured rows for the {family} family."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"case_id": {"type": "string"}},
-                    "required": ["case_id"],
-                },
-            }
-        )
+    seen_tools: set[str] = set()
+    for fam in (family, *extra_families):
+        if fam in _FAMILY_TO_TOOL:
+            tool_name = _FAMILY_TO_TOOL[fam]
+            if tool_name not in seen_tools:
+                seen_tools.add(tool_name)
+                tools.append(
+                    {
+                        "name": tool_name,
+                        "description": _TOOL_DESCRIPTIONS.get(
+                            tool_name, f"Return structured rows for the {fam} family."
+                        ),
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"case_id": {"type": "string"}},
+                            "required": ["case_id"],
+                        },
+                    }
+                )
     return tools
 
 
@@ -1014,6 +1073,25 @@ def _compute_abstention_rate(rows: tuple[PerQuestionRow, ...], *, arm: str) -> f
         1 for r in arm_rows if r.claim_status in {None, "DRAFT", "DRAFT_TAMPER_SUSPECTED"}
     )
     return abstain / len(arm_rows)
+
+
+def _compute_bare_confident_rate(rows: tuple[PerQuestionRow, ...], *, arm: str) -> float | None:
+    """Fraction of bare-arm rows where the model gave a non-empty, non-marker response.
+
+    A "confident" bare-arm response is one that did not terminate in a system
+    marker (``<context_overflow>``, ``<api_error>``, ``<subprocess_*>``).
+    Markers represent infrastructure failures, not confident-wrong answers.
+
+    Returns ``None`` for arms that are not ``bare`` — the sanctum arm has
+    explicit ``claim_status`` tiers for the same purpose.
+    """
+    if arm != "bare":
+        return None
+    arm_rows = [r for r in rows if r.arm == arm]
+    if not arm_rows:
+        return None
+    confident = sum(1 for r in arm_rows if r.predicted and not r.predicted.startswith("<"))
+    return confident / len(arm_rows)
 
 
 def _aggregate_arm(
@@ -1044,6 +1122,7 @@ def _aggregate_arm(
         mean_tokens_in=sum(r.tokens_in for r in arm_rows) / len(arm_rows),
         mean_tokens_out=sum(r.tokens_out for r in arm_rows) / len(arm_rows),
         total_cost_usd=total_cost_usd,
+        bare_confident_rate=_compute_bare_confident_rate(rows, arm=arm),
     )
 
 
@@ -1077,6 +1156,7 @@ def _aggregate_to_dict(agg: ArmAggregate) -> dict[str, Any]:
         "mean_tokens_in": agg.mean_tokens_in,
         "mean_tokens_out": agg.mean_tokens_out,
         "total_cost_usd": agg.total_cost_usd,
+        "bare_confident_rate": agg.bare_confident_rate,
     }
 
 
@@ -1118,7 +1198,6 @@ def run_eval(
     per_q_timeout_s: float = 120.0,
     output_filename: str | None = None,
     dfir_metric_commit_sha: str = "unknown",
-    dep_versions: str = "",
 ) -> EvalReport:
     """Drive the eval. See module docstring for AC mapping.
 
@@ -1232,7 +1311,6 @@ def run_eval(
         aggregates=aggregates,
         partial=partial,
         halt_reason=halt_reason,
-        dep_versions=dep_versions,
     )
     out_name = output_filename or f"{run_id}.json"
     (output_dir / out_name).write_text(
@@ -1246,7 +1324,6 @@ def run_eval(
 
 if __name__ == "__main__":
     import argparse
-    import sys
 
     from scripts.fetch_dfir_metric import fetch_upstream
     from tests.benchmarks.dfir_metric_subset import SUBSET
@@ -1265,10 +1342,10 @@ if __name__ == "__main__":
         help=(
             "SHA-256 hex digest of the upstream DFIR-Metric-CTF.json. "
             "Required if the corpus cache is absent. "
-            "Get it with: python3 -c \""
+            'Get it with: python3 -c "'
             "import urllib.request, hashlib; "
             "r=urllib.request.urlopen('https://raw.githubusercontent.com/DFIR-Metric/DFIR-Metric/main/DFIR-Metric-CTF.json'); "
-            "print(hashlib.sha256(r.read()).hexdigest())\""
+            'print(hashlib.sha256(r.read()).hexdigest())"'
         ),
     )
     parser.add_argument(
@@ -1313,26 +1390,25 @@ if __name__ == "__main__":
         help="Model ID for both arms (default: claude-opus-4-7).",
     )
     parser.add_argument(
-        "--track",
-        choices=["dfir-metric", "fixture", "both"],
-        default="dfir-metric",
+        "--local-corpus",
+        type=Path,
+        default=None,
         help=(
-            "Which question track to run (default: dfir-metric). "
-            "'dfir-metric' uses the upstream DFIR-Metric corpus subset. "
-            "'fixture' uses the architectural-property questions grounded in "
-            "tests/fixtures/ sidecars — no upstream corpus required. "
-            "'both' runs both tracks together."
+            'Path to a local questions JSON (array of {"question": ...} objects). '
+            "When provided, skips the upstream fetch entirely. "
+            "Default: None (uses upstream corpus)."
         ),
     )
     args = parser.parse_args()
 
-    # --- Question hydration ------------------------------------------------
-
-    questions: list[Question] = []
-
-    # Track A: DFIR-Metric corpus subset (skip when --track fixture).
-    dfir_metric_commit_sha = "unknown"
-    if args.track in ("dfir-metric", "both"):
+    if args.local_corpus is not None:
+        corpus_path = args.local_corpus.resolve()
+        if not corpus_path.exists():
+            print(f"ERROR: --local-corpus path not found: {corpus_path}", file=sys.stderr)
+            sys.exit(1)
+        dfir_metric_commit_sha = "local-v1"
+        print(f"Using local corpus: {corpus_path}")
+    else:
         corpus_path = args.corpus_cache / "DFIR-Metric-CTF.json"
         provenance_path = args.corpus_cache / "PROVENANCE.json"
 
@@ -1342,11 +1418,11 @@ if __name__ == "__main__":
                     "ERROR: corpus not cached and --sha256 not provided.\n"
                     "Run with --sha256 <hex> to fetch and verify the upstream corpus.\n"
                     "Get the SHA-256 with:\n"
-                    "  python3 -c \""
+                    '  python3 -c "'
                     "import urllib.request, hashlib; "
                     "r=urllib.request.urlopen('https://raw.githubusercontent.com/DFIR-Metric/"
                     "DFIR-Metric/main/DFIR-Metric-CTF.json'); "
-                    "print(hashlib.sha256(r.read()).hexdigest())\"",
+                    'print(hashlib.sha256(r.read()).hexdigest())"',
                     file=sys.stderr,
                 )
                 sys.exit(1)
@@ -1354,6 +1430,7 @@ if __name__ == "__main__":
             fetch_upstream(expected_sha256=args.sha256, cache_dir=args.corpus_cache)
             print("Fetch OK.")
         else:
+            # Re-verify the cached file if --sha256 was given.
             if args.sha256 is not None:
                 import hashlib
 
@@ -1368,6 +1445,7 @@ if __name__ == "__main__":
                     )
                     sys.exit(1)
 
+        dfir_metric_commit_sha = "unknown"
         if provenance_path.exists():
             try:
                 prov = json.loads(provenance_path.read_text(encoding="utf-8"))
@@ -1375,41 +1453,17 @@ if __name__ == "__main__":
             except Exception:
                 pass
 
-        print(f"Hydrating {len(SUBSET)} DFIR-Metric questions from corpus ...")
-        questions.extend(hydrate_questions_from_corpus(corpus_path, SUBSET))
-
-    # Track B: architectural-property questions grounded in fixture sidecars.
-    if args.track in ("fixture", "both"):
-        from tests.benchmarks.arch_property_questions import (
-            ARCH_QUESTIONS,
-            hydrate_arch_questions,
-        )
-
-        fixture_root = Path("tests/fixtures")
-        print(f"Hydrating {len(ARCH_QUESTIONS)} fixture-grounded arch-property questions ...")
-        questions.extend(hydrate_arch_questions(ARCH_QUESTIONS, fixture_root))
-
-    questions_tuple = tuple(questions)
+    print(f"Hydrating {len(SUBSET)} questions from corpus ...")
+    questions = hydrate_questions_from_corpus(corpus_path, SUBSET)
     print(
-        f"  {len(questions_tuple)} total questions across families: "
-        f"{sorted({q.family for q in questions_tuple})}"
+        f"  {len(questions)} questions across families: " f"{sorted({q.family for q in questions})}"
     )
 
     case_root = args.case_root.resolve()
     print(f"Case root: {case_root}")
-    print(f"Track: {args.track}  arm: {args.arm}  n_runs: {args.n_runs}  "
-          f"max_cost: ${args.max_cost_usd}")
+    print(f"Arm: {args.arm}  n_runs: {args.n_runs}  max_cost: ${args.max_cost_usd}")
     print(f"Output dir: {args.output_dir}")
     print()
-
-    # Capture dep versions for judge reproducibility (REC-3).
-    _dep_versions = ""
-    try:
-        _dep_versions = subprocess.check_output(
-            [sys.executable, "-m", "pip", "freeze"], text=True, timeout=30
-        )
-    except Exception:
-        pass
 
     server_env = dict(os.environ)
     import secrets as _secrets
@@ -1427,7 +1481,7 @@ if __name__ == "__main__":
 
     report = run_eval(
         arm=args.arm,  # type: ignore[arg-type]
-        questions=questions_tuple,
+        questions=questions,
         n_runs=args.n_runs,
         max_cost_usd=args.max_cost_usd,
         output_dir=args.output_dir,
@@ -1435,7 +1489,6 @@ if __name__ == "__main__":
         case_root=case_root,
         server_env=server_env,
         dfir_metric_commit_sha=dfir_metric_commit_sha,
-        dep_versions=_dep_versions,
     )
 
     out_path = args.output_dir / f"{report.run_id}.json"
@@ -1447,5 +1500,5 @@ if __name__ == "__main__":
     for arm_name, agg in report.aggregates.items():
         print(f"  [{arm_name}] accuracy={agg.accuracy_mean:.1%} ± {agg.accuracy_std:.1%}")
     print()
-    print(f"Paste the Numbers table into docs/ACCURACY.md with:")
+    print("Paste the Numbers table into docs/ACCURACY.md with:")
     print(f"  python -m scripts.summarize_eval {out_path}")
