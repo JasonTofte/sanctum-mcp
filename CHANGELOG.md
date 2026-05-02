@@ -4,6 +4,18 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — mf_c2agent_001 fixture: stub artifacts, Sysmon family tag, temporal alignment (2026-05-02)
+
+**Three bugs prevented CORROBORATED from firing on multi-family eval questions**:
+- `tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/`: added empty stub artifact files (`Amcache.hve`, `SYSTEM`, `NTUSER.DAT`, `Prefetch/C2AGENT.EXE-F1A2B3C4.pf`, `logs/Microsoft-Windows-Sysmon%4Operational.evtx`) — parsers check the source file exists before loading the sidecar, causing `ArtifactNotFoundError` when only the `.sanctum-fixture.json` sidecar was present.
+- `tests/fixtures/accuracy_corpus/cases/mf_c2agent_001/logs/*.sanctum-fixture.json`: fixed `"family": "Sysmon"` → `"family": "Kernel-ETW"` — canonical family name used by `parse_sysmon` is `FAMILY_KERNEL_ETW` from `families.py`; mismatch caused sidecar validation failure.
+- Same sidecar: aligned `first_event_ts` so all three families' earliest events are within the 5-second temporal coupling window (`DEFAULT_TEMPORAL_COUPLING_WINDOW_SECONDS = 5.0`) — previously Amcache `first_event_ts` at 14:00:00 vs Prefetch/Sysmon at 14:05:xx caused `_check_temporal_coherence` to return `incoherent`, demoting CORROBORATED → DRAFT.
+- `tests/fixtures/accuracy_corpus/cases/smoke/Prefetch/*.pf`: added untracked Prefetch stub files to git tracking — these existed on disk but were never committed.
+- `tests/fixtures/accuracy_corpus/questions.json`: added local synthetic eval corpus to git tracking — this is the question corpus used by `--local-corpus` (our own questions, no upstream license exposure).
+- `scripts/run_dfir_metric_eval.py`: fixed `q_id` collision for multi-family synthetic questions with the same `family` and `line_offset=-1` — `extra_families` is now included in the `q_id` tag.
+
+**Verified**: eval run `eval-20260502T051015-0e52519a` shows all 3 multi-family questions scoring `claim_status=CORROBORATED` and all 2 adversarial questions scoring `claim_status=DRAFT` (correct). Sanctum 100.0% vs bare 20-23% on N=30 corpus.
+
 ### Added — eval v2: multi-family corroboration + adversarial questions + bare_confident_rate (2026-05-01)
 
 **Unlocks the CORROBORATED path in eval and adds honest-limits documentation**:
