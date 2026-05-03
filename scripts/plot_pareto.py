@@ -11,9 +11,11 @@ Usage::
 
 The chart plots operating configurations as (wallclock, accuracy) points on a
 joint cost-quality plane, following the methodology in Kapoor & Narayanan
-(arXiv:2407.01502 §2.2) for joint cost-quality reporting.  A reference line at
-38.52% annotates GPT-4.1's TUS@4 baseline from the DFIR-Metric benchmark
-(Cherif et al., arXiv:2505.19973, Table 3).
+(arXiv:2407.01502 §2.2) for joint cost-quality reporting.  The reference line
+is the bare-LLM baseline: same model (Opus 4.7), same corpus, same scoring —
+the only controlled comparison available.  GPT-4.1's DFIR-Metric score (38.5%)
+is cited in the footnote only; it is a different model on a different eval setup
+and cannot be placed on the same Y-axis without conflating two effects.
 
 Axes:
 - X: ms per MB of evidence (lower is faster)
@@ -32,7 +34,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# GPT-4.1 TUS@4 baseline from Cherif et al. arXiv:2505.19973 Table 3.
+# Bare-LLM baseline: same model (Opus 4.7), same corpus, same scoring as the
+# Sanctum arms — the only directly comparable reference.
+# Source: eval-20260503T155143-7cdbb1af.json, arm="bare", N=129.
+BARE_ARM_ACCURACY = 0.163
+
+# GPT-4.1 DFIR-Metric score — cited in footnote only (different model + eval).
+# Source: Cherif et al. arXiv:2505.19973, Table 3, TUS@4 Module II.
 GPT41_TUS4 = 0.3852
 
 _COLORS = {
@@ -125,23 +133,24 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
             color=color,
         )
 
-    # GPT-4.1 reference line
+    # Bare-LLM reference line — the only directly comparable baseline.
+    bare_color = "#555555"
     ax.axhline(
-        y=GPT41_TUS4,
-        color="#d62728",
+        y=BARE_ARM_ACCURACY,
+        color=bare_color,
         linestyle="--",
         linewidth=1.2,
-        label=f"GPT-4.1 TUS@4 = {GPT41_TUS4:.1%} (Cherif et al., arXiv:2505.19973)",
+        label=f"bare Opus 4.7 baseline (same corpus) — {BARE_ARM_ACCURACY:.1%}",
         zorder=2,
     )
     ax.annotate(
-        f"GPT-4.1 {GPT41_TUS4:.1%}",
-        xy=(0.01, GPT41_TUS4),
+        f"bare Opus 4.7  {BARE_ARM_ACCURACY:.1%}",
+        xy=(0.01, BARE_ARM_ACCURACY),
         xycoords=("axes fraction", "data"),
         textcoords="offset points",
         xytext=(0, 5),
         fontsize=8,
-        color="#d62728",
+        color=bare_color,
     )
 
     ax.set_xlabel("Wallclock — ms per MB of evidence  (lower is faster)", fontsize=10)
@@ -150,19 +159,20 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
     else:
         ax.set_ylabel("IR-accuracy (pending first eval run)", fontsize=10)
     ax.set_title(
-        "Sanctum: operating configurations vs. GPT-4.1 baseline",
-        fontsize=12,
+        "Sanctum configurations vs. bare Opus 4.7 baseline\n"
+        "(same model · same corpus · same scoring)",
+        fontsize=11,
         pad=14,
     )
-    # Leave room at top for value labels and at right for C1 name label
-    ax.set_ylim(bottom=max(0.0, GPT41_TUS4 - 0.12), top=1.12)
+    ax.set_ylim(bottom=0.0, top=1.12)
     ax.margins(x=0.18)
     ax.legend(fontsize=8, loc="lower right")
     ax.grid(True, alpha=0.3)
 
     note = (
-        "Sanctum (host-based deterministic pipeline) and GPT-4.1 (general-purpose LLM) "
-        "are different systems; the reference line is a benchmark anchor, not a direct comparison."
+        f"Controlled comparison: Sanctum arms vs. bare Opus 4.7, N=43 questions × 3 runs, same corpus and scoring.  "
+        f"External ref (not directly comparable — different model + eval): "
+        f"GPT-4.1 scores {GPT41_TUS4:.1%} on DFIR-Metric Module II (Cherif et al., arXiv:2505.19973, Table 3)."
     )
     fig.text(0.5, -0.02, note, ha="center", fontsize=7, color="#555555", wrap=True)
 
