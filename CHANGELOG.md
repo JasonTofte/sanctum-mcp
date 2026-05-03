@@ -4,6 +4,13 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — eval methodology: AUGRC citation + precision@CORROBORATED metric (2026-05-02)
+
+- `docs/ACCURACY.md`: fixed AUGRC citation — corrected "Galil et al. NeurIPS 2024" (wrong) to "Traub et al. NeurIPS 2024 (arXiv:2407.01032)". Galil is a prior work cited *by* that paper, not the paper itself.
+- `scripts/run_dfir_metric_eval.py`: added `precision_at_corroborated` field to `ArmAggregate` — Geifman & El-Yaniv 2017 selective-classification precision computed as `correct_CORROBORATED / N_CORROBORATED`. Returns `None` for the bare arm (no CORROBORATED tier) and when `N_CORROBORATED==0` (undefined, distinct from 0.0). This is the correct headline metric when `accuracy_mean=100%`: it measures gate quality over confident outputs only, excluding hedged DRAFT rows.
+- `scripts/summarize_eval.py`: added `precision@CORROBORATED` column to the per-arm summary table.
+- `tests/test_eval_driver_unit.py`: added 4 unit tests for `_compute_precision_at_corroborated` (correct computation, None-when-empty, None-for-bare-arm, all-correct); updated `test_arm_aggregate_schema_keys`.
+
 ### Fixed — mf_c2agent_001 fixture: stub artifacts, Sysmon family tag, temporal alignment (2026-05-02)
 
 **Three bugs prevented CORROBORATED from firing on multi-family eval questions**:

@@ -651,8 +651,8 @@ together so the chart remains reproducible from the stored measurements.
 - [ ] **AURC / AUGRC (v2, after multi-family questions)** — add
       `compute_aurc.py` that builds the risk-coverage curve from
       the three discrete tiers (DRAFT / CORROBORATED / FINAL) using
-      the trapezoid rule, following the AURC formulation in Galil
-      et al. NeurIPS 2024. Three points is low resolution; report
+      the trapezoid rule, following the AURC formulation in Traub
+      et al. NeurIPS 2024 (arXiv:2407.01032). Three points is low resolution; report
       the Wilson CI at each tier-point alongside the AURC estimate
       so the CI width is visible to the reader.
 

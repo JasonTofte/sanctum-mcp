@@ -144,18 +144,20 @@ def summarize(report_path: Path) -> str:
     out.append("**Per-arm summary**")
     out.append("")
     out.append(
-        "| Arm | accuracy_mean ± std | abstention_rate | false_confidence_rate |"
-        " bare_confident_rate | mean_wallclock_ms | mean_tokens_in"
-        " | mean_tokens_out | total_cost_usd |"
+        "| Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate"
+        " | false_confidence_rate | bare_confident_rate | mean_wallclock_ms"
+        " | mean_tokens_in | mean_tokens_out | total_cost_usd |"
     )
-    out.append("|---|---|---|---|---|---|---|---|---|")
+    out.append("|---|---|---|---|---|---|---|---|---|---|")
     for arm in arms:
         agg = aggregates[arm]
         flag = " ⚠" if _should_flag_high_variance(agg) else ""
         accuracy_cell = f"{_fmt_pct(agg.accuracy_mean)} ± {_fmt_pct(agg.accuracy_std)}{flag}"
         bare_confident_rate = getattr(agg, "bare_confident_rate", None)
+        precision_at_corroborated = getattr(agg, "precision_at_corroborated", None)
         out.append(
-            f"| `{arm}` | {accuracy_cell} | {_fmt_pct(agg.abstention_rate)} | "
+            f"| `{arm}` | {accuracy_cell} | {_fmt_pct(precision_at_corroborated)} | "
+            f"{_fmt_pct(agg.abstention_rate)} | "
             f"{_fmt_pct(agg.false_confidence_rate)} | "
             f"{_fmt_pct(bare_confident_rate)} | "
             f"{agg.mean_wallclock_ms:.0f} | "
