@@ -224,6 +224,32 @@ def test_claim_finding_confirmation_basis_is_literal_constrained() -> None:
         assert v, "ConfirmationBasis values must be non-empty"
 
 
+def test_subset_q_id_uniqueness() -> None:
+    """All SUBSET entries generate distinct q_ids under the eval driver's naming scheme.
+
+    Duplicate q_ids cause the eval report to conflate separate questions, silently
+    inflating per-question statistics. This test catches the offline-ID collision
+    introduced when multiple synthetic entries share family+extra_families+line_offset.
+    """
+    from collections import Counter
+
+    ids: list[str] = []
+    for entry in SUBSET:
+        if entry.synthetic_text is not None:
+            extra_tag = ("_" + "_".join(entry.extra_families)) if entry.extra_families else ""
+            qid = f"synthetic_{entry.family}{extra_tag}_{abs(entry.line_offset)}_{entry.question_type}"
+        else:
+            qid = f"dfir_metric_{entry.line_offset}"
+        ids.append(qid)
+
+    duplicates = {qid: n for qid, n in Counter(ids).items() if n > 1}
+    assert not duplicates, (
+        f"SUBSET contains {len(duplicates)} duplicate q_id(s): {duplicates}. "
+        "Assign distinct line_offset values to synthetic entries that share "
+        "family+extra_families combinations."
+    )
+
+
 def test_claim_finding_summary_extra_includes_confirmation_basis() -> None:
     """AC-QUICKSTART-2: server.py claim_finding passes confirmation_basis in summary_extra.
 
