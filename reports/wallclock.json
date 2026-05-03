@@ -11,6 +11,10 @@
     "wallclock_ms": 6.097041012253612,
     "evidence_mb": 0.01,
     "ms_per_mb": 609.7041012253612,
-    "tus_m": null
+    "tus_m": 1.0,
+    "partial": true,
+    "partial_n": 47,
+    "partial_total_n": 129,
+    "partial_note": "cost_cap hit at $5; 43/43 unique questions correct on first pass"
   }
 }

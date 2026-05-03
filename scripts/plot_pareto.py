@@ -83,7 +83,13 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
             zorder=3,
             label=config_name,
         )
-        label_text = config_name if accuracy is not None else f"{config_name}\n(accuracy: pending)"
+        if accuracy is None:
+            label_text = f"{config_name}\n(accuracy: pending)"
+        elif metrics.get("partial"):
+            partial_n = metrics.get("partial_n", "?")
+            label_text = f"{config_name}\n(partial N={partial_n})"
+        else:
+            label_text = config_name
         ax.annotate(
             label_text,
             (x, y),

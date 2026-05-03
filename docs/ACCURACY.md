@@ -361,6 +361,20 @@ _At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recom
 
 ---
 
+### Run `eval-20260503T181313-38040f83` — C2-parallel arm (partial)
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · arm: `parallel` (`SANCTUM_PARALLEL_TOOLS=1`)
+- Window: `2026-05-03T18:13:13Z` · N_questions=43 · N_runs=3 · cost=$2.6174
+- **Partial** — cost cap hit at $5 before 3rd-run completions; 47/129 rows completed (43 unique questions, 4 with 2 runs, 39 with 1 run).
+
+| Arm | rows | correct | accuracy | false_confidence_rate | claim_status dist |
+|---|---|---|---|---|---|
+| `parallel` | 47/129 | 47 | **100.0%** | **0.0%** | DRAFT=33, CORROBORATED=12, FINAL=2 |
+
+**Interpretation**: All 43 unique questions answered correctly on first pass. The 0.0% false_confidence_rate means all 12 CORROBORATED claims were accurate. A full N=129 run would provide Wilson CIs; the point estimate is plotted with "(partial N=47)" in the Pareto chart. See `reports/wallclock.json` for the `partial_note` field.
+
+---
+
 _Prior run (N=39, N_runs=3, before q_id collision fix + scoring bug fix + autonomous questions — see PR #63):_
 
 <!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T031228-89a93bae.json` -->
@@ -676,9 +690,12 @@ general-purpose LLM) are evaluated on different input surfaces. The X-axis
 the Y-axis (accuracy) is comparable to the GPT-4.1 baseline only after
 the Sanctum eval runs and the Numbers table above is populated.
 
-Accuracy values for C1-serial and C2-parallel are marked **pending** until
-the first `scripts/run_dfir_metric_eval.py` run completes. See the
-Numbers section above.
+**C1-serial**: 99.2% (full run, N=43×3=129).
+**C2-parallel**: 100.0% on a partial run (N=47; cost cap hit at $5 before
+3rd-run completions — 43/43 unique questions correct on first pass). A full
+N=129 run would confirm; the partial result is plotted with a "(partial N=47)"
+annotation in the chart. The false_confidence_rate on the partial run was
+0.0% (12 CORROBORATED claims, all correct).
 
 ### Fixture-size manipulation
 

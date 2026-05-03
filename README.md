@@ -236,10 +236,12 @@ judges and operators can assess applicability.
   team that built the tools; an independent holdout corpus would be a
   stronger validity signal.
 
-- **Parallel-tool accuracy is pending.** `SANCTUM_PARALLEL_TOOLS=1` (C2)
-  reduces wallclock time (~21%) but has not yet been benchmarked for
-  accuracy. Until the C2 eval run completes, the 99.2% figure applies
-  only to serial tool execution (C1).
+- **Parallel-tool accuracy is from a partial run.** `SANCTUM_PARALLEL_TOOLS=1`
+  (C2) reduces wallclock time (~21%) and showed **100% accuracy on a
+  first-pass partial run** (47/129 runs, cost cap hit; all 43 unique
+  questions correct). A full N=129 run would provide Wilson CIs. The
+  99.2% figure from the complete run applies to C1 (serial); C2 result
+  is in [`docs/ACCURACY.md`](docs/ACCURACY.md) §C2-parallel.
 
 - **No live-evidence test.** All evaluation runs against synthetic
   fixture files, not real disk images or memory captures. Parser
