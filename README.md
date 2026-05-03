@@ -1,7 +1,7 @@
 # Sanctum — An architecturally-hardened DFIR MCP server
 
 > **Benchmark (DFIR-Metric subset, N=43 questions × 3 runs, claude-opus-4-7):**
-> Sanctum **99.2%** accuracy · Bare LLM **16.3%** · **+83 pp gap**
+> Sanctum **99.2%** \[95.7%, 99.9%\] · Bare LLM **16.3%** \[10.9%, 23.6%\] · **+82.9 pp gap** (Wilson 95% CIs)
 > precision@CORROBORATED **97.2%** · false confidence rate **2.8%**
 > Full results: [`docs/ACCURACY.md`](docs/ACCURACY.md)
 
@@ -136,7 +136,11 @@ protocol-compatibility smoke test.
 | Rubric axis | How Sanctum scores |
 |---|---|
 | Autonomous Execution Quality *(co-equal 1/6 weight; first tiebreaker; Stage 1 gating)* | `claim_finding(hypothesis, audit_ids[])` is an **external-signal self-correction primitive** in the sense of Kamoi (TACL 2024): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection. A single-family claim returns DRAFT, forcing the agent to gather a second-family corroborator before promoting to CORROBORATED. This is the form of self-correction Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows empirically helps; intrinsic "reflect on mistakes" loops are not used because Huang shows they degrade reasoning on average. |
+<<<<<<< HEAD
 | IR Accuracy | Measured against DFIR-Metric (Cherif et al., [arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). **Sanctum: 99.2% vs bare LLM: 16.3% on N=43 questions × 3 runs** (precision@CORROBORATED 97.2%, false confidence rate 2.8%). Regression table in [`docs/ACCURACY.md`](docs/ACCURACY.md). |
+=======
+| IR Accuracy | Measured against DFIR-Metric ([arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). **Sanctum scores 99.2% \[95.7%, 99.9%\] vs bare-LLM baseline 16.3% \[10.9%, 23.6%\], an 82.9 pp non-overlapping gap** (N=43 questions, N_runs=3, Wilson 95% CIs). Regression table in `docs/ACCURACY.md`. |
+>>>>>>> 3d33ea8 (docs(readme): add benchmark numbers + honest limits (items 4+5))
 | Breadth & Depth | Complete Windows execution-evidence triangulation set across five artifact families (AppCompat, Explorer/NTUSER, Background-service, Kernel-ETW, SysMain); depth over breadth per brief. Memory-resident artifacts are explicit v2 scope — see [Scope](#) above and [Status / roadmap](#status--roadmap) below. |
 | Constraint Implementation | **Architectural** at the server (typed-tool boundary, hash-anchored I/O, no shell passthrough); client-side hooks are defense-in-depth, not the real guarantee — see [§Limits of structural defenses](#limits-of-structural-defenses). Sanitization residuals (curated-allowlist limits, novel-vector exposure) named explicitly in [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md). Bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
 | Audit Trail Quality | Every finding cites `audit_ids[]`; `claim_finding` refuses calls whose audit_ids don't resolve to ledger entries — eliminating LLM-fabricated-citation as a route to a CORROBORATED verdict. The HMAC chain ensures an attacker with ledger write access cannot retroactively insert a fake entry to satisfy the gate. |
@@ -224,6 +228,29 @@ judges and operators can assess applicability.
   Desktop, OpenAI MCP shim) and the server-side guarantee is
   unchanged; switch off the hook and the server-side guarantee is
   unchanged.
+
+- **Evaluation corpus is synthetic and self-authored.** The 43-question
+  benchmark in [`tests/benchmarks/dfir_metric_subset.py`](tests/benchmarks/dfir_metric_subset.py)
+  is derived from DFIR-Metric (Cherif et al., [arXiv:2505.19973](https://arxiv.org/abs/2505.19973))
+  plus Sanctum-authored fixture cases. Questions were written by the same
+  team that built the tools; an independent holdout corpus would be a
+  stronger validity signal.
+
+- **Parallel-tool accuracy is pending.** `SANCTUM_PARALLEL_TOOLS=1` (C2)
+  reduces wallclock time (~21%) but has not yet been benchmarked for
+  accuracy. Until the C2 eval run completes, the 99.2% figure applies
+  only to serial tool execution (C1).
+
+- **No live-evidence test.** All evaluation runs against synthetic
+  fixture files, not real disk images or memory captures. Parser
+  correctness on real-world artifacts (encoding edge cases, partial
+  records, anti-forensic traces) has not been measured.
+
+- **No structured-bare ablation.** The 82.9 pp accuracy gap combines the
+  contribution of the typed parsers (structured evidence) and the
+  family-corroboration gate (architectural constraint). A structured-bare
+  arm — same parsers, gate disabled — would isolate how much of the gap
+  each component explains. Planned for a future session.
 
 These limits aren't oversights; they are the v1 scope claim. v2
 followups for each are tracked in the relevant threat-model docs.
