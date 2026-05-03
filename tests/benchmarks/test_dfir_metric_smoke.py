@@ -360,4 +360,49 @@ def test_smoke_subprocess_crash_during_call(server_env: dict[str, str], tmp_path
     assert len(report.per_question) == 1
     row = report.per_question[0]
     assert row.predicted == "<subprocess_crash>", f"unexpected predicted={row.predicted!r}"
-    assert row.correct is False
+
+
+def test_smoke_structured_bare_arm(server_env: dict[str, str], tmp_path: Path) -> None:
+    """structured_bare arm: parsers run directly; no MCP subprocess; schema matches AC-4."""
+    questions = (
+        _mk_question(
+            q_id="smoke-structured-q-1",
+            family="AppCompat",
+            text="Was runtimebroker.exe executed on this host?",
+            scoring_pattern=r"~(?i)\bAmcache\b",
+            bare_evidence=b"",  # unused by structured_bare arm
+        ),
+    )
+    client = MockAnthropicClient(
+        responses=[_final_answer_response("Amcache.hve InventoryApplicationFile")]
+    )
+
+    report = eval_driver.run_eval(
+        arm="structured_bare",
+        n_runs=1,
+        questions=questions,
+        anthropic_client=client,
+        case_root=FIXTURES_ROOT / SYNTHETIC_CASE_ID,
+        output_dir=tmp_path,
+        server_env=server_env,
+    )
+
+    assert len(report.per_question) == 1, f"expected 1 row, got {len(report.per_question)}"
+    row = report.per_question[0]
+    assert row.arm == "structured_bare"
+    assert row.claim_status is None, "structured_bare arm must not produce a claim_status"
+    assert row.audit_ids == (), "structured_bare arm must not carry audit_ids"
+    assert row.correct is True, f"expected correct=True, got predicted={row.predicted!r}"
+
+    assert "structured_bare" in report.aggregates
+    agg = report.aggregates["structured_bare"]
+    assert agg.false_confidence_rate is None, "no gate — false_confidence_rate must be None"
+    assert agg.abstention_rate is None, "no gate — abstention_rate must be None"
+    assert agg.precision_at_corroborated is None, "no CORROBORATED tier — must be None"
+    assert 0.0 <= agg.accuracy_mean <= 1.0
+
+    # Verify no MCP subprocess was spawned (no sanctum arm in this run).
+    spawned_this_run = [p for p in eval_driver._spawned_procs if p.returncode is not None]
+    assert len(spawned_this_run) == len(
+        eval_driver._spawned_procs
+    ), "structured_bare arm must not spawn any MCP subprocess"

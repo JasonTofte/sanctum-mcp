@@ -4,6 +4,11 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval: structured_bare ablation arm (R6, 2026-05-03)
+
+- `scripts/run_dfir_metric_eval.py`: added `structured_bare` eval arm that runs Sanctum's parsers directly (no MCP subprocess, no gate) and feeds clean structured JSON to Claude. Isolates the gate's accuracy contribution from the parser's: bare (~16%) → structured_bare (TBD) → sanctum (~99%) three-arm table decomposes the 83pp gap. `--arm structured_bare` runs the ablation; `--arm both` retains the existing two-arm behaviour.
+- `tests/benchmarks/test_dfir_metric_smoke.py`: added `test_smoke_structured_bare_arm` verifying schema correctness (claim_status=None, audit_ids=(), no MCP subprocess spawned, arm appears in aggregates).
+
 ### Fixed — eval: autonomous scoring pattern + R2 clean results (2026-05-03)
 
 - `tests/benchmarks/dfir_metric_subset.py`: fixed scoring pattern for the `mf_privesc_001` autonomous question — `~(?i)\bjuicypotato\.exe\b` → `~(?i)\bjuicypotato(\.exe)?\b`. Open-ended "tool" phrasing elicits the bare name without `.exe`; the model's answer (`JuicyPotato`) was factually correct. The guided "executable" variants retain the strict `.exe` pattern.
