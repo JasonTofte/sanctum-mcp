@@ -470,7 +470,9 @@ SUBSET: tuple[SubsetEntry, ...] = (
         line_offset=-34,
         family="AppCompat",
         extra_families=("Sysmon",),
-        scoring_pattern=r"~(?i)\bjuicypotato\.exe\b",
+        # Accept with or without .exe — open-ended "tool" phrasing elicits bare name;
+        # guided variants use "executable" phrasing which reliably produces the .exe suffix.
+        scoring_pattern=r"~(?i)\bjuicypotato(\.exe)?\b",
         question_type="autonomous",
         justification=(
             "Autonomous — agent discovers tool path independently; juicypotato.exe "

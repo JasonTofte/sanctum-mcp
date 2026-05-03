@@ -277,7 +277,7 @@ A judge reading the Numbers table can confirm the following facts inline:
 | Model version | `claude-opus-4-7` | `EvalReport.model_id` |
 | DFIR-Metric corpus | local-v1 (25-question self-contained corpus, see §Subset-selection rationale) | `EvalReport.dfir_metric_commit_sha` |
 | Sanctum version | `0.4.1` | `EvalReport.sanctum_version` |
-| Run count per question | N=1 (single-run; N=3 deferred to v2 per Honest limits §N=3) | `EvalReport.n_runs_per_q` |
+| Run count per question | N=3 | `EvalReport.n_runs_per_q` |
 | Arm parity | identical prompts, fixtures, scoring pattern; arms differ only in MCP tool availability | `scripts/run_dfir_metric_eval.py` |
 | Confidence intervals | Wilson score, 95% level | `scripts/compute_cis.py` |
 
@@ -286,42 +286,44 @@ recommendation in Brown, Cai & DasGupta, *Statistical Science*
 2001 — Wilson score intervals are preferred over CLT-based
 intervals at N=45.
 
-<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T031228-89a93bae.json` -->
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T155143-7cdbb1af.json` -->
 
-### Run `eval-20260503T031228-89a93bae` — sanctum_partial_credit_accuracy
+### Run `eval-20260503T155143-7cdbb1af` — sanctum_partial_credit_accuracy
 
 - Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
-- Window: `2026-05-03T02:42:07Z` → `2026-05-03T03:12:28Z` · N_questions=39 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$7.1581
+- Window: `2026-05-03T15:15:35Z` → `2026-05-03T15:51:43Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.1986
 
-> ⚠ **high variance — interpret with caution** (`bare`, `sanctum`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
+> ⚠ **high variance — interpret with caution** (`bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
 
 **Per-arm summary**
 
 | Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
 |---|---|---|---|---|---|---|---|---|---|
-| `sanctum` | 97.4% ± 15.8% ⚠ | 90.0% | 74.4% | 10.0% | n/a | 11263 | 7622 | 633 | $6.3103 |
-| `bare` | 21.4% ± 41.0% ⚠ | n/a | n/a | n/a | 100.0% | 4294 | 195 | 251 | $0.8477 |
+| `sanctum` | 99.2% ± 8.8% | 97.2% | 67.4% | 2.8% | n/a | 12296 | 7880 | 684 | $7.2886 |
+| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 100.0% | 4512 | 195 | 243 | $0.9100 |
+
+> **Note on the 1 remaining CORROBORATED miss (false_confidence_rate=2.8%):** The miss is `synthetic_AppCompat_Sysmon_34_autonomous` — the autonomous mf_privesc_001 question asking "What was the privilege-escalation tool used?" The model answered `JuicyPotato` (correct) but the scoring pattern required `juicypotato.exe` (with `.exe` suffix). This is a scoring strictness edge case: open-ended "tool" phrasing does not reliably elicit the `.exe` suffix, unlike the guided "executable" variants. The gate fired correctly (CORROBORATED from Amcache + Sysmon). The pattern has been corrected to `~(?i)\bjuicypotato(\.exe)?\b` in PR #64; a future re-run is expected to show `false_confidence_rate=0%`.
 
 **Per-family breakdown** (single-author tagging bias is visible here)
 
 | Arm | Family | tagged_count | correct_count | accuracy |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | 8 | 30 | 90.9% |
-| `sanctum` | `BAM` | 7 | 21 | 100.0% |
-| `sanctum` | `Explorer` | 7 | 24 | 100.0% |
-| `sanctum` | `SysMain` | 7 | 24 | 100.0% |
+| `sanctum` | `AppCompat` | 13 | 38 | 97.4% |
+| `sanctum` | `BAM` | 8 | 24 | 100.0% |
+| `sanctum` | `Explorer` | 9 | 27 | 100.0% |
+| `sanctum` | `SysMain` | 8 | 24 | 100.0% |
 | `sanctum` | `Sysmon` | 5 | 15 | 100.0% |
-| `bare` | `AppCompat` | 8 | 8 | 24.2% |
-| `bare` | `BAM` | 7 | 0 | 0.0% |
-| `bare` | `Explorer` | 7 | 4 | 16.7% |
-| `bare` | `SysMain` | 7 | 9 | 37.5% |
-| `bare` | `Sysmon` | 5 | 4 | 26.7% |
+| `bare` | `AppCompat` | 13 | 6 | 15.4% |
+| `bare` | `BAM` | 8 | 0 | 0.0% |
+| `bare` | `Explorer` | 9 | 4 | 14.8% |
+| `bare` | `SysMain` | 8 | 9 | 37.5% |
+| `bare` | `Sysmon` | 5 | 2 | 13.3% |
 
 _Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
 
 <!-- END pasted fragment -->
 
-<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260503T031228-89a93bae.json` -->
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260503T155143-7cdbb1af.json` -->
 
 **Wilson 95% confidence intervals**
 
@@ -331,29 +333,46 @@ _At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recom
 
 | Arm | n | accuracy | Wilson 95% CI |
 |---|---|---|---|
-| `sanctum` | 117 | 97.4% | [92.7%, 99.1%] |
-| `bare` | 117 | 21.4% | [14.9%, 29.6%] |
+| `sanctum` | 129 | 99.2% | [95.7%, 99.9%] |
+| `bare` | 129 | 16.3% | [10.9%, 23.6%] |
 
 **Per-arm × per-family**
 
 | Arm | Family | n | accuracy | Wilson 95% CI |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | 33 | 90.9% | [76.4%, 96.9%] |
-| `sanctum` | `BAM` | 21 | 100.0% | [84.5%, 100.0%] |
-| `sanctum` | `Explorer` | 24 | 100.0% | [86.2%, 100.0%] |
+| `sanctum` | `AppCompat` | 39 | 97.4% | [86.8%, 99.5%] |
+| `sanctum` | `BAM` | 24 | 100.0% | [86.2%, 100.0%] |
+| `sanctum` | `Explorer` | 27 | 100.0% | [87.5%, 100.0%] |
 | `sanctum` | `SysMain` | 24 | 100.0% | [86.2%, 100.0%] |
 | `sanctum` | `Sysmon` | 15 | 100.0% | [79.6%, 100.0%] |
-| `bare` | `AppCompat` | 33 | 24.2% | [12.8%, 41.0%] |
-| `bare` | `BAM` | 21 | 0.0% | [0.0%, 15.5%] |
-| `bare` | `Explorer` | 24 | 16.7% | [6.7%, 35.9%] |
+| `bare` | `AppCompat` | 39 | 15.4% | [7.2%, 29.7%] |
+| `bare` | `BAM` | 24 | 0.0% | [0.0%, 13.8%] |
+| `bare` | `Explorer` | 27 | 14.8% | [5.9%, 32.5%] |
 | `bare` | `SysMain` | 24 | 37.5% | [21.2%, 57.3%] |
-| `bare` | `Sysmon` | 15 | 26.7% | [10.9%, 52.0%] |
+| `bare` | `Sysmon` | 15 | 13.3% | [3.7%, 37.9%] |
 
 **Arm-difference interpretation**
 
-- sanctum: 97.4% [92.7%, 99.1%]  ·  bare: 21.4% [14.9%, 29.6%]
-- Point-estimate gap: `sanctum − bare = 76.1%`
+- sanctum: 99.2% [95.7%, 99.9%]  ·  bare: 16.3% [10.9%, 23.6%]
+- Point-estimate gap: `sanctum − bare = 82.9%`
 - Per-arm CIs do NOT overlap, which is a sufficient (but not necessary) condition for a statistically significant difference at the α corresponding to this confidence level.
+
+<!-- END pasted fragment -->
+
+---
+
+_Prior run (N=39, N_runs=3, before q_id collision fix + scoring bug fix + autonomous questions — see PR #63):_
+
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T031228-89a93bae.json` -->
+
+### Run `eval-20260503T031228-89a93bae` — sanctum_partial_credit_accuracy (archived)
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
+- Window: `2026-05-03T02:42:07Z` → `2026-05-03T03:12:28Z` · N_questions=39 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$7.1581
+- **Archived** — scoring bug in mf_privesc_001 directory question caused false_confidence_rate=10% (model answered correctly; pattern was wrong). Superseded by run `eval-20260503T155143-7cdbb1af`.
+
+| `sanctum` | 97.4% ± 15.8% ⚠ | 90.0% | 74.4% | 10.0% | n/a | — |
+| `bare` | 21.4% ± 41.0% ⚠ | n/a | n/a | n/a | 100.0% | — |
 
 <!-- END pasted fragment -->
 
