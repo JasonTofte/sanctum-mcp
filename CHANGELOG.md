@@ -4,6 +4,11 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — eval: autonomous scoring pattern + R2 clean results (2026-05-03)
+
+- `tests/benchmarks/dfir_metric_subset.py`: fixed scoring pattern for the `mf_privesc_001` autonomous question — `~(?i)\bjuicypotato\.exe\b` → `~(?i)\bjuicypotato(\.exe)?\b`. Open-ended "tool" phrasing elicits the bare name without `.exe`; the model's answer (`JuicyPotato`) was factually correct. The guided "executable" variants retain the strict `.exe` pattern.
+- `docs/ACCURACY.md`: updated Numbers table with clean N=3 eval on 43-question corpus (`eval-20260503T155143-7cdbb1af`): sanctum 99.2% [95.7%, 99.9%] vs bare 16.3% [10.9%, 23.6%], gap 82.9pp with non-overlapping CIs. Previous run (`eval-20260503T031228-89a93bae`) archived — it had a scoring bug that inflated false_confidence_rate to 10%.
+
 ### Added — eval corpus: 4 autonomous questions + q_id collision fix + scoring bug fix (2026-05-02)
 
 - `tests/benchmarks/dfir_metric_subset.py`: added 4 **autonomous** `SubsetEntry` records (one per attack case) whose `synthetic_text` does not name which tools to call — the agent must self-select its tool path. This tests that the corroboration gate fires even without guided tool nomination, the strongest form of the "architectural enforcement, not prompt tricks" claim.
