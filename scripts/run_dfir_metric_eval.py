@@ -1434,7 +1434,7 @@ def _report_to_dict(report: EvalReport) -> dict[str, Any]:
 
 def run_eval(
     *,
-    arm: Literal["sanctum", "bare", "structured_bare", "both"],
+    arm: Literal["sanctum", "bare", "structured_bare", "both", "parallel"],
     questions: Sequence[Question],
     n_runs: int = 3,
     max_cost_usd: float = 50.0,
@@ -1469,8 +1469,9 @@ def run_eval(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     arms: tuple[str, ...] = ("sanctum", "bare") if arm == "both" else (arm,)
-    # "both" intentionally excludes structured_bare to preserve existing
-    # two-arm report shape. Use --arm structured_bare to run the ablation alone.
+    # "both" intentionally excludes structured_bare and parallel to preserve
+    # existing two-arm report shape. Use --arm structured_bare for the R6
+    # ablation; --arm parallel runs the sanctum path with SANCTUM_PARALLEL_TOOLS=1.
     case_id = case_root.name
 
     started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1513,7 +1514,7 @@ def run_eval(
                     halt_reason = "cost_cap_exceeded"
                     outer_done = True
                     break
-                if current_arm == "sanctum":
+                if current_arm in ("sanctum", "parallel"):
                     row, usage = _run_one_sanctum_question(
                         question=question,
                         run_idx=run_idx,
@@ -1612,9 +1613,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--arm",
-        choices=["sanctum", "bare", "structured_bare", "both"],
+        choices=["sanctum", "bare", "structured_bare", "both", "parallel"],
         default="both",
-        help="Which arm(s) to run (default: both). Use 'structured_bare' for the R6 ablation.",
+        help=(
+            "Which arm(s) to run (default: both). "
+            "'structured_bare' runs the R6 ablation (parsers only, no gate). "
+            "'parallel' runs the sanctum arm with SANCTUM_PARALLEL_TOOLS=1."
+        ),
     )
     parser.add_argument(
         "--n-runs",
@@ -1740,6 +1745,8 @@ if __name__ == "__main__":
     server_env["SANCTUM_OUTPUT_ROOT"] = str(_output_root)
     server_env["SANCTUM_SKIP_MOUNT_CHECK"] = "1"
     server_env["SANCTUM_USE_FIXTURE_SIDECAR"] = "1"
+    if args.arm == "parallel":
+        server_env["SANCTUM_PARALLEL_TOOLS"] = "1"
 
     report = run_eval(
         arm=args.arm,  # type: ignore[arg-type]
