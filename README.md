@@ -1,8 +1,8 @@
 # Sanctum — An architecturally-hardened DFIR MCP server
 
 > **Benchmark (DFIR-Metric subset, N=43 questions × 3 runs, claude-opus-4-7):**
-> Sanctum **99.2%** \[95.7%, 99.9%\] · Bare LLM **16.3%** \[10.9%, 23.6%\] · **+82.9 pp gap** (Wilson 95% CIs)
-> precision@CORROBORATED **97.2%** · false confidence rate **2.8%**
+> C1-serial **99.2%** \[95.7%, 99.9%\] · C2-parallel **100.0%** \[97.1%, 100.0%\] · Bare LLM **16.3%** \[10.9%, 23.6%\] · **+82.9 pp gap** (Wilson 95% CIs)
+> precision@CORROBORATED **97.2%** (C1) / **100.0%** (C2) · false confidence rate **2.8%** (C1) / **0.0%** (C2)
 > Full results: [`docs/ACCURACY.md`](docs/ACCURACY.md)
 
 **Status**: 0.3.0 — quickstart runs end-to-end against a synthetic fixture ([`scripts/quickstart.py`](scripts/quickstart.py)); six real-mode parsers shipped (Amcache, ShimCache, BAM, UserAssist, Prefetch, Sysmon-EVTX); two-layer [`claim_finding`](src/sanctum/finding.py) gate live.
@@ -232,12 +232,11 @@ judges and operators can assess applicability.
   team that built the tools; an independent holdout corpus would be a
   stronger validity signal.
 
-- **Parallel-tool accuracy is from a partial run.** `SANCTUM_PARALLEL_TOOLS=1`
-  (C2) reduces wallclock time (~21%) and showed **100% accuracy on a
-  first-pass partial run** (47/129 runs, cost cap hit; all 43 unique
-  questions correct). A full N=129 run would provide Wilson CIs. The
-  99.2% figure from the complete run applies to C1 (serial); C2 result
-  is in [`docs/ACCURACY.md`](docs/ACCURACY.md) §C2-parallel.
+- **Parallel-tool eval is complete but on a synthetic corpus.** `SANCTUM_PARALLEL_TOOLS=1`
+  (C2) scores **100.0% [97.1%, 100.0%]** (N=43×3=129, Wilson 95% CI) and
+  is 21% faster (610 vs 770 ms/MB) — strictly dominating C1-serial on both
+  axes. Both figures apply only to the synthetic fixture corpus; live-evidence
+  accuracy has not been measured.
 
 - **No live-evidence test.** All evaluation runs against synthetic
   fixture files, not real disk images or memory captures. Parser

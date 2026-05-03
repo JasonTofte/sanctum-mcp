@@ -361,17 +361,58 @@ _At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recom
 
 ---
 
-### Run `eval-20260503T181313-38040f83` — C2-parallel arm (partial)
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T224805-f6566e38.json` -->
 
-- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · arm: `parallel` (`SANCTUM_PARALLEL_TOOLS=1`)
-- Window: `2026-05-03T18:13:13Z` · N_questions=43 · N_runs=3 · cost=$2.6174
-- **Partial** — cost cap hit at $5 before 3rd-run completions; 47/129 rows completed (43 unique questions, 4 with 2 runs, 39 with 1 run).
+### Run `eval-20260503T224805-f6566e38` — sanctum_partial_credit_accuracy (C2-parallel, full run)
 
-| Arm | rows | correct | accuracy | false_confidence_rate | claim_status dist |
-|---|---|---|---|---|---|
-| `parallel` | 47/129 | 47 | **100.0%** | **0.0%** | DRAFT=33, CORROBORATED=12, FINAL=2 |
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
+- Window: `2026-05-03T22:22:44Z` → `2026-05-03T22:48:05Z` · N_questions=43 · N_runs=3 · arms=['parallel'] · cost=$7.3206
 
-**Interpretation**: All 43 unique questions answered correctly on first pass. The 0.0% false_confidence_rate means all 12 CORROBORATED claims were accurate. A full N=129 run would provide Wilson CIs; the point estimate is plotted with "(partial N=47)" in the Pareto chart. See `reports/wallclock.json` for the `partial_note` field.
+**Per-arm summary**
+
+| Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
+|---|---|---|---|---|---|---|---|---|---|
+| `parallel` | 100.0% ± 0.0% | 100.0% | 67.4% | 0.0% | n/a | 11788 | 7880 | 694 | $7.3206 |
+
+**Per-family breakdown** (single-author tagging bias is visible here)
+
+| Arm | Family | tagged_count | correct_count | accuracy |
+|---|---|---|---|---|
+| `parallel` | `AppCompat` | 13 | 39 | 100.0% |
+| `parallel` | `BAM` | 8 | 24 | 100.0% |
+| `parallel` | `Explorer` | 9 | 27 | 100.0% |
+| `parallel` | `SysMain` | 8 | 24 | 100.0% |
+| `parallel` | `Sysmon` | 5 | 15 | 100.0% |
+
+_Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
+
+<!-- END pasted fragment -->
+
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260503T224805-f6566e38.json` -->
+
+**Wilson 95% confidence intervals**
+
+_At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recommended small-N method (Brown, Cai & DasGupta, Statistical Science 2001)._
+
+**Per-arm accuracy**
+
+| Arm | n | accuracy | Wilson 95% CI |
+|---|---|---|---|
+| `parallel` | 129 | 100.0% | [97.1%, 100.0%] |
+
+**Per-arm × per-family**
+
+| Arm | Family | n | accuracy | Wilson 95% CI |
+|---|---|---|---|---|
+| `parallel` | `AppCompat` | 39 | 100.0% | [91.0%, 100.0%] |
+| `parallel` | `BAM` | 24 | 100.0% | [86.2%, 100.0%] |
+| `parallel` | `Explorer` | 27 | 100.0% | [87.5%, 100.0%] |
+| `parallel` | `SysMain` | 24 | 100.0% | [86.2%, 100.0%] |
+| `parallel` | `Sysmon` | 15 | 100.0% | [79.6%, 100.0%] |
+
+<!-- END pasted fragment -->
+
+_Supersedes partial run `eval-20260503T181313-38040f83` (cost cap hit at $5, 47/129 rows)._
 
 ---
 
@@ -690,12 +731,11 @@ general-purpose LLM) are evaluated on different input surfaces. The X-axis
 the Y-axis (accuracy) is comparable to the GPT-4.1 baseline only after
 the Sanctum eval runs and the Numbers table above is populated.
 
-**C1-serial**: 99.2% (full run, N=43×3=129).
-**C2-parallel**: 100.0% on a partial run (N=47; cost cap hit at $5 before
-3rd-run completions — 43/43 unique questions correct on first pass). A full
-N=129 run would confirm; the partial result is plotted with a "(partial N=47)"
-annotation in the chart. The false_confidence_rate on the partial run was
-0.0% (12 CORROBORATED claims, all correct).
+**C1-serial**: 99.2% [95.7%, 99.9%] (full run, N=43×3=129).
+**C2-parallel**: **100.0% [97.1%, 100.0%]** (full run, N=43×3=129, Wilson 95% CI).
+Every family 100%, precision@CORROBORATED 100%, false_confidence_rate 0.0%.
+C2-parallel strictly dominates C1-serial on both axes — faster (610 vs 770 ms/MB)
+and more accurate (100% vs 99.2%).
 
 ### Fixture-size manipulation
 

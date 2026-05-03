@@ -161,9 +161,8 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
     ax.grid(True, alpha=0.3)
 
     note = (
-        "* partial = cost cap hit before all N=129 runs completed  ·  "
-        "Sanctum (host-based pipeline) and GPT-4.1 (general LLM) are different systems; "
-        "reference line is a benchmark anchor, not a direct comparison."
+        "Sanctum (host-based deterministic pipeline) and GPT-4.1 (general-purpose LLM) "
+        "are different systems; the reference line is a benchmark anchor, not a direct comparison."
     )
     fig.text(0.5, -0.02, note, ha="center", fontsize=7, color="#555555", wrap=True)
 
