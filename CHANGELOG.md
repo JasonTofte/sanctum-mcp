@@ -15,7 +15,8 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ### Added — eval: structured_bare ablation arm (R6, 2026-05-03)
 
-- `scripts/run_dfir_metric_eval.py`: added `structured_bare` eval arm that runs Sanctum's parsers directly (no MCP subprocess, no gate) and feeds clean structured JSON to Claude. Isolates the gate's accuracy contribution from the parser's: bare (~16%) → structured_bare (TBD) → sanctum (~99%) three-arm table decomposes the 83pp gap. `--arm structured_bare` runs the ablation; `--arm both` retains the existing two-arm behaviour.
+- `scripts/run_dfir_metric_eval.py`: added `structured_bare` eval arm that runs Sanctum's parsers directly (no MCP subprocess, no gate) and feeds clean structured JSON to Claude. Result: bare=16.3% → structured_bare=10.1% → sanctum=99.2%. Structured data from the wrong case hurts (−6.2pp vs bare); 89pp sanctum−structured_bare gap is attributable to fixture-aligned case routing + typed tool contracts + corroboration gate. `--arm structured_bare` runs the ablation; `--arm both` retains the existing two-arm behaviour.
+- `docs/ACCURACY.md`: added R6 run results and three-arm interpretation table.
 - `tests/benchmarks/test_dfir_metric_smoke.py`: added `test_smoke_structured_bare_arm` verifying schema correctness (claim_status=None, audit_ids=(), no MCP subprocess spawned, arm appears in aggregates).
 
 ### Fixed — eval: autonomous scoring pattern + R2 clean results (2026-05-03)
