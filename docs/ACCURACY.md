@@ -418,6 +418,53 @@ _Supersedes partial run `eval-20260503T181313-38040f83` (cost cap hit at $5, 47/
 
 _Prior run (N=39, N_runs=3, before q_id collision fix + scoring bug fix + autonomous questions — see PR #63):_
 
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T230908-f3f2cf46.json` -->
+
+### Run `eval-20260503T230908-f3f2cf46` — sanctum_partial_credit_accuracy (R6 structured_bare ablation)
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
+- Window: `2026-05-03T23:01:31Z` → `2026-05-03T23:09:08Z` · N_questions=43 · N_runs=3 · arms=['structured_bare'] · cost=$0.6471
+
+> ⚠ **high variance — interpret with caution** (`structured_bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
+
+**Per-arm summary**
+
+| Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
+|---|---|---|---|---|---|---|---|---|---|
+| `structured_bare` | 10.1% ± 30.1% ⚠ | n/a | n/a | n/a | 100.0% | 3542 | 217 | 157 | $0.6471 |
+
+**Per-family breakdown** (single-author tagging bias is visible here)
+
+| Arm | Family | tagged_count | correct_count | accuracy |
+|---|---|---|---|---|
+| `structured_bare` | `AppCompat` | 13 | 3 | 7.7% |
+| `structured_bare` | `BAM` | 0 | 0 | 0.0% |
+| `structured_bare` | `Explorer` | 9 | 3 | 11.1% |
+| `structured_bare` | `SysMain` | 8 | 6 | 25.0% |
+| `structured_bare` | `Sysmon` | 5 | 1 | 6.7% |
+
+_Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
+
+**R6 interpretation — why structured_bare (10.1%) < bare (16.3%)**
+
+This is the load-bearing finding of the ablation. Two mechanisms explain the result:
+
+1. **Adversarial questions score 0 by construction.** 6 of 43 questions are `adversarial_single_family` or `autonomous` type, where correctness requires the family-corroboration gate to fire (returning `DRAFT`). Without a gate, `structured_bare` cannot produce `DRAFT` — these questions always score incorrect. The `sanctum` arm scores them correctly because the gate fires.
+
+2. **Evidence from the wrong case anchor-anchors the model.** 25 of the 43 questions are drawn from the upstream DFIR-Metric CTF corpus, which are answered from training knowledge in the `bare` arm (evidence is empty bytes). The `structured_bare` arm feeds parsed rows from the synthetic smoke fixture — a completely different system with different executables. The model reads this irrelevant evidence and anchors on it, scoring *worse* than answering from knowledge alone. This is a known LLM failure mode: confidently-wrong evidence beats no evidence.
+
+**Three-arm summary (cross-run comparison)**
+
+| Arm | Accuracy | Gap vs bare | Interpretation |
+|---|---|---|---|
+| `bare` | 16.3% [10.9%, 23.6%] | — | Baseline: training knowledge, no evidence |
+| `structured_bare` | 10.1% | −6.2pp | Structured data from wrong case hurts; gate contribution isolatable |
+| `sanctum` | 99.2% [95.7%, 99.9%] | +83pp | Fixture-aligned case routing + typed tools + corroboration gate |
+
+The 89pp gap between `sanctum` and `structured_bare` is attributable to the Sanctum architecture: fixture-aligned case routing (the MCP server reads the case the question was written against), typed tool contracts (no free-text injection path), and the multi-family corroboration gate (two independent artifact families required before `FINAL`). Structured parsing alone does not explain the gap.
+
+---
+
 <!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T031228-89a93bae.json` -->
 
 ### Run `eval-20260503T031228-89a93bae` — sanctum_partial_credit_accuracy (archived)
