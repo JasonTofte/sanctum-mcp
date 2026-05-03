@@ -58,12 +58,15 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
     matplotlib.use("Agg")  # headless — no display required
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(9, 6))
 
     any_accuracy = False
+    points: list[tuple[float, float, str, str, bool, bool, int | None]] = []
     for config_name, metrics in sorted(data.items()):
         x = float(metrics.get("ms_per_mb", 0))
-        accuracy = metrics.get("tus_m")  # None until eval runs
+        accuracy = metrics.get("tus_m")
+        is_partial = bool(metrics.get("partial", False))
+        partial_n: int | None = metrics.get("partial_n") if is_partial else None
 
         if accuracy is not None:
             y = float(accuracy)
@@ -71,31 +74,54 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
         else:
             y = 0.0
 
-        color = _COLORS.get(config_name, "#7f7f7f")
-        marker = _MARKERS.get(config_name, "D")
+        points.append((x, y, config_name, _COLORS.get(config_name, "#7f7f7f"),
+                        accuracy is not None, is_partial, partial_n))
 
-        ax.scatter(
-            x,
-            y,
-            color=color,
-            marker=marker,
-            s=120,
-            zorder=3,
-            label=config_name,
-        )
-        if accuracy is None:
-            label_text = f"{config_name}\n(accuracy: pending)"
-        elif metrics.get("partial"):
-            partial_n = metrics.get("partial_n", "?")
-            label_text = f"{config_name}\n(partial N={partial_n})"
+    # Determine annotation side per point: leftmost point goes right, rightmost goes left
+    if points:
+        xs = [p[0] for p in points]
+        x_min, x_max = min(xs), max(xs)
+
+    for x, y, config_name, color, has_accuracy, is_partial, partial_n in points:
+        marker = _MARKERS.get(config_name, "D")
+        ax.scatter(x, y, color=color, marker=marker, s=140, zorder=3, label=config_name)
+
+        # Value label on the point
+        if has_accuracy:
+            pct_label = f"{y:.1%}" + (" *" if is_partial else "")
+            ax.annotate(
+                pct_label,
+                (x, y),
+                textcoords="offset points",
+                xytext=(0, 10),
+                fontsize=9,
+                ha="center",
+                color=color,
+                fontweight="bold",
+            )
+
+        # Config name label: anchor left for rightmost point, right for leftmost
+        if x == x_max:
+            name_offset = (-8, -18)
+            ha = "right"
         else:
-            label_text = config_name
+            name_offset = (8, -18)
+            ha = "left"
+
+        if not has_accuracy:
+            name_text = f"{config_name}\n(pending)"
+        elif is_partial:
+            name_text = f"{config_name}\n(partial N={partial_n})"
+        else:
+            name_text = config_name
+
         ax.annotate(
-            label_text,
+            name_text,
             (x, y),
             textcoords="offset points",
-            xytext=(8, 6),
-            fontsize=9,
+            xytext=name_offset,
+            fontsize=8.5,
+            ha=ha,
             color=color,
         )
 
@@ -105,37 +131,41 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
         color="#d62728",
         linestyle="--",
         linewidth=1.2,
-        label=f"GPT-4.1 TUS@4 = {GPT41_TUS4:.1%}\n(Cherif et al., arXiv:2505.19973)",
+        label=f"GPT-4.1 TUS@4 = {GPT41_TUS4:.1%} (Cherif et al., arXiv:2505.19973)",
         zorder=2,
     )
     ax.annotate(
         f"GPT-4.1 {GPT41_TUS4:.1%}",
-        xy=(0, GPT41_TUS4),
+        xy=(0.01, GPT41_TUS4),
         xycoords=("axes fraction", "data"),
         textcoords="offset points",
-        xytext=(4, 4),
+        xytext=(0, 5),
         fontsize=8,
         color="#d62728",
     )
 
-    ax.set_xlabel("Wallclock — ms per MB of evidence\n(lower is faster)", fontsize=10)
+    ax.set_xlabel("Wallclock — ms per MB of evidence  (lower is faster)", fontsize=10)
     if any_accuracy:
-        ax.set_ylabel("IR-accuracy (higher is better)", fontsize=10)
+        ax.set_ylabel("IR-accuracy  (higher is better)", fontsize=10)
     else:
         ax.set_ylabel("IR-accuracy (pending first eval run)", fontsize=10)
     ax.set_title(
-        "Sanctum operating configurations vs. GPT-4.1 baseline\n"
-        "Pareto frontier: wallclock cost × accuracy",
-        fontsize=11,
+        "Sanctum: operating configurations vs. GPT-4.1 baseline",
+        fontsize=12,
+        pad=14,
     )
-    ax.legend(fontsize=8, loc="upper right")
+    # Leave room at top for value labels and at right for C1 name label
+    ax.set_ylim(bottom=max(0.0, GPT41_TUS4 - 0.12), top=1.12)
+    ax.margins(x=0.18)
+    ax.legend(fontsize=8, loc="lower right")
     ax.grid(True, alpha=0.3)
 
     note = (
-        "Note: Sanctum (host-based deterministic pipeline) and GPT-4.1 (general-purpose LLM)\n"
-        "are different systems; the reference line is a benchmark anchor, not a direct comparison."
+        "* partial = cost cap hit before all N=129 runs completed  ·  "
+        "Sanctum (host-based pipeline) and GPT-4.1 (general LLM) are different systems; "
+        "reference line is a benchmark anchor, not a direct comparison."
     )
-    fig.text(0.5, -0.04, note, ha="center", fontsize=7, color="#555555", wrap=True)
+    fig.text(0.5, -0.02, note, ha="center", fontsize=7, color="#555555", wrap=True)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
