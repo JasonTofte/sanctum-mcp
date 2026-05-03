@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval corpus: 3 new multi-family fixture cases (R5, 2026-05-02)
+
+Nine new CORROBORATED-path questions across three distinct attack patterns (previously all 3 CORROBORATED questions used the same `c2agent.exe` pattern):
+
+- **`mf_persistence_001`** — persistence via `C:\ProgramData\svcupdate.exe`; families Explorer/UserAssist + SysMain/Prefetch + Kernel-ETW/Sysmon. Three question pairs covering all family combinations.
+- **`mf_lateral_001`** — lateral movement via `C:\Windows\Temp\psexesvc.exe`; families Background-service/BAM + Kernel-ETW/Sysmon + Explorer/UserAssist. Three question pairs covering all family combinations.
+- **`mf_privesc_001`** — privilege escalation via `C:\Temp\juicypotato.exe`; families AppCompat/Amcache + Kernel-ETW/Sysmon. Three questions (exe name, child process whoami.exe, directory).
+
+Each case: stub artifacts (empty files satisfying `_resolve_case` path checks) + `*.sanctum-fixture.json` sidecars using the canonical family names. All events within the 5-second temporal coupling window. `dfir_metric_subset.py` updated with 9 new `SubsetEntry` records using short eval-report family names (`Explorer`, `BAM`, `Sysmon`).
+
 ### Fixed — eval methodology: AUGRC citation + precision@CORROBORATED metric (2026-05-02)
 
 - `docs/ACCURACY.md`: fixed AUGRC citation — corrected "Galil et al. NeurIPS 2024" (wrong) to "Traub et al. NeurIPS 2024 (arXiv:2407.01032)". Galil is a prior work cited *by* that paper, not the paper itself.

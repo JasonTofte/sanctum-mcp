@@ -1,0 +1,1 @@
+{"family": "Explorer/NTUSER", "tool": "get_userassist", "events": [{"program_path": "C:\\Windows\\Temp\\psexesvc.exe", "timestamp": "2024-06-15T11:15:02+00:00", "evidence_size_bytes": 131072, "extras": {"row_index": "0", "run_count": "1"}}]}

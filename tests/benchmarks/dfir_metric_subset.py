@@ -278,6 +278,135 @@ SUBSET: tuple[SubsetEntry, ...] = (
         ),
         case_id_override="mf_c2agent_001",
     ),
+    # --- Multi-family: mf_persistence_001 (Explorer/NTUSER + SysMain + Kernel-ETW) ---
+    # Attack pattern: svcupdate.exe dropped in ProgramData, persistent via Run key.
+    SubsetEntry(
+        line_offset=-1,
+        family="Explorer",
+        extra_families=("SysMain",),
+        scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
+        justification="svcupdate.exe appears in UserAssist and Prefetch in mf_persistence_001.",
+        synthetic_text=(
+            "Call get_userassist and get_prefetch for this case, then call claim_finding "
+            "citing both audit_ids. What suspicious executable from C:\\ProgramData appears "
+            "in both UserAssist execution records and Prefetch entries?"
+        ),
+        case_id_override="mf_persistence_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="Explorer",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
+        justification="svcupdate.exe appears in UserAssist and Sysmon in mf_persistence_001.",
+        synthetic_text=(
+            "Call get_userassist and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What executable from C:\\ProgramData appears in both "
+            "UserAssist records and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_persistence_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="SysMain",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
+        justification="svcupdate.exe appears in Prefetch and Sysmon in mf_persistence_001.",
+        synthetic_text=(
+            "Call get_prefetch and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What suspicious executable from C:\\ProgramData appears "
+            "in both Prefetch entries and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_persistence_001",
+    ),
+    # --- Multi-family: mf_lateral_001 (BAM + Explorer + Sysmon) ---
+    # Attack pattern: psexesvc.exe lateral movement via PsExec into Windows\Temp.
+    SubsetEntry(
+        line_offset=-1,
+        family="BAM",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
+        justification="psexesvc.exe appears in BAM and Sysmon in mf_lateral_001.",
+        synthetic_text=(
+            "Call get_bam and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What suspicious executable from C:\\Windows\\Temp appears "
+            "in both BAM records and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_lateral_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="BAM",
+        extra_families=("Explorer",),
+        scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
+        justification="psexesvc.exe appears in BAM and UserAssist in mf_lateral_001.",
+        synthetic_text=(
+            "Call get_bam and get_userassist for this case, then call claim_finding "
+            "citing both audit_ids. What executable from C:\\Windows\\Temp appears in both "
+            "BAM execution records and UserAssist entries?"
+        ),
+        case_id_override="mf_lateral_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="Explorer",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
+        justification="psexesvc.exe appears in UserAssist and Sysmon in mf_lateral_001.",
+        synthetic_text=(
+            "Call get_userassist and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What suspicious executable from C:\\Windows\\Temp appears "
+            "in both UserAssist records and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_lateral_001",
+    ),
+    # --- Multi-family: mf_privesc_001 (AppCompat + Kernel-ETW) ---
+    # Attack pattern: juicypotato.exe privilege escalation tool in C:\Temp.
+    SubsetEntry(
+        line_offset=-1,
+        family="AppCompat",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bjuicypotato\.exe\b",
+        justification="juicypotato.exe appears in Amcache and Sysmon in mf_privesc_001.",
+        synthetic_text=(
+            "Call get_amcache and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What privilege-escalation tool from C:\\Temp appears "
+            "in both Amcache execution records and Sysmon process-creation events?"
+        ),
+        case_id_override="mf_privesc_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="AppCompat",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bwhoami\.exe\b",
+        justification=(
+            "After juicypotato.exe runs, whoami.exe is spawned as child in both Amcache "
+            "and Sysmon in mf_privesc_001 — confirming elevated-shell post-exploitation."
+        ),
+        synthetic_text=(
+            "Call get_amcache and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. What Windows built-in was executed as a child of "
+            "C:\\Temp\\juicypotato.exe according to both Amcache and Sysmon?"
+        ),
+        case_id_override="mf_privesc_001",
+    ),
+    SubsetEntry(
+        line_offset=-1,
+        family="AppCompat",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bjuicypotato\.exe\b",
+        justification=(
+            "juicypotato.exe appears in Amcache + Sysmon with whoami child confirming "
+            "privilege escalation; question asks which directory in mf_privesc_001."
+        ),
+        synthetic_text=(
+            "Call get_amcache and get_sysmon_4688 for this case, then call claim_finding "
+            "citing both audit_ids. In what directory was the privilege-escalation tool "
+            "located, according to both Amcache and Sysmon evidence?"
+        ),
+        case_id_override="mf_privesc_001",
+    ),
     # --- Adversarial single-family (correct answer = DRAFT, gate must refuse) ---
     # The agent has only one family's tool available and is asked to corroborate.
     # claim_finding with a single-family audit_id must return DRAFT — not CORROBORATED.
