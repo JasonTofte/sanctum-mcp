@@ -1,0 +1,1 @@
+{"family": "AppCompat", "tool": "get_amcache", "events": [{"program_path": "C:\\Temp\\juicypotato.exe", "timestamp": "2024-06-15T14:22:00+00:00", "evidence_size_bytes": 409600, "extras": {"row_index": "0"}}, {"program_path": "C:\\Windows\\System32\\whoami.exe", "timestamp": "2024-06-15T14:22:15+00:00", "evidence_size_bytes": 384, "extras": {"row_index": "1"}}]}

@@ -1,0 +1,1 @@
+{"family": "SysMain", "tool": "get_prefetch", "events": [{"program_path": "C:\\ProgramData\\svcupdate.exe", "timestamp": "2024-06-15T09:30:03+00:00", "evidence_size_bytes": 131072, "extras": {"row_index": "0"}}]}
