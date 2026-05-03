@@ -54,7 +54,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 Family = Literal["AppCompat", "Explorer", "BAM", "Sysmon", "SysMain"]
-QuestionType = Literal["factual", "adversarial_single_family"]
+QuestionType = Literal["factual", "adversarial_single_family", "autonomous"]
 
 
 @dataclass(frozen=True)
@@ -278,10 +278,29 @@ SUBSET: tuple[SubsetEntry, ...] = (
         ),
         case_id_override="mf_c2agent_001",
     ),
+    # Autonomous variant: agent must self-select tools; gate fires without guided nomination.
+    SubsetEntry(
+        line_offset=-4,
+        family="AppCompat",
+        extra_families=("SysMain", "Sysmon"),
+        scoring_pattern=r"~(?i)\bc2agent\.exe\b",
+        question_type="autonomous",
+        justification=(
+            "Autonomous — agent discovers tool path independently; c2agent.exe "
+            "must be CORROBORATED from Amcache, Prefetch, or Sysmon."
+        ),
+        synthetic_text=(
+            "A suspicious executable is present in this case. Investigate the available "
+            "forensic artifacts and call claim_finding citing all corroborating audit_ids. "
+            "What is the name of the suspicious executable?"
+        ),
+        case_id_override="mf_c2agent_001",
+    ),
     # --- Multi-family: mf_persistence_001 (Explorer/NTUSER + SysMain + Kernel-ETW) ---
     # Attack pattern: svcupdate.exe dropped in ProgramData, persistent via Run key.
+    # Offsets -11/-12/-13 (case-scoped to avoid collisions with other cases at -1).
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-11,
         family="Explorer",
         extra_families=("SysMain",),
         scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
@@ -294,7 +313,7 @@ SUBSET: tuple[SubsetEntry, ...] = (
         case_id_override="mf_persistence_001",
     ),
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-12,
         family="Explorer",
         extra_families=("Sysmon",),
         scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
@@ -307,7 +326,7 @@ SUBSET: tuple[SubsetEntry, ...] = (
         case_id_override="mf_persistence_001",
     ),
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-13,
         family="SysMain",
         extra_families=("Sysmon",),
         scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
@@ -319,10 +338,29 @@ SUBSET: tuple[SubsetEntry, ...] = (
         ),
         case_id_override="mf_persistence_001",
     ),
+    # Autonomous variant: agent must self-select tools; gate fires without guided nomination.
+    SubsetEntry(
+        line_offset=-14,
+        family="Explorer",
+        extra_families=("SysMain", "Sysmon"),
+        scoring_pattern=r"~(?i)\bsvcupdate\.exe\b",
+        question_type="autonomous",
+        justification=(
+            "Autonomous — agent discovers tool path independently; svcupdate.exe "
+            "must be CORROBORATED from UserAssist, Prefetch, or Sysmon."
+        ),
+        synthetic_text=(
+            "A persistence mechanism was established in this case. Investigate the available "
+            "forensic artifacts and call claim_finding citing corroborating audit_ids. "
+            "What executable was used to establish persistence?"
+        ),
+        case_id_override="mf_persistence_001",
+    ),
     # --- Multi-family: mf_lateral_001 (BAM + Explorer + Sysmon) ---
     # Attack pattern: psexesvc.exe lateral movement via PsExec into Windows\Temp.
+    # Offsets -21/-22/-23 (case-scoped to avoid collisions with other cases at -1).
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-21,
         family="BAM",
         extra_families=("Sysmon",),
         scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
@@ -335,7 +373,7 @@ SUBSET: tuple[SubsetEntry, ...] = (
         case_id_override="mf_lateral_001",
     ),
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-22,
         family="BAM",
         extra_families=("Explorer",),
         scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
@@ -348,7 +386,7 @@ SUBSET: tuple[SubsetEntry, ...] = (
         case_id_override="mf_lateral_001",
     ),
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-23,
         family="Explorer",
         extra_families=("Sysmon",),
         scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
@@ -360,10 +398,29 @@ SUBSET: tuple[SubsetEntry, ...] = (
         ),
         case_id_override="mf_lateral_001",
     ),
+    # Autonomous variant: agent must self-select tools; gate fires without guided nomination.
+    SubsetEntry(
+        line_offset=-24,
+        family="BAM",
+        extra_families=("Explorer", "Sysmon"),
+        scoring_pattern=r"~(?i)\bpsexesvc\.exe\b",
+        question_type="autonomous",
+        justification=(
+            "Autonomous — agent discovers tool path independently; psexesvc.exe "
+            "must be CORROBORATED from BAM, UserAssist, or Sysmon."
+        ),
+        synthetic_text=(
+            "Lateral movement occurred in this case. Investigate the available forensic "
+            "artifacts and call claim_finding citing corroborating audit_ids. "
+            "What executable facilitated the lateral movement?"
+        ),
+        case_id_override="mf_lateral_001",
+    ),
     # --- Multi-family: mf_privesc_001 (AppCompat + Kernel-ETW) ---
     # Attack pattern: juicypotato.exe privilege escalation tool in C:\Temp.
+    # Offsets -31/-32/-33 (case-scoped; all three are AppCompat+Sysmon so need distinct ids).
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-31,
         family="AppCompat",
         extra_families=("Sysmon",),
         scoring_pattern=r"~(?i)\bjuicypotato\.exe\b",
@@ -376,7 +433,7 @@ SUBSET: tuple[SubsetEntry, ...] = (
         case_id_override="mf_privesc_001",
     ),
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-32,
         family="AppCompat",
         extra_families=("Sysmon",),
         scoring_pattern=r"~(?i)\bwhoami\.exe\b",
@@ -392,18 +449,37 @@ SUBSET: tuple[SubsetEntry, ...] = (
         case_id_override="mf_privesc_001",
     ),
     SubsetEntry(
-        line_offset=-1,
+        line_offset=-33,
         family="AppCompat",
         extra_families=("Sysmon",),
-        scoring_pattern=r"~(?i)\bjuicypotato\.exe\b",
+        # Question asks for the directory — scoring matches C:\Temp, not the exe name.
+        scoring_pattern=r"~(?i)C:\\Temp",
         justification=(
-            "juicypotato.exe appears in Amcache + Sysmon with whoami child confirming "
-            "privilege escalation; question asks which directory in mf_privesc_001."
+            "juicypotato.exe resides in C:\\Temp per Amcache + Sysmon in mf_privesc_001; "
+            "question asks which directory, not which executable."
         ),
         synthetic_text=(
             "Call get_amcache and get_sysmon_4688 for this case, then call claim_finding "
             "citing both audit_ids. In what directory was the privilege-escalation tool "
             "located, according to both Amcache and Sysmon evidence?"
+        ),
+        case_id_override="mf_privesc_001",
+    ),
+    # Autonomous variant: agent must self-select tools; gate fires without guided nomination.
+    SubsetEntry(
+        line_offset=-34,
+        family="AppCompat",
+        extra_families=("Sysmon",),
+        scoring_pattern=r"~(?i)\bjuicypotato\.exe\b",
+        question_type="autonomous",
+        justification=(
+            "Autonomous — agent discovers tool path independently; juicypotato.exe "
+            "must be CORROBORATED from Amcache and Sysmon."
+        ),
+        synthetic_text=(
+            "A privilege escalation event is present in this case. Investigate the available "
+            "forensic artifacts and call claim_finding citing corroborating audit_ids. "
+            "What was the privilege-escalation tool used, based on the corroborated evidence?"
         ),
         case_id_override="mf_privesc_001",
     ),

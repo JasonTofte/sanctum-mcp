@@ -4,6 +4,14 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval corpus: 4 autonomous questions + q_id collision fix + scoring bug fix (2026-05-02)
+
+- `tests/benchmarks/dfir_metric_subset.py`: added 4 **autonomous** `SubsetEntry` records (one per attack case) whose `synthetic_text` does not name which tools to call — the agent must self-select its tool path. This tests that the corroboration gate fires even without guided tool nomination, the strongest form of the "architectural enforcement, not prompt tricks" claim.
+- `tests/benchmarks/dfir_metric_subset.py`: fixed 5 q_id collisions — all synthetic entries shared `line_offset=-1`, causing the formula `synthetic_{family}{extra_tag}_{abs(offset)}_{type}` to generate duplicate ids across cases. Assigned case-scoped negative offsets (mf_persistence_001: -11/-12/-13, mf_lateral_001: -21/-22/-23, mf_privesc_001: -31/-32/-33); mf_c2agent_001 retains -1 as anchor.
+- `tests/benchmarks/dfir_metric_subset.py`: fixed wrong `scoring_pattern` on the `mf_privesc_001` directory question — was checking for `juicypotato.exe` but the question asks "In what directory...". Pattern corrected to `~(?i)C:\\Temp`. Model had been answering correctly but marked wrong in all 3 runs.
+- `tests/benchmarks/test_dfir_metric_eval_driver.py`: added `test_subset_q_id_uniqueness` — verifies all 43 SUBSET entries produce distinct q_ids under the driver's naming scheme; prevents silent regression.
+- SUBSET count: 39 → 43. `QuestionType` extended with `"autonomous"` variant.
+
 ### Added — eval corpus: 3 new multi-family fixture cases (R5, 2026-05-02)
 
 Nine new CORROBORATED-path questions across three distinct attack patterns (previously all 3 CORROBORATED questions used the same `c2agent.exe` pattern):
