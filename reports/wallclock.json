@@ -1,0 +1,16 @@
+{
+  "C1-serial": {
+    "config_name": "C1-serial",
+    "wallclock_ms": 7.6985000050626695,
+    "evidence_mb": 0.01,
+    "ms_per_mb": 769.850000506267,
+    "tus_m": 0.992
+  },
+  "C2-parallel": {
+    "config_name": "C2-parallel",
+    "wallclock_ms": 6.097041012253612,
+    "evidence_mb": 0.01,
+    "ms_per_mb": 609.7041012253612,
+    "tus_m": null
+  }
+}
