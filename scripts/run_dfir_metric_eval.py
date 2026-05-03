@@ -157,6 +157,12 @@ class ArmAggregate:
     # Fraction of bare-arm rows where the model produced a non-empty, non-marker
     # response (i.e., not <context_overflow>, <api_error>, etc.).  None for the
     # sanctum arm (which has explicit claim_status tiers for abstention).
+    precision_at_corroborated: float | None = None
+    # Geifman & El-Yaniv 2017 selective-classification precision: correct /
+    # N_CORROBORATED.  None for bare arm (no CORROBORATED tier) and when
+    # N_CORROBORATED==0 (undefined, distinct from 0.0).  This is the headline
+    # metric when accuracy_mean is 100%: it answers "how confident should we
+    # be about the confident answers?" independently of hedged DRAFT rows.
 
     def __post_init__(self) -> None:
         # Range guards. accuracy_* ∈ [0, 1]; counts/cost ≥ 0; rates (when
@@ -187,6 +193,14 @@ class ArmAggregate:
         if self.bare_confident_rate is not None and not 0.0 <= self.bare_confident_rate <= 1.0:
             raise ValueError(
                 f"bare_confident_rate must be in [0, 1] or None, got {self.bare_confident_rate}"
+            )
+        if (
+            self.precision_at_corroborated is not None
+            and not 0.0 <= self.precision_at_corroborated <= 1.0
+        ):
+            raise ValueError(
+                f"precision_at_corroborated must be in [0, 1] or None, "
+                f"got {self.precision_at_corroborated}"
             )
 
 
@@ -246,6 +260,29 @@ def _compute_false_confidence_rate(
             rate,
         )
     return rate
+
+
+def _compute_precision_at_corroborated(
+    rows: tuple[PerQuestionRow, ...],
+    *,
+    arm: str,
+) -> float | None:
+    """Selective-classification precision over CORROBORATED rows (Geifman & El-Yaniv 2017).
+
+    Returns ``correct_CORROBORATED / N_CORROBORATED``, or ``None`` when
+    N_CORROBORATED==0 (undefined, distinct from 0.0).  None for the bare
+    arm (no CORROBORATED tier exists there — pass arm=="bare" to get None).
+
+    This is the primary metric when accuracy_mean==100%: the denominator
+    excludes hedged DRAFT rows, so the fraction answers "of the answers the
+    gate allowed through, how many were right?"
+    """
+    relevant = [r for r in rows if r.arm == arm and r.claim_status == "CORROBORATED"]
+    if not relevant:
+        return None
+    n = len(relevant)
+    k_correct = sum(1 for r in relevant if r.correct)
+    return k_correct / n
 
 
 def _estimate_cost_usd(usage: dict[str, int]) -> float:
@@ -1123,6 +1160,9 @@ def _aggregate_arm(
         mean_tokens_out=sum(r.tokens_out for r in arm_rows) / len(arm_rows),
         total_cost_usd=total_cost_usd,
         bare_confident_rate=_compute_bare_confident_rate(rows, arm=arm),
+        precision_at_corroborated=None if is_bare else _compute_precision_at_corroborated(
+            rows, arm=arm
+        ),
     )
 
 
@@ -1157,6 +1197,7 @@ def _aggregate_to_dict(agg: ArmAggregate) -> dict[str, Any]:
         "mean_tokens_out": agg.mean_tokens_out,
         "total_cost_usd": agg.total_cost_usd,
         "bare_confident_rate": agg.bare_confident_rate,
+        "precision_at_corroborated": agg.precision_at_corroborated,
     }
 
 

@@ -60,6 +60,45 @@ def test_false_confidence_warning_on_nonzero(caplog: pytest.LogCaptureFixture) -
     ), "expected a WARN with k=1 substring; got: " + "; ".join(r.message for r in caplog.records)
 
 
+# --- precision@CORROBORATED (Geifman & El-Yaniv 2017) -------------------
+
+
+def test_precision_at_corroborated_correct() -> None:
+    """correct_CORROBORATED / N_CORROBORATED — basic computation."""
+    rows = (
+        _row(arm="sanctum", claim_status="CORROBORATED", correct=True),
+        _row(arm="sanctum", claim_status="CORROBORATED", correct=True),
+        _row(arm="sanctum", claim_status="CORROBORATED", correct=False),
+        _row(arm="sanctum", claim_status="DRAFT", correct=True),  # excluded — not CORROBORATED
+        _row(arm="bare", claim_status=None, correct=True),  # excluded — bare arm
+    )
+    assert eval_driver._compute_precision_at_corroborated(rows, arm="sanctum") == pytest.approx(
+        2 / 3
+    )
+
+
+def test_precision_at_corroborated_none_when_empty() -> None:
+    """N_CORROBORATED==0 → None, distinct from 0.0."""
+    rows = (_row(arm="sanctum", claim_status="DRAFT", correct=True),)
+    assert eval_driver._compute_precision_at_corroborated(rows, arm="sanctum") is None
+
+
+def test_precision_at_corroborated_none_for_bare_arm() -> None:
+    """Bare arm has no CORROBORATED tier → always None."""
+    rows = (_row(arm="bare", claim_status=None, correct=True),)
+    assert eval_driver._compute_precision_at_corroborated(rows, arm="bare") is None
+
+
+def test_precision_at_corroborated_all_correct() -> None:
+    """3/3 CORROBORATED correct → 1.0."""
+    rows = tuple(
+        _row(arm="sanctum", claim_status="CORROBORATED", correct=True) for _ in range(3)
+    )
+    assert eval_driver._compute_precision_at_corroborated(rows, arm="sanctum") == pytest.approx(
+        1.0
+    )
+
+
 # --- AC-6: cost guard / cost formula -------------------------------------
 
 
@@ -209,6 +248,7 @@ def test_arm_aggregate_schema_keys() -> None:
         "mean_tokens_out",
         "total_cost_usd",
         "bare_confident_rate",
+        "precision_at_corroborated",
     }
     actual = {f.name for f in dataclasses.fields(eval_driver.ArmAggregate)}
     assert (
