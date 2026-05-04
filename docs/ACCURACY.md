@@ -297,10 +297,41 @@ SUBSET against corpus `1f2c22c6a28b`.
 | Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | mean_wallclock_ms | total_cost_usd |
 |---|---|---|---|---|---|---|
 | `sanctum` (serial) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 12106 | $7.3372 |
-| `bare` | 17.1% ± 37.6% ⚠ | n/a | n/a | n/a | 4458 | $0.9292 |
+| `bare` | 17.1% ± 37.6%† | n/a | n/a | n/a | 4458 | $0.9292 |
 | `parallel` (`SANCTUM_PARALLEL_TOOLS=1`) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 11788 | $7.3206 |
 
 _Point-estimate gap sanctum−bare = 82.9 pp; Wilson 95% CIs non-overlapping. Both sanctum arms (serial + parallel) confirm false_confidence_rate=0.0%._
+
+† The bare arm ±37.6% figure is the **binomial-population standard deviation**
+`sqrt(p̂(1−p̂)) = sqrt(0.171×0.829) = 0.3765` — a function of the mean, not
+a measure of run-to-run instability. It is reported here because the eval
+driver computes it, but it should not be read as evidence that bare accuracy
+varies across runs. Per-question run stability must be assessed from the
+per-question rows in the JSON report.
+
+**Paired significance test — McNemar exact (question-level, n=43; Wolfram-verified):**
+
+Data from `eval-20260504T060045-bd8268fc`: bare arm answered ≥1 run correctly
+on 9 of 43 questions (bare_q=1), and 0 runs correctly on 34 questions
+(bare_q=0). Sanctum answered correctly on all 43 questions (bare_q is
+irrelevant to sanctum since sanctum accuracy = 100%).
+
+McNemar 2×2 table:
+
+| | bare_q=1 | bare_q=0 |
+|---|---|---|
+| **sanctum_q=1** | n₁₁ = 9 | n₁₀ = 34 |
+| **sanctum_q=0** | n₀₁ = 0 | n₀₀ = 0 |
+
+Exact two-sided p = 2 × (½)^34 = **1.164 × 10⁻¹⁰**
+(Fagerland et al. 2013 mid-P exact McNemar, PMC 3716987; Wolfram-verified:
+`2*(1/2)^34 = 1.16415×10⁻¹⁰`)
+
+The 82.9 pp gap is not attributable to chance under any standard significance
+threshold. Note: row-level McNemar (N=129, n₁₀=107) gives p=1.233×10⁻³²;
+this inflates significance by treating 3 correlated runs per question as
+independent. The question-level test (n=43) is the methodologically correct
+unit of analysis (pseudoreplication caution per Hurlbert 1984; PMC 10543393).
 
 ---
 
