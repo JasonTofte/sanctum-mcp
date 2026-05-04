@@ -70,42 +70,47 @@ def _usd(v: float | None) -> str:
 
 def _render_headline(report: dict) -> str:
     aggs = report["aggregates"]
-    sanctum = aggs.get("sanctum", {})
-    bare = aggs.get("bare", {})
+    arms = report["arms"]
 
-    s_acc = sanctum.get("accuracy_mean", 0)
-    b_acc = bare.get("accuracy_mean", 0)
-
-    def _bar(acc: float, color: str, label: str, arm_color: str) -> str:
-        pct_str = _pct(acc, 1)
+    def _bar(arm: str, agg: dict) -> str:
+        acc = agg.get("accuracy_mean", 0)
+        color = _ARM_COLOR.get(arm, "#94a3b8")
+        label = arm.replace("_", " ").upper()
         bar_w = f"{acc * 100:.1f}%"
         return f"""
 <div style="flex:1;min-width:200px">
-  <div style="color:{arm_color};font-size:0.8em;font-weight:600;letter-spacing:0.08em;
+  <div style="color:{color};font-size:0.8em;font-weight:600;letter-spacing:0.08em;
               text-transform:uppercase;margin-bottom:6px">{_e(label)}</div>
-  <div style="font-size:3em;font-weight:800;color:#f1f5f9;line-height:1">{_e(pct_str)}</div>
-  <div style="background:#1e293b;border-radius:4px;height:8px;margin:8px 0">
-    <div style="background:{color};width:{bar_w};height:8px;border-radius:4px;
-                transition:width 0.3s"></div>
+  <div style="font-size:3em;font-weight:800;color:#f1f5f9;line-height:1">{_e(_pct(acc, 1))}</div>
+  <div style="background:#0f172a;border-radius:4px;height:8px;margin:8px 0">
+    <div style="background:{color};width:{bar_w};height:8px;border-radius:4px"></div>
   </div>
   <div style="color:#64748b;font-size:0.8em">accuracy (N={report['n_questions']} q × {report['n_runs_per_q']} runs)</div>
 </div>"""
 
-    delta = s_acc - b_acc
-    delta_str = f"+{_pct(delta, 1)}" if delta >= 0 else _pct(delta, 1)
-    delta_color = "#22c55e" if delta >= 0 else "#ef4444"
+    bars = [_bar(arm, aggs[arm]) for arm in arms if arm in aggs]
+
+    # If exactly two arms show a delta between them
+    delta_html = ""
+    if len(arms) == 2 and all(a in aggs for a in arms):
+        acc0 = aggs[arms[0]].get("accuracy_mean", 0)
+        acc1 = aggs[arms[1]].get("accuracy_mean", 0)
+        delta = acc0 - acc1
+        delta_str = f"+{_pct(delta, 1)}" if delta >= 0 else _pct(delta, 1)
+        delta_color = "#22c55e" if delta >= 0 else "#ef4444"
+        delta_html = f"""
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+            padding-bottom:20px">
+  <div style="color:{delta_color};font-size:1.6em;font-weight:700">{_e(delta_str)}</div>
+  <div style="color:#64748b;font-size:0.75em">{_e(arms[0])} vs {_e(arms[1])}</div>
+</div>"""
+        bars.insert(1, delta_html)
 
     return f"""
 <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;
             padding:24px;margin-bottom:24px">
   <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end">
-    {_bar(s_acc, "#a78bfa", "Sanctum", "#a78bfa")}
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                padding-bottom:20px">
-      <div style="color:{delta_color};font-size:1.6em;font-weight:700">{_e(delta_str)}</div>
-      <div style="color:#64748b;font-size:0.75em">vs bare</div>
-    </div>
-    {_bar(b_acc, "#94a3b8", "Bare LLM", "#94a3b8")}
+    {"".join(bars)}
   </div>
 </div>"""
 
@@ -114,61 +119,68 @@ def _render_headline(report: dict) -> str:
 # Metric cards
 # ---------------------------------------------------------------------------
 
-def _metric_row(label: str, s_val: str, b_val: str, good: str = "high") -> str:
-    return f"""
-<tr style="border-bottom:1px solid #1e293b">
-  <td style="color:#94a3b8;font-size:0.85em;padding:8px 0">{_e(label)}</td>
-  <td style="text-align:right;color:#a78bfa;font-weight:600;font-size:0.95em;padding:8px 12px">{_e(s_val)}</td>
-  <td style="text-align:right;color:#94a3b8;font-size:0.95em;padding:8px 0">{_e(b_val)}</td>
-</tr>"""
-
-
 def _render_metrics(report: dict) -> str:
-    s = report["aggregates"].get("sanctum", {})
-    b = report["aggregates"].get("bare", {})
+    aggs = report["aggregates"]
+    arms = report["arms"]
 
-    rows = [
-        _metric_row("Accuracy (mean ± std)",
-                    f"{_pct(s.get('accuracy_mean'))} ± {_pct(s.get('accuracy_std'))}",
-                    f"{_pct(b.get('accuracy_mean'))} ± {_pct(b.get('accuracy_std'))}"),
-        _metric_row("precision@CORROBORATED",
-                    _pct(s.get("precision_at_corroborated")),
-                    "— (no tier)"),
-        _metric_row("False confidence rate",
-                    _pct(s.get("false_confidence_rate")),
-                    "—"),
-        _metric_row("Abstention rate",
-                    _pct(s.get("abstention_rate")),
-                    "—"),
-        _metric_row("Bare confident rate",
-                    "—",
-                    _pct(b.get("bare_confident_rate"))),
-        _metric_row("Mean wallclock",
-                    _ms(s.get("mean_wallclock_ms")),
-                    _ms(b.get("mean_wallclock_ms"))),
-        _metric_row("Mean tokens in",
-                    f"{s.get('mean_tokens_in', 0):,.0f}",
-                    f"{b.get('mean_tokens_in', 0):,.0f}"),
-        _metric_row("Total cost",
-                    _usd(s.get("total_cost_usd")),
-                    _usd(b.get("total_cost_usd"))),
+    # Build column headers dynamically
+    col_colors = [_ARM_COLOR.get(a, "#94a3b8") for a in arms]
+    col_labels = [a.replace("_", " ").upper() for a in arms]
+
+    def _th(label: str, color: str, first: bool) -> str:
+        pad = "8px 12px" if not first else "8px 0"
+        return (f'<th style="text-align:right;padding:{pad};color:{color};font-size:0.78em;'
+                f'font-weight:600;letter-spacing:0.08em;text-transform:uppercase">{_e(label)}</th>')
+
+    header = (
+        '<th style="text-align:left;padding:8px 0;color:#64748b;font-size:0.78em;'
+        'font-weight:500;letter-spacing:0.08em;text-transform:uppercase">Metric</th>'
+        + "".join(_th(col_labels[i], col_colors[i], i == 0) for i in range(len(arms)))
+    )
+
+    def _vals(metric: str, fmt=None) -> list[str]:
+        out = []
+        for arm in arms:
+            v = aggs.get(arm, {}).get(metric)
+            out.append(fmt(v) if fmt else (str(v) if v is not None else "—"))
+        return out
+
+    def _row(label: str, vals: list[str]) -> str:
+        cells = ""
+        for i, v in enumerate(vals):
+            pad = "8px 12px" if i == 0 else "8px 0"
+            color = col_colors[i]
+            weight = "600" if i == 0 else "400"
+            cells += (f'<td style="text-align:right;color:{color};font-weight:{weight};'
+                      f'font-size:0.95em;padding:{pad}">{_e(v)}</td>')
+        return (f'<tr style="border-bottom:1px solid #1e293b">'
+                f'<td style="color:#94a3b8;font-size:0.85em;padding:8px 0">{_e(label)}</td>'
+                f'{cells}</tr>')
+
+    def _acc_std(arm: str) -> str:
+        a = aggs.get(arm, {})
+        m, s = a.get("accuracy_mean"), a.get("accuracy_std")
+        if m is None:
+            return "—"
+        return f"{_pct(m)} ± {_pct(s)}"
+
+    metric_rows = [
+        _row("Accuracy (mean ± std)", [_acc_std(a) for a in arms]),
+        _row("precision@CORROBORATED", [_pct(aggs.get(a, {}).get("precision_at_corroborated")) for a in arms]),
+        _row("False confidence rate",  [_pct(aggs.get(a, {}).get("false_confidence_rate")) for a in arms]),
+        _row("Abstention rate",        [_pct(aggs.get(a, {}).get("abstention_rate")) for a in arms]),
+        _row("Bare confident rate",    [_pct(aggs.get(a, {}).get("bare_confident_rate")) for a in arms]),
+        _row("Mean wallclock",         [_ms(aggs.get(a, {}).get("mean_wallclock_ms")) for a in arms]),
+        _row("Mean tokens in",         [f"{aggs.get(a,{}).get('mean_tokens_in', 0):,.0f}" for a in arms]),
+        _row("Total cost",             [_usd(aggs.get(a, {}).get("total_cost_usd")) for a in arms]),
     ]
 
     return f"""
 <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;
             padding:20px;margin-bottom:24px;overflow-x:auto">
   <table style="width:100%;border-collapse:collapse">
-    <thead>
-      <tr style="border-bottom:2px solid #334155">
-        <th style="text-align:left;padding:8px 0;color:#64748b;font-size:0.78em;
-                   font-weight:500;letter-spacing:0.08em;text-transform:uppercase">Metric</th>
-        <th style="text-align:right;padding:8px 12px;color:#a78bfa;font-size:0.78em;
-                   font-weight:600;letter-spacing:0.08em;text-transform:uppercase">Sanctum</th>
-        <th style="text-align:right;padding:8px 0;color:#94a3b8;font-size:0.78em;
-                   font-weight:500;letter-spacing:0.08em;text-transform:uppercase">Bare LLM</th>
-      </tr>
-    </thead>
-    <tbody>{"".join(rows)}</tbody>
+    <thead><tr style="border-bottom:2px solid #334155">{header}</tr></thead>
+    <tbody>{"".join(metric_rows)}</tbody>
   </table>
 </div>"""
 
@@ -179,11 +191,16 @@ def _render_metrics(report: dict) -> str:
 
 def _render_claim_status(report: dict) -> str:
     rows = report["per_question"]
-    sanctum_rows = [r for r in rows if r["arm"] == "sanctum" and r["claim_status"]]
-    total = len(sanctum_rows) or 1
+    # Show distribution for whichever arm(s) have claim_status data
+    tiered_rows = [r for r in rows if r.get("claim_status")]
+    total = len(tiered_rows) or 1
 
+    if not tiered_rows:
+        return ""
+
+    tiered_arm_names = sorted(set(r["arm"] for r in tiered_rows))
     counts: dict[str, int] = defaultdict(int)
-    for r in sanctum_rows:
+    for r in tiered_rows:
         counts[r["claim_status"]] += 1
 
     order = ["FINAL", "CORROBORATED", "DRAFT", "DRAFT_TAMPER_SUSPECTED"]
@@ -204,14 +221,15 @@ def _render_claim_status(report: dict) -> str:
             f"</div></div></div>"
         )
 
+    arm_label = " + ".join(tiered_arm_names)
     return f"""
 <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;
             padding:20px;margin-bottom:24px">
   <h3 style="margin:0 0 16px 0;color:#94a3b8;font-size:0.8em;font-weight:500;
              letter-spacing:0.08em;text-transform:uppercase">
-    Sanctum Claim-Status Distribution
+    Claim-Status Distribution
     <span style="color:#64748b;font-weight:400;text-transform:none;letter-spacing:0">
-      ({total} sanctum rows)
+      ({total} rows — {_e(arm_label)})
     </span>
   </h3>
   {"".join(bars)}
