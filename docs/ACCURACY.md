@@ -289,33 +289,26 @@ intervals at N=45.
 ### Three-arm comparison (N=43, N_runs=3, Opus 4.7)
 
 Summary across the two most-recent full runs. `sanctum` + `bare` are from
-`eval-20260503T155143-7cdbb1af`; `parallel` is from
-`eval-20260503T224805-f6566e38`. All three share the same 43-question
+`eval-20260504T060045-bd8268fc` (post-pattern-fix canonical run); `parallel`
+is from `eval-20260503T224805-f6566e38`. All three share the same 43-question
 SUBSET against corpus `1f2c22c6a28b`.
-
-> ⚠ The `sanctum` (serial) `false_confidence_rate=2.8%` reflects a
-> **pre-fix** scoring pattern for the autonomous juicypotato question
-> (`~(?i)\bjuicypotato\.exe\b` → corrected to `~(?i)\bjuicypotato(\.exe)?\b`).
-> The `parallel` arm was run after the fix and shows 0.0%. A fresh
-> `--arm both` re-run will confirm 0.0% for the serial arm. Until
-> then the 2.8% figure is a conservative lower bound on precision.
 
 | Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | mean_wallclock_ms | total_cost_usd |
 |---|---|---|---|---|---|---|
-| `sanctum` (serial) | 99.2% ± 8.8% | 97.2%\* | 67.4% | 2.8%\* | 12296 | $7.2886 |
-| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 4512 | $0.9100 |
+| `sanctum` (serial) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 12106 | $7.3372 |
+| `bare` | 17.1% ± 37.6% ⚠ | n/a | n/a | n/a | 4458 | $0.9292 |
 | `parallel` (`SANCTUM_PARALLEL_TOOLS=1`) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 11788 | $7.3206 |
 
-_\* Pre-pattern-fix run — expect 0.0% after fresh `--arm both` re-run. Point-estimate gap sanctum−bare = 82.9 pp; Wilson 95% CIs non-overlapping. Parallel arm confirms pattern fix correct._
+_Point-estimate gap sanctum−bare = 82.9 pp; Wilson 95% CIs non-overlapping. Both sanctum arms (serial + parallel) confirm false_confidence_rate=0.0%._
 
 ---
 
-<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T155143-7cdbb1af.json` -->
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260504T060045-bd8268fc.json` -->
 
-### Run `eval-20260503T155143-7cdbb1af` — sanctum_partial_credit_accuracy
+### Run `eval-20260504T060045-bd8268fc` — sanctum_partial_credit_accuracy
 
 - Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
-- Window: `2026-05-03T15:15:35Z` → `2026-05-03T15:51:43Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.1986
+- Window: `2026-05-04T05:25:08Z` → `2026-05-04T06:00:45Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.2664
 
 > ⚠ **high variance — interpret with caution** (`bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
 
@@ -323,31 +316,29 @@ _\* Pre-pattern-fix run — expect 0.0% after fresh `--arm both` re-run. Point-e
 
 | Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
 |---|---|---|---|---|---|---|---|---|---|
-| `sanctum` | 99.2% ± 8.8% | 97.2% | 67.4% | 2.8% | n/a | 12296 | 7880 | 684 | $7.2886 |
-| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 100.0% | 4512 | 195 | 243 | $0.9100 |
-
-> **Note on the 1 remaining CORROBORATED miss (false_confidence_rate=2.8%):** The miss is `synthetic_AppCompat_Sysmon_34_autonomous` — the autonomous mf_privesc_001 question asking "What was the privilege-escalation tool used?" The model answered `JuicyPotato` (correct) but the scoring pattern required `juicypotato.exe` (with `.exe` suffix). This is a scoring strictness edge case: open-ended "tool" phrasing does not reliably elicit the `.exe` suffix, unlike the guided "executable" variants. The gate fired correctly (CORROBORATED from Amcache + Sysmon). The pattern has been corrected to `~(?i)\bjuicypotato(\.exe)?\b` in PR #64; a future re-run is expected to show `false_confidence_rate=0%`.
+| `sanctum` | 100.0% ± 0.0% | 100.0% | 67.4% | 0.0% | n/a | 12106 | 7890 | 697 | $7.3372 |
+| `bare` | 17.1% ± 37.6% ⚠ | n/a | n/a | n/a | 100.0% | 4458 | 195 | 249 | $0.9292 |
 
 **Per-family breakdown** (single-author tagging bias is visible here)
 
 | Arm | Family | tagged_count | correct_count | accuracy |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | 13 | 38 | 97.4% |
+| `sanctum` | `AppCompat` | 13 | 39 | 100.0% |
 | `sanctum` | `BAM` | 8 | 24 | 100.0% |
 | `sanctum` | `Explorer` | 9 | 27 | 100.0% |
 | `sanctum` | `SysMain` | 8 | 24 | 100.0% |
 | `sanctum` | `Sysmon` | 5 | 15 | 100.0% |
-| `bare` | `AppCompat` | 13 | 6 | 15.4% |
+| `bare` | `AppCompat` | 13 | 7 | 17.9% |
 | `bare` | `BAM` | 8 | 0 | 0.0% |
-| `bare` | `Explorer` | 9 | 4 | 14.8% |
-| `bare` | `SysMain` | 8 | 9 | 37.5% |
-| `bare` | `Sysmon` | 5 | 2 | 13.3% |
+| `bare` | `Explorer` | 9 | 3 | 11.1% |
+| `bare` | `SysMain` | 8 | 8 | 33.3% |
+| `bare` | `Sysmon` | 5 | 4 | 26.7% |
 
 _Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
 
 <!-- END pasted fragment -->
 
-<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260503T155143-7cdbb1af.json` -->
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260504T060045-bd8268fc.json` -->
 
 **Wilson 95% confidence intervals**
 
@@ -357,29 +348,46 @@ _At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recom
 
 | Arm | n | accuracy | Wilson 95% CI |
 |---|---|---|---|
-| `sanctum` | 129 | 99.2% | [95.7%, 99.9%] |
-| `bare` | 129 | 16.3% | [10.9%, 23.6%] |
+| `sanctum` | 129 | 100.0% | [97.1%, 100.0%] |
+| `bare` | 129 | 17.1% | [11.5%, 24.5%] |
 
 **Per-arm × per-family**
 
 | Arm | Family | n | accuracy | Wilson 95% CI |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | 39 | 97.4% | [86.8%, 99.5%] |
+| `sanctum` | `AppCompat` | 39 | 100.0% | [91.0%, 100.0%] |
 | `sanctum` | `BAM` | 24 | 100.0% | [86.2%, 100.0%] |
 | `sanctum` | `Explorer` | 27 | 100.0% | [87.5%, 100.0%] |
 | `sanctum` | `SysMain` | 24 | 100.0% | [86.2%, 100.0%] |
 | `sanctum` | `Sysmon` | 15 | 100.0% | [79.6%, 100.0%] |
-| `bare` | `AppCompat` | 39 | 15.4% | [7.2%, 29.7%] |
+| `bare` | `AppCompat` | 39 | 17.9% | [9.0%, 32.7%] |
 | `bare` | `BAM` | 24 | 0.0% | [0.0%, 13.8%] |
-| `bare` | `Explorer` | 27 | 14.8% | [5.9%, 32.5%] |
-| `bare` | `SysMain` | 24 | 37.5% | [21.2%, 57.3%] |
-| `bare` | `Sysmon` | 15 | 13.3% | [3.7%, 37.9%] |
+| `bare` | `Explorer` | 27 | 11.1% | [3.9%, 28.1%] |
+| `bare` | `SysMain` | 24 | 33.3% | [18.0%, 53.3%] |
+| `bare` | `Sysmon` | 15 | 26.7% | [10.9%, 52.0%] |
 
 **Arm-difference interpretation**
 
-- sanctum: 99.2% [95.7%, 99.9%]  ·  bare: 16.3% [10.9%, 23.6%]
+- sanctum: 100.0% [97.1%, 100.0%]  ·  bare: 17.1% [11.5%, 24.5%]
 - Point-estimate gap: `sanctum − bare = 82.9%`
 - Per-arm CIs do NOT overlap, which is a sufficient (but not necessary) condition for a statistically significant difference at the α corresponding to this confidence level.
+
+<!-- END pasted fragment -->
+
+---
+
+_Archived — pre-pattern-fix run (false_confidence_rate=2.8% due to strict `juicypotato\.exe` pattern on autonomous question; corrected in PR #64, confirmed 0.0% in run above):_
+
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T155143-7cdbb1af.json` -->
+
+### Run `eval-20260503T155143-7cdbb1af` — sanctum_partial_credit_accuracy (archived)
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
+- Window: `2026-05-03T15:15:35Z` → `2026-05-03T15:51:43Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.1986
+- **Archived** — scoring pattern for `synthetic_AppCompat_Sysmon_34_autonomous` was strict (`~(?i)\bjuicypotato\.exe\b`); model answered `JuicyPotato` (correct, gate fired). Pattern corrected to `~(?i)\bjuicypotato(\.exe)?\b`. Superseded by `eval-20260504T060045-bd8268fc`.
+
+| `sanctum` | 99.2% ± 8.8% | 97.2% | 67.4% | 2.8% | n/a | 12296 | 7880 | 684 | $7.2886 |
+| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 100.0% | 4512 | 195 | 243 | $0.9100 |
 
 <!-- END pasted fragment -->
 
