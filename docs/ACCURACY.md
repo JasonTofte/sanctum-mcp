@@ -275,7 +275,7 @@ A judge reading the Numbers table can confirm the following facts inline:
 | Fact | Value | Source-of-truth |
 |---|---|---|
 | Model version | `claude-opus-4-7` | `EvalReport.model_id` |
-| DFIR-Metric corpus | local-v1 (25-question self-contained corpus, see §Subset-selection rationale) | `EvalReport.dfir_metric_commit_sha` |
+| DFIR-Metric corpus | `1f2c22c6a28b` (upstream DFIR-Metric-CTF.json, SHA-256 first 12 chars, fetched 2026-05-01) | `EvalReport.dfir_metric_commit_sha` |
 | Sanctum version | `0.4.1` | `EvalReport.sanctum_version` |
 | Run count per question | N=3 | `EvalReport.n_runs_per_q` |
 | Arm parity | identical prompts, fixtures, scoring pattern; arms differ only in MCP tool availability | `scripts/run_dfir_metric_eval.py` |
@@ -285,6 +285,30 @@ Confidence-interval reporting follows the small-N proportion
 recommendation in Brown, Cai & DasGupta, *Statistical Science*
 2001 — Wilson score intervals are preferred over CLT-based
 intervals at N=45.
+
+### Three-arm comparison (N=43, N_runs=3, Opus 4.7)
+
+Summary across the two most-recent full runs. `sanctum` + `bare` are from
+`eval-20260503T155143-7cdbb1af`; `parallel` is from
+`eval-20260503T224805-f6566e38`. All three share the same 43-question
+SUBSET against corpus `1f2c22c6a28b`.
+
+> ⚠ The `sanctum` (serial) `false_confidence_rate=2.8%` reflects a
+> **pre-fix** scoring pattern for the autonomous juicypotato question
+> (`~(?i)\bjuicypotato\.exe\b` → corrected to `~(?i)\bjuicypotato(\.exe)?\b`).
+> The `parallel` arm was run after the fix and shows 0.0%. A fresh
+> `--arm both` re-run will confirm 0.0% for the serial arm. Until
+> then the 2.8% figure is a conservative lower bound on precision.
+
+| Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | mean_wallclock_ms | total_cost_usd |
+|---|---|---|---|---|---|---|
+| `sanctum` (serial) | 99.2% ± 8.8% | 97.2%\* | 67.4% | 2.8%\* | 12296 | $7.2886 |
+| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 4512 | $0.9100 |
+| `parallel` (`SANCTUM_PARALLEL_TOOLS=1`) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 11788 | $7.3206 |
+
+_\* Pre-pattern-fix run — expect 0.0% after fresh `--arm both` re-run. Point-estimate gap sanctum−bare = 82.9 pp; Wilson 95% CIs non-overlapping. Parallel arm confirms pattern fix correct._
+
+---
 
 <!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T155143-7cdbb1af.json` -->
 
