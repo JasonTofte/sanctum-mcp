@@ -94,9 +94,10 @@ comparison would conflate two distinct effects:
 - Model-capability delta (what a 2026 frontier model adds over a
   2025 snapshot), which has nothing to do with Sanctum.
 
-The Pareto chart's GPT-4.1 reference line (Wallclock performance §)
-is therefore positioned as a **benchmark anchor**, not a head-to-head
-result. A judge wanting to make the cross-model comparison must run
+The Pareto chart's reference line is the **bare Opus 4.7 baseline** at 17.1%
+(Wallclock performance §) — not GPT-4.1. GPT-4.1's Module II (CTF)
+Confidence Index (28%) is cited as an external footnote only, not as a chart
+element. A judge wanting to make a cross-model comparison must run
 their own bare-LLM arm against an Opus 4.7 baseline — which is
 exactly what our `bare` arm provides. See `docs/ACCURACY.md` §
 "Honest limits" → "Model coupling" for the same rule restated.
@@ -799,22 +800,32 @@ which configurations are non-dominated on both axes.
 
 ### Pareto frontier chart
 
-![Pareto frontier: Sanctum configurations vs. GPT-4.1 baseline](figures/pareto.png)
+![Pareto frontier: Sanctum configurations vs. bare Opus 4.7 baseline](figures/pareto.png)
 
-The dashed reference line at 38.52% is GPT-4.1's TUS@4 score on the
-DFIR-Metric Module II (CTF) subset from Cherif et al.,
-arXiv:2505.19973, Table 3. This is a **benchmark anchor**, not a direct
-comparison: Sanctum (a host-based deterministic pipeline) and GPT-4.1 (a
-general-purpose LLM) are evaluated on different input surfaces. The X-axis
-(wallclock) is directly comparable between Sanctum configurations;
-the Y-axis (accuracy) is comparable to the GPT-4.1 baseline only after
-the Sanctum eval runs and the Numbers table above is populated.
+The dashed reference line at 17.1% is the **bare Opus 4.7 baseline** on the
+same 43-question Sanctum-relevant subset — same corpus, same model, same
+scoring. This is the only directly comparable baseline: the sole variable
+is the Sanctum architecture.
 
-**C1-serial**: 99.2% [95.7%, 99.9%] (full run, N=43×3=129).
-**C2-parallel**: **100.0% [97.1%, 100.0%]** (full run, N=43×3=129, Wilson 95% CI).
+**External reference (not on chart — different model and eval setup):**
+GPT-4.1's Confidence Index on DFIR-Metric **Module II** (CTF) is **28%**
+(47 correct, 103 wrong, 0 skipped out of 150 tasks; Cherif et al.,
+arXiv:2505.19973, Table 3). Note: GPT-4.1's TUS@4 on **Module III** (NIST
+forensic string search) is 38.5% — a different module and a different
+metric; the two figures are not interchangeable and prior drafts of this
+document cited the wrong figure for Module II.
+
+**C1-serial**: 100.0% [91.8%, 100.0%] Wilson 95% CI (N=43 questions × 3 runs).
+**C2-parallel** (`SANCTUM_PARALLEL_TOOLS=1`): **100.0% [91.8%, 100.0%]** Wilson 95% CI (N=43 questions × 3 runs).
 Every family 100%, precision@CORROBORATED 100%, false_confidence_rate 0.0%.
-C2-parallel strictly dominates C1-serial on both axes — faster (610 vs 770 ms/MB)
-and more accurate (100% vs 99.2%).
+C2-parallel strictly dominates C1-serial on the wallclock axis — faster
+(610 vs 770 ms/MB) at identical accuracy.
+
+> **Statistical note on Wilson CI unit:** The CI is computed at n=43
+> (independent questions). The 3 runs per question provide within-question
+> variance, not 129 additional independent observations. Computing the CI
+> at N=129 would narrow it artificially to [97.1%, 100.0%]; the honest
+> lower bound at n=43 is 91.8%.
 
 ### Fixture-size manipulation
 

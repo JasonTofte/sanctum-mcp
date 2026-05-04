@@ -4,7 +4,7 @@
     "wallclock_ms": 7.6985000050626695,
     "evidence_mb": 0.01,
     "ms_per_mb": 769.850000506267,
-    "tus_m": 0.992
+    "tus_m": 1.0
   },
   "C2-parallel": {
     "config_name": "C2-parallel",

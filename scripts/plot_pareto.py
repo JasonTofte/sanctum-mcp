@@ -13,9 +13,11 @@ The chart plots operating configurations as (wallclock, accuracy) points on a
 joint cost-quality plane, following the methodology in Kapoor & Narayanan
 (arXiv:2407.01502 §2.2) for joint cost-quality reporting.  The reference line
 is the bare-LLM baseline: same model (Opus 4.7), same corpus, same scoring —
-the only controlled comparison available.  GPT-4.1's DFIR-Metric score (38.5%)
-is cited in the footnote only; it is a different model on a different eval setup
-and cannot be placed on the same Y-axis without conflating two effects.
+the only controlled comparison available.  GPT-4.1's score is cited in the
+footnote only (different model + eval); it cannot be placed on the same Y-axis
+without conflating two effects.  Note: GPT-4.1's TUS@4 on Module III (NIST
+forensic string search) is 38.5%; its Confidence Index on Module II (CTF) is
+28% — the two figures are not interchangeable (Cherif et al., arXiv:2505.19973).
 
 Axes:
 - X: ms per MB of evidence (lower is faster)
@@ -36,11 +38,13 @@ from typing import Any
 
 # Bare-LLM baseline: same model (Opus 4.7), same corpus, same scoring as the
 # Sanctum arms — the only directly comparable reference.
-# Source: eval-20260503T155143-7cdbb1af.json, arm="bare", N=129.
-BARE_ARM_ACCURACY = 0.163
+# Source: eval-20260504T060045-bd8268fc.json, arm="bare", N=129.
+BARE_ARM_ACCURACY = 0.171
 
 # GPT-4.1 DFIR-Metric score — cited in footnote only (different model + eval).
-# Source: Cherif et al. arXiv:2505.19973, Table 3, TUS@4 Module II.
+# Source: Cherif et al. arXiv:2505.19973, Table 3, TUS@4 Module III (NIST forensic
+# string search). Module II (CTF) Confidence Index = 28% (47 correct, 103 wrong,
+# 0 skipped out of 150 tasks). The two figures are not interchangeable.
 GPT41_TUS4 = 0.3852
 
 _COLORS = {
@@ -172,7 +176,8 @@ def plot(data: dict[str, Any], out_path: Path) -> None:
     note = (
         f"Controlled comparison: Sanctum arms vs. bare Opus 4.7, N=43 questions × 3 runs, same corpus and scoring.  "
         f"External ref (not directly comparable — different model + eval): "
-        f"GPT-4.1 scores {GPT41_TUS4:.1%} on DFIR-Metric Module II (Cherif et al., arXiv:2505.19973, Table 3)."
+        f"GPT-4.1 TUS@4 on Module III (NIST forensic string search): {GPT41_TUS4:.1%} — "
+        f"Module II (CTF) Confidence Index: 28% — Cherif et al., arXiv:2505.19973, Table 3."
     )
     fig.text(0.5, -0.02, note, ha="center", fontsize=7, color="#555555", wrap=True)
 
