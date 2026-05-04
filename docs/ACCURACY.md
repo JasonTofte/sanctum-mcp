@@ -94,9 +94,10 @@ comparison would conflate two distinct effects:
 - Model-capability delta (what a 2026 frontier model adds over a
   2025 snapshot), which has nothing to do with Sanctum.
 
-The Pareto chart's GPT-4.1 reference line (Wallclock performance §)
-is therefore positioned as a **benchmark anchor**, not a head-to-head
-result. A judge wanting to make the cross-model comparison must run
+The Pareto chart's reference line is the **bare Opus 4.7 baseline** at 17.1%
+(Wallclock performance §) — not GPT-4.1. GPT-4.1's Module II (CTF)
+Confidence Index (28%) is cited as an external footnote only, not as a chart
+element. A judge wanting to make a cross-model comparison must run
 their own bare-LLM arm against an Opus 4.7 baseline — which is
 exactly what our `bare` arm provides. See `docs/ACCURACY.md` §
 "Honest limits" → "Model coupling" for the same rule restated.
@@ -275,7 +276,7 @@ A judge reading the Numbers table can confirm the following facts inline:
 | Fact | Value | Source-of-truth |
 |---|---|---|
 | Model version | `claude-opus-4-7` | `EvalReport.model_id` |
-| DFIR-Metric corpus | local-v1 (25-question self-contained corpus, see §Subset-selection rationale) | `EvalReport.dfir_metric_commit_sha` |
+| DFIR-Metric corpus | `1f2c22c6a28b` (upstream DFIR-Metric-CTF.json, SHA-256 first 12 chars, fetched 2026-05-01) | `EvalReport.dfir_metric_commit_sha` |
 | Sanctum version | `0.4.1` | `EvalReport.sanctum_version` |
 | Run count per question | N=3 | `EvalReport.n_runs_per_q` |
 | Arm parity | identical prompts, fixtures, scoring pattern; arms differ only in MCP tool availability | `scripts/run_dfir_metric_eval.py` |
@@ -286,12 +287,60 @@ recommendation in Brown, Cai & DasGupta, *Statistical Science*
 2001 — Wilson score intervals are preferred over CLT-based
 intervals at N=45.
 
-<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T155143-7cdbb1af.json` -->
+### Three-arm comparison (N=43, N_runs=3, Opus 4.7)
 
-### Run `eval-20260503T155143-7cdbb1af` — sanctum_partial_credit_accuracy
+Summary across the two most-recent full runs. `sanctum` + `bare` are from
+`eval-20260504T060045-bd8268fc` (post-pattern-fix canonical run); `parallel`
+is from `eval-20260503T224805-f6566e38`. All three share the same 43-question
+SUBSET against corpus `1f2c22c6a28b`.
+
+| Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | mean_wallclock_ms | total_cost_usd |
+|---|---|---|---|---|---|---|
+| `sanctum` (serial) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 12106 | $7.3372 |
+| `bare` | 17.1% ± 37.6%† | n/a | n/a | n/a | 4458 | $0.9292 |
+| `parallel` (`SANCTUM_PARALLEL_TOOLS=1`) | **100.0% ± 0.0%** | **100.0%** | 67.4% | **0.0%** | 11788 | $7.3206 |
+
+_Point-estimate gap sanctum−bare = 82.9 pp; Wilson 95% CIs non-overlapping. Both sanctum arms (serial + parallel) confirm false_confidence_rate=0.0%._
+
+† The bare arm ±37.6% figure is the **binomial-population standard deviation**
+`sqrt(p̂(1−p̂)) = sqrt(0.171×0.829) = 0.3765` — a function of the mean, not
+a measure of run-to-run instability. It is reported here because the eval
+driver computes it, but it should not be read as evidence that bare accuracy
+varies across runs. Per-question run stability must be assessed from the
+per-question rows in the JSON report.
+
+**Paired significance test — McNemar exact (question-level, n=43; Wolfram-verified):**
+
+Data from `eval-20260504T060045-bd8268fc`: bare arm answered ≥1 run correctly
+on 9 of 43 questions (bare_q=1), and 0 runs correctly on 34 questions
+(bare_q=0). Sanctum answered correctly on all 43 questions (bare_q is
+irrelevant to sanctum since sanctum accuracy = 100%).
+
+McNemar 2×2 table:
+
+| | bare_q=1 | bare_q=0 |
+|---|---|---|
+| **sanctum_q=1** | n₁₁ = 9 | n₁₀ = 34 |
+| **sanctum_q=0** | n₀₁ = 0 | n₀₀ = 0 |
+
+Exact two-sided p = 2 × (½)^34 = **1.164 × 10⁻¹⁰**
+(Fagerland et al. 2013 mid-P exact McNemar, PMC 3716987; Wolfram-verified:
+`2*(1/2)^34 = 1.16415×10⁻¹⁰`)
+
+The 82.9 pp gap is not attributable to chance under any standard significance
+threshold. Note: row-level McNemar (N=129, n₁₀=107) gives p=1.233×10⁻³²;
+this inflates significance by treating 3 correlated runs per question as
+independent. The question-level test (n=43) is the methodologically correct
+unit of analysis (pseudoreplication caution per Hurlbert 1984; PMC 10543393).
+
+---
+
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260504T060045-bd8268fc.json` -->
+
+### Run `eval-20260504T060045-bd8268fc` — sanctum_partial_credit_accuracy
 
 - Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
-- Window: `2026-05-03T15:15:35Z` → `2026-05-03T15:51:43Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.1986
+- Window: `2026-05-04T05:25:08Z` → `2026-05-04T06:00:45Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.2664
 
 > ⚠ **high variance — interpret with caution** (`bare`). N=3 is a small sample; per-arm coefficient of variation exceeds 15%. See Methodology §N=3 limitation.
 
@@ -299,31 +348,29 @@ intervals at N=45.
 
 | Arm | accuracy_mean ± std | precision@CORROBORATED | abstention_rate | false_confidence_rate | bare_confident_rate | mean_wallclock_ms | mean_tokens_in | mean_tokens_out | total_cost_usd |
 |---|---|---|---|---|---|---|---|---|---|
-| `sanctum` | 99.2% ± 8.8% | 97.2% | 67.4% | 2.8% | n/a | 12296 | 7880 | 684 | $7.2886 |
-| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 100.0% | 4512 | 195 | 243 | $0.9100 |
-
-> **Note on the 1 remaining CORROBORATED miss (false_confidence_rate=2.8%):** The miss is `synthetic_AppCompat_Sysmon_34_autonomous` — the autonomous mf_privesc_001 question asking "What was the privilege-escalation tool used?" The model answered `JuicyPotato` (correct) but the scoring pattern required `juicypotato.exe` (with `.exe` suffix). This is a scoring strictness edge case: open-ended "tool" phrasing does not reliably elicit the `.exe` suffix, unlike the guided "executable" variants. The gate fired correctly (CORROBORATED from Amcache + Sysmon). The pattern has been corrected to `~(?i)\bjuicypotato(\.exe)?\b` in PR #64; a future re-run is expected to show `false_confidence_rate=0%`.
+| `sanctum` | 100.0% ± 0.0% | 100.0% | 67.4% | 0.0% | n/a | 12106 | 7890 | 697 | $7.3372 |
+| `bare` | 17.1% ± 37.6% ⚠ | n/a | n/a | n/a | 100.0% | 4458 | 195 | 249 | $0.9292 |
 
 **Per-family breakdown** (single-author tagging bias is visible here)
 
 | Arm | Family | tagged_count | correct_count | accuracy |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | 13 | 38 | 97.4% |
+| `sanctum` | `AppCompat` | 13 | 39 | 100.0% |
 | `sanctum` | `BAM` | 8 | 24 | 100.0% |
 | `sanctum` | `Explorer` | 9 | 27 | 100.0% |
 | `sanctum` | `SysMain` | 8 | 24 | 100.0% |
 | `sanctum` | `Sysmon` | 5 | 15 | 100.0% |
-| `bare` | `AppCompat` | 13 | 6 | 15.4% |
+| `bare` | `AppCompat` | 13 | 7 | 17.9% |
 | `bare` | `BAM` | 8 | 0 | 0.0% |
-| `bare` | `Explorer` | 9 | 4 | 14.8% |
-| `bare` | `SysMain` | 8 | 9 | 37.5% |
-| `bare` | `Sysmon` | 5 | 2 | 13.3% |
+| `bare` | `Explorer` | 9 | 3 | 11.1% |
+| `bare` | `SysMain` | 8 | 8 | 33.3% |
+| `bare` | `Sysmon` | 5 | 4 | 26.7% |
 
 _Metric: `sanctum_partial_credit_accuracy` — single-criterion exact-match. We do not implement TUS@m; see ACCURACY.md §AC-12 disclaimer._
 
 <!-- END pasted fragment -->
 
-<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260503T155143-7cdbb1af.json` -->
+<!-- BEGIN: pasted from `python -m scripts.compute_cis reports/eval-20260504T060045-bd8268fc.json` -->
 
 **Wilson 95% confidence intervals**
 
@@ -333,29 +380,46 @@ _At N=45 the Wald (normal-approximation) interval is biased; Wilson is the recom
 
 | Arm | n | accuracy | Wilson 95% CI |
 |---|---|---|---|
-| `sanctum` | 129 | 99.2% | [95.7%, 99.9%] |
-| `bare` | 129 | 16.3% | [10.9%, 23.6%] |
+| `sanctum` | 129 | 100.0% | [97.1%, 100.0%] |
+| `bare` | 129 | 17.1% | [11.5%, 24.5%] |
 
 **Per-arm × per-family**
 
 | Arm | Family | n | accuracy | Wilson 95% CI |
 |---|---|---|---|---|
-| `sanctum` | `AppCompat` | 39 | 97.4% | [86.8%, 99.5%] |
+| `sanctum` | `AppCompat` | 39 | 100.0% | [91.0%, 100.0%] |
 | `sanctum` | `BAM` | 24 | 100.0% | [86.2%, 100.0%] |
 | `sanctum` | `Explorer` | 27 | 100.0% | [87.5%, 100.0%] |
 | `sanctum` | `SysMain` | 24 | 100.0% | [86.2%, 100.0%] |
 | `sanctum` | `Sysmon` | 15 | 100.0% | [79.6%, 100.0%] |
-| `bare` | `AppCompat` | 39 | 15.4% | [7.2%, 29.7%] |
+| `bare` | `AppCompat` | 39 | 17.9% | [9.0%, 32.7%] |
 | `bare` | `BAM` | 24 | 0.0% | [0.0%, 13.8%] |
-| `bare` | `Explorer` | 27 | 14.8% | [5.9%, 32.5%] |
-| `bare` | `SysMain` | 24 | 37.5% | [21.2%, 57.3%] |
-| `bare` | `Sysmon` | 15 | 13.3% | [3.7%, 37.9%] |
+| `bare` | `Explorer` | 27 | 11.1% | [3.9%, 28.1%] |
+| `bare` | `SysMain` | 24 | 33.3% | [18.0%, 53.3%] |
+| `bare` | `Sysmon` | 15 | 26.7% | [10.9%, 52.0%] |
 
 **Arm-difference interpretation**
 
-- sanctum: 99.2% [95.7%, 99.9%]  ·  bare: 16.3% [10.9%, 23.6%]
+- sanctum: 100.0% [97.1%, 100.0%]  ·  bare: 17.1% [11.5%, 24.5%]
 - Point-estimate gap: `sanctum − bare = 82.9%`
 - Per-arm CIs do NOT overlap, which is a sufficient (but not necessary) condition for a statistically significant difference at the α corresponding to this confidence level.
+
+<!-- END pasted fragment -->
+
+---
+
+_Archived — pre-pattern-fix run (false_confidence_rate=2.8% due to strict `juicypotato\.exe` pattern on autonomous question; corrected in PR #64, confirmed 0.0% in run above):_
+
+<!-- BEGIN: pasted from `python -m scripts.summarize_eval reports/eval-20260503T155143-7cdbb1af.json` -->
+
+### Run `eval-20260503T155143-7cdbb1af` — sanctum_partial_credit_accuracy (archived)
+
+- Model: `claude-opus-4-7` · Sanctum: `0.4.1` · DFIR-Metric commit: `1f2c22c6a28b`
+- Window: `2026-05-03T15:15:35Z` → `2026-05-03T15:51:43Z` · N_questions=43 · N_runs=3 · arms=['sanctum', 'bare'] · cost=$8.1986
+- **Archived** — scoring pattern for `synthetic_AppCompat_Sysmon_34_autonomous` was strict (`~(?i)\bjuicypotato\.exe\b`); model answered `JuicyPotato` (correct, gate fired). Pattern corrected to `~(?i)\bjuicypotato(\.exe)?\b`. Superseded by `eval-20260504T060045-bd8268fc`.
+
+| `sanctum` | 99.2% ± 8.8% | 97.2% | 67.4% | 2.8% | n/a | 12296 | 7880 | 684 | $7.2886 |
+| `bare` | 16.3% ± 36.9% ⚠ | n/a | n/a | n/a | 100.0% | 4512 | 195 | 243 | $0.9100 |
 
 <!-- END pasted fragment -->
 
@@ -767,22 +831,32 @@ which configurations are non-dominated on both axes.
 
 ### Pareto frontier chart
 
-![Pareto frontier: Sanctum configurations vs. GPT-4.1 baseline](figures/pareto.png)
+![Pareto frontier: Sanctum configurations vs. bare Opus 4.7 baseline](figures/pareto.png)
 
-The dashed reference line at 38.52% is GPT-4.1's TUS@4 score on the
-DFIR-Metric Module II (CTF) subset from Cherif et al.,
-arXiv:2505.19973, Table 3. This is a **benchmark anchor**, not a direct
-comparison: Sanctum (a host-based deterministic pipeline) and GPT-4.1 (a
-general-purpose LLM) are evaluated on different input surfaces. The X-axis
-(wallclock) is directly comparable between Sanctum configurations;
-the Y-axis (accuracy) is comparable to the GPT-4.1 baseline only after
-the Sanctum eval runs and the Numbers table above is populated.
+The dashed reference line at 17.1% is the **bare Opus 4.7 baseline** on the
+same 43-question Sanctum-relevant subset — same corpus, same model, same
+scoring. This is the only directly comparable baseline: the sole variable
+is the Sanctum architecture.
 
-**C1-serial**: 99.2% [95.7%, 99.9%] (full run, N=43×3=129).
-**C2-parallel**: **100.0% [97.1%, 100.0%]** (full run, N=43×3=129, Wilson 95% CI).
+**External reference (not on chart — different model and eval setup):**
+GPT-4.1's Confidence Index on DFIR-Metric **Module II** (CTF) is **28%**
+(47 correct, 103 wrong, 0 skipped out of 150 tasks; Cherif et al.,
+arXiv:2505.19973, Table 3). Note: GPT-4.1's TUS@4 on **Module III** (NIST
+forensic string search) is 38.5% — a different module and a different
+metric; the two figures are not interchangeable and prior drafts of this
+document cited the wrong figure for Module II.
+
+**C1-serial**: 100.0% [91.8%, 100.0%] Wilson 95% CI (N=43 questions × 3 runs).
+**C2-parallel** (`SANCTUM_PARALLEL_TOOLS=1`): **100.0% [91.8%, 100.0%]** Wilson 95% CI (N=43 questions × 3 runs).
 Every family 100%, precision@CORROBORATED 100%, false_confidence_rate 0.0%.
-C2-parallel strictly dominates C1-serial on both axes — faster (610 vs 770 ms/MB)
-and more accurate (100% vs 99.2%).
+C2-parallel strictly dominates C1-serial on the wallclock axis — faster
+(610 vs 770 ms/MB) at identical accuracy.
+
+> **Statistical note on Wilson CI unit:** The CI is computed at n=43
+> (independent questions). The 3 runs per question provide within-question
+> variance, not 129 additional independent observations. Computing the CI
+> at N=129 would narrow it artificially to [97.1%, 100.0%]; the honest
+> lower bound at n=43 is 91.8%.
 
 ### Fixture-size manipulation
 

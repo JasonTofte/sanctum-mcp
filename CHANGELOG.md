@@ -4,6 +4,34 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — eval: statistical correctness + McNemar paired test (2026-05-04)
+
+- `docs/ACCURACY.md`: corrected GPT-4.1 benchmark figure — 38.5% TUS@4 is
+  Module III (NIST forensic string search), not Module II (CTF). Correct
+  Module II Confidence Index is **28%** (47/150 correct). Prior drafts cited
+  the wrong module; the error was discovered via adversarial source check
+  against arXiv:2505.19973 Table 3.
+- `docs/ACCURACY.md`: corrected Wilson CI unit from N=129 (pseudoreplication)
+  to n=43 (independent questions). Correct lower bound for sanctum 100%
+  accuracy at n=43 is **91.8%** (was 97.1% inflated by treating 3 correlated
+  runs per question as independent). Wolfram-verified: `((1 + 1.96²/86) −
+  1.96√(1.96²/7396)) / (1 + 1.96²/43) = 0.917987`.
+- `docs/ACCURACY.md`: added Wolfram-verified McNemar exact paired test.
+  Exact n₁₀=34 from `eval-20260504T060045-bd8268fc` data (bare arm answered
+  ≥1 run correctly on 9/43 questions). Exact two-sided p = 2×(½)^34 =
+  **1.164×10⁻¹⁰** (Wolfram: `N[2*(1/2)^34, 6]`). Row-level p (N=129) noted
+  as 1.233×10⁻³² but explained as pseudoreplication.
+- `docs/ACCURACY.md`: relabelled bare arm ±37.6% as binomial-population SD
+  (= `sqrt(p̂(1−p̂))`), not run-to-run instability. Wolfram-verified:
+  `sqrt(0.171*0.829) = 0.376509`.
+- `docs/ACCURACY.md`: updated Pareto chart description to reflect current
+  chart (bare Opus 4.7 dashed line at 17.1%, not old GPT-4.1 line at 38.52%).
+- `docs/figures/pareto.html`: corrected external-ref footnote to distinguish
+  Module II CI=28% from Module III TUS@4=38.5%.
+- `scripts/plot_pareto.py`: corrected module attribution in docstring and
+  chart footnote string.
+- `reports/wallclock.json`: updated C1-serial `tus_m` to 1.0 (post-fix run).
+
 ### Added — C2-parallel full run + honest Pareto chart (2026-05-03)
 
 - `scripts/run_dfir_metric_eval.py`: added `--arm parallel` eval arm that sets `SANCTUM_PARALLEL_TOOLS=1` before running the Sanctum agent loop (C2 configuration). Full run: N=43 questions × 3 runs = 129 rows; accuracy **100.0%** [97.1%, 100.0%] vs C1-serial 99.2% [95.7%, 99.9%]. C2-parallel strictly dominates C1-serial on both axes: higher accuracy and lower wallclock (610 vs 770 ms/MB). Cost $7.32 (eval-20260503T224805-f6566e38).
