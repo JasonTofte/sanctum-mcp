@@ -4,6 +4,15 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — C2-parallel full run + honest Pareto chart (2026-05-03)
+
+- `scripts/run_dfir_metric_eval.py`: added `--arm parallel` eval arm that sets `SANCTUM_PARALLEL_TOOLS=1` before running the Sanctum agent loop (C2 configuration). Full run: N=43 questions × 3 runs = 129 rows; accuracy **100.0%** [97.1%, 100.0%] vs C1-serial 99.2% [95.7%, 99.9%]. C2-parallel strictly dominates C1-serial on both axes: higher accuracy and lower wallclock (610 vs 770 ms/MB). Cost $7.32 (eval-20260503T224805-f6566e38).
+- `scripts/plot_pareto.py`: replaced misleading GPT-4.1 reference line (different model + eval setup — not a controlled comparison) with bare Opus 4.7 at 16.3% (same model, same corpus, same scoring). GPT-4.1's 38.5% score is now footnote-only with explicit disclaimer. Updated title to "Sanctum configurations vs. bare Opus 4.7 baseline (same model · same corpus · same scoring)".
+- `docs/figures/pareto.html`: self-contained HTML page wrapping the Pareto chart with stat cards (C2 100.0%, C1 99.2%, bare 16.3% with Wilson CIs) and honest methodology notes (what the gap does/doesn't measure; GPT-4.1 disclaimer).
+- `reports/wallclock.json`: updated C2-parallel entry with full-run accuracy (`tus_m: 1.0`); no more `partial` flag.
+- `docs/ACCURACY.md`: added C2-parallel full run section and updated Numbers table with parallel arm column.
+- `README.md`: updated benchmark callout block with C2 numbers (100.0% [97.1%, 100.0%]); updated IR Accuracy rubric row; added 4 honest-limits bullets to §"Limits of structural defenses".
+
 ### Added — eval: structured_bare ablation arm (R6, 2026-05-03)
 
 - `scripts/run_dfir_metric_eval.py`: added `structured_bare` eval arm that runs Sanctum's parsers directly (no MCP subprocess, no gate) and feeds clean structured JSON to Claude. Isolates the gate's accuracy contribution from the parser's: bare (~16%) → structured_bare (TBD) → sanctum (~99%) three-arm table decomposes the 83pp gap. `--arm structured_bare` runs the ablation; `--arm both` retains the existing two-arm behaviour.
