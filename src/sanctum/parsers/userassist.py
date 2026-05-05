@@ -62,6 +62,7 @@ from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundErro
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
     PROGRAM_PATH_MAX_LEN,
+    _coerce_to_bytes,
     _safe_field,
     fixture_mode,
     load_sidecar,
@@ -210,16 +211,15 @@ def _build_event_from_value(
     if _FIELD_DELIMITER_PATTERN.search(program_path):
         return None
 
-    if not isinstance(value_bytes, (bytes, bytearray)):
-        return None
-    if len(value_bytes) != _UA_V5_SIZE:
+    raw_bytes = _coerce_to_bytes(value_bytes)
+    if raw_bytes is None or len(raw_bytes) != _UA_V5_SIZE:
         return None
 
     try:
-        run_count = struct.unpack_from("<I", value_bytes, _UA_RUN_COUNT_OFFSET)[0]
-        focus_count = struct.unpack_from("<I", value_bytes, _UA_FOCUS_COUNT_OFFSET)[0]
-        focus_time_ms = struct.unpack_from("<I", value_bytes, _UA_FOCUS_TIME_OFFSET)[0]
-        filetime = struct.unpack_from("<Q", value_bytes, _UA_LAST_RUN_OFFSET)[0]
+        run_count = struct.unpack_from("<I", raw_bytes, _UA_RUN_COUNT_OFFSET)[0]
+        focus_count = struct.unpack_from("<I", raw_bytes, _UA_FOCUS_COUNT_OFFSET)[0]
+        focus_time_ms = struct.unpack_from("<I", raw_bytes, _UA_FOCUS_TIME_OFFSET)[0]
+        filetime = struct.unpack_from("<Q", raw_bytes, _UA_LAST_RUN_OFFSET)[0]
     except struct.error:
         return None
 
@@ -241,7 +241,7 @@ def _build_event_from_value(
         program_path=program_path,
         timestamp=timestamp,
         source_artifact=hive_path.as_posix(),
-        evidence_size_bytes=len(value_bytes),
+        evidence_size_bytes=len(raw_bytes),
         extras=extras,
     )
 

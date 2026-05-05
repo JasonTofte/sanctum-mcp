@@ -80,6 +80,23 @@ EVIDENCE_SIZE_MAX = 2**40  # 1 TiB
 _FIELD_DELIMITER_PATTERN = re.compile(f"[<>\\x00-\\x1f{INVISIBLE_CODEPOINT_CLASS}]")
 
 
+def _coerce_to_bytes(raw: Any) -> bytes | None:
+    """Normalize a regipy REG_BINARY value to bytes.
+
+    regipy 6.x returns small REG_BINARY values as lowercase hex strings and
+    large blobs as bytes. Both forms are accepted here so callers don't need
+    to branch on regipy version behavior.
+    """
+    if isinstance(raw, (bytes, bytearray)):
+        return bytes(raw)
+    if isinstance(raw, str):
+        try:
+            return bytes.fromhex(raw)
+        except ValueError:
+            return None
+    return None
+
+
 def _safe_field(value: Any, *, limit: int = 128) -> str:
     """Scrub an attacker-influenceable value for safe inclusion in an
     exception message. Replaces angle brackets and control characters with

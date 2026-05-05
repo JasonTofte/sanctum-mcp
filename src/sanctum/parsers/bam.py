@@ -78,6 +78,7 @@ from sanctum.parsers._errors import ArtifactMalformedError, ArtifactNotFoundErro
 from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
     PROGRAM_PATH_MAX_LEN,
+    _coerce_to_bytes,
     _safe_field,
     fixture_mode,
     load_sidecar,
@@ -284,13 +285,12 @@ def _build_event_from_value(
     if _FIELD_DELIMITER_PATTERN.search(value_name):
         return None
 
-    if not isinstance(value_bytes, (bytes, bytearray)):
-        return None
-    if len(value_bytes) < 8:
+    raw_bytes = _coerce_to_bytes(value_bytes)
+    if raw_bytes is None or len(raw_bytes) < 8:
         return None
 
     try:
-        filetime = struct.unpack_from("<Q", value_bytes, 0)[0]
+        filetime = struct.unpack_from("<Q", raw_bytes, 0)[0]
     except struct.error:
         return None
 
@@ -311,7 +311,7 @@ def _build_event_from_value(
         program_path=value_name,
         timestamp=timestamp,
         source_artifact=hive_path.as_posix(),
-        evidence_size_bytes=len(value_bytes),
+        evidence_size_bytes=len(raw_bytes),
         extras=extras,
     )
 

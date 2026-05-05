@@ -78,6 +78,7 @@ from sanctum.parsers._fixture_io import (
     _FIELD_DELIMITER_PATTERN,
     EVIDENCE_SIZE_MAX,
     PROGRAM_PATH_MAX_LEN,
+    _coerce_to_bytes,
     _safe_field,
     fixture_mode,
     load_sidecar,
@@ -175,9 +176,7 @@ def _load_shimcache_blob(
                 continue
             if getattr(v, "is_corrupted", False):
                 return None
-            if isinstance(v.value, (bytes, bytearray)):
-                return bytes(v.value)
-            return None
+            return _coerce_to_bytes(v.value)
     except RegistryParsingException:
         return None
     return None
