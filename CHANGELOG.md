@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval: Sysmon adversarial_single_family fixture (2026-05-04)
+
+- `tests/benchmarks/dfir_metric_subset.py`: added a third `adversarial_single_family`
+  entry for the **Sysmon** (Kernel-ETW) family. Calls `get_sysmon_4688`, then immediately
+  `claim_finding` with that single audit_id. Expected verdict: DRAFT.
+  Rationale: Sysmon is gold-standard ETW telemetry — showing the gate still returns DRAFT
+  for a single-Sysmon claim is the most counterintuitive and therefore most legible
+  demonstration that corroboration requires a second independent artifact family, not just
+  a high-quality first family. (R5 eval improvement.)
+
 ### Fixed — eval: statistical correctness + McNemar paired test (2026-05-04)
 
 - `docs/ACCURACY.md`: corrected GPT-4.1 benchmark figure — 38.5% TUS@4 is
