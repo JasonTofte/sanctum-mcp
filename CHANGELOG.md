@@ -4,6 +4,27 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — eval: prompt_only arm (R4 pure-LLM-knowledge baseline) (2026-05-04)
+
+- `scripts/run_dfir_metric_eval.py`: added `prompt_only` eval arm — question text
+  only, no evidence bytes, no parsers, no MCP subprocess.  Callable via
+  `--arm prompt_only` on the CLI.
+- `PROMPT_ONLY_SYSTEM_PROMPT`: minimal DFIR prompt with no evidence delimiters,
+  so the model answers purely from training weights.
+- `_run_one_prompt_only_question()`: mirrors `_run_one_bare_question` but sends
+  only `question.text` in the user turn — zero evidence context.
+- `_aggregate_arm`: treats `prompt_only` identically to `bare` (`is_bare` check
+  now covers both) — `false_confidence_rate`, `abstention_rate`, and
+  `precision_at_corroborated` are all `None`; `bare_confident_rate` is computed.
+- `_compute_bare_confident_rate`: added `"prompt_only"` to the arm allowlist.
+- `tests/benchmarks/test_dfir_metric_smoke.py`: `test_smoke_prompt_only_arm`
+  exercises the full driver scaffolding end-to-end with a mock Anthropic client.
+- `tests/test_eval_driver_unit.py`: `test_bare_confident_rate_computed_for_prompt_only_arm`
+  verifies the arm returns a non-None `bare_confident_rate`.
+- Insight: a `sanctum`/`prompt_only` gap that persists across question families
+  means the forensic artifacts carry signal the model's training weights do not
+  encode — the artifacts do real information-theoretic work.
+
 ### Added — eval: Sysmon adversarial_single_family fixture (2026-05-04)
 
 - `tests/benchmarks/dfir_metric_subset.py`: added a third `adversarial_single_family`
