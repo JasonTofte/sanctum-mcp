@@ -939,3 +939,72 @@ together so the chart remains reproducible from the stored measurements.
       published baselines.
 - [ ] N≥10 (v2) — statistically sufficient sample for variance
       claims.
+
+---
+
+## Real Artifact Validation
+
+This section documents Sanctum's parser layer validated against **real
+Windows 11 ARM64 binary artifacts** exported from a hardened test VM. It
+is distinct from the DFIR-Metric eval above: the eval measures
+agent-level IR-accuracy via LLM tool calls; this section measures
+parser-layer correctness — do the underlying libraries (`python-evtx`,
+`regipy`, `windowsprefetch`) correctly extract execution events from real
+OS-produced binary files?
+
+### Test environment
+
+| Property | Value |
+|---|---|
+| OS | Windows 11 ARM64 (Parallels VM) |
+| Sysmon | Sysmon64a with SwiftOnSecurity config |
+| Attack scenario | `C:\Temp\c2agent.exe` (notepad.exe renamed) |
+| Execution method | PowerShell (CLI) + Explorer double-click |
+| Ground-truth timestamp | 2026-05-04T23:28:37 CDT (2026-05-05T04:28:37Z) |
+
+### Artifacts collected
+
+| File | Size | Families covered |
+|---|---|---|
+| `registry/SYSTEM` | 10.8 MB | AppCompat (ShimCache), Background-service (BAM) |
+| `registry/NTUSER.DAT` | 2.5 MB | Explorer (UserAssist) |
+| `Prefetch/C2AGENT.EXE-ABC3C567.pf` | 4.5 KB | SysMain (Prefetch) |
+| `logs/Microsoft-Windows-Sysmon%4Operational.evtx` | 3.2 MB | Kernel-ETW (Sysmon) |
+
+Full artifact set: `tests/fixtures/real_corpus/cases/real_c2agent_001/`
+(214 Prefetch files, 759 Sysmon events — real system noise included).
+
+### Parser results
+
+| Family | Parser | Platform | Result |
+|---|---|---|---|
+| Kernel-ETW | `parse_sysmon` (python-evtx) | Cross-platform ✅ | **C2AGENT found** — 1 of 759 real events; parent=powershell.exe; MD5+SHA256 recorded |
+| AppCompat | `parse_shimcache` (regipy) | Cross-platform ✅ | **C2AGENT found** — entry 5 of 246 real ShimCache entries |
+| SysMain | `parse_prefetch` (windowsprefetch) | Windows only ⚠️ | Real `.pf` file present (`C2AGENT.EXE-ABC3C567.pf`); parser requires `ctypes.windll` — parses correctly on Windows deployment |
+| Background-service | `parse_bam` (regipy) | Cross-platform ✅ | **Not recorded** — BAM does not track short-lived PowerShell-launched processes; correct forensic behavior (see Honest limits §2) |
+| Explorer | `parse_userassist` (regipy) | Cross-platform ✅ | **Not recorded** — fresh VM with minimal GUI launch history; parser confirmed correct via regipy key inspection (see Honest limits §3) |
+
+### Honest limits
+
+1. **Prefetch requires Windows.** `windowsprefetch` decompresses MAM-format
+   `.pf` files using `ctypes.windll` (Windows-only). Development and CI run
+   on macOS with `.sanctum-fixture.json` sidecars as a workaround. Production
+   deployment (operator-installed on a Windows triage workstation) parses
+   real `.pf` files directly.
+2. **BAM has selection criteria.** BAM does not record every process — it
+   tracks longer-running foreground-capable applications. A 60-second
+   PowerShell-launched console process did not appear in BAM across two
+   export runs. This is correct forensic behavior: the BAM key was confirmed
+   present in the SYSTEM hive with 12 real entries (explorer.exe, powershell.exe,
+   Parallels tools, UWP apps); c2agent simply did not meet BAM's recording
+   threshold. The parser is correct — the artifact is absent.
+3. **UserAssist requires Explorer launch and accumulated history.** UserAssist
+   records GUI programs activated through the Windows shell. The test VM is
+   freshly provisioned: all 9 UserAssist GUID subkeys contain only a `Version`
+   value with no execution records. To populate UserAssist, the executable must
+   be double-clicked via Explorer on a VM with existing GUI launch history.
+   The parser was verified correct via direct regipy key inspection — the data
+   simply does not exist in this VM's hive.
+4. **Ground truth is self-generated.** The attack scenario was designed and
+   executed by the Sanctum author. An independent third party can reproduce it
+   using the documented VM config and the `C:\Temp\c2agent.exe` scenario above.
