@@ -406,3 +406,60 @@ def test_smoke_structured_bare_arm(server_env: dict[str, str], tmp_path: Path) -
     assert len(spawned_this_run) == len(
         eval_driver._spawned_procs
     ), "structured_bare arm must not spawn any MCP subprocess"
+
+
+@pytest.mark.benchmark
+def test_smoke_prompt_only_arm(server_env: dict[str, str], tmp_path: Path) -> None:
+    """prompt_only arm: question text only, no evidence bytes, no parsers, no MCP.
+
+    Verifies:
+    - arm label is 'prompt_only' in every PerQuestionRow
+    - claim_status and audit_ids are absent (no gate)
+    - false_confidence_rate, abstention_rate, precision_at_corroborated are None
+    - bare_confident_rate is computed (not None) — the arm is noisy, not silent
+    - no MCP subprocess spawned
+    - schema AC-4 fields present in aggregates
+    """
+    questions = (
+        _mk_question(
+            q_id="smoke-prompt-only-q-1",
+            family="AppCompat",
+            text="Name a common Windows host-based forensic artifact for execution.",
+            scoring_pattern=r"~(?i)\bAmcache\b",
+            bare_evidence=b"",  # ignored — prompt_only sends no evidence at all
+        ),
+    )
+    client = MockAnthropicClient(
+        responses=[_final_answer_response("Amcache.hve InventoryApplicationFile")]
+    )
+    prev_spawned = len(eval_driver._spawned_procs)
+
+    report = eval_driver.run_eval(
+        arm="prompt_only",
+        n_runs=1,
+        questions=questions,
+        anthropic_client=client,
+        case_root=FIXTURES_ROOT / SYNTHETIC_CASE_ID,
+        output_dir=tmp_path,
+        server_env=server_env,
+    )
+
+    assert len(report.per_question) == 1, f"expected 1 row, got {len(report.per_question)}"
+    row = report.per_question[0]
+    assert row.arm == "prompt_only"
+    assert row.claim_status is None, "prompt_only arm must not produce a claim_status"
+    assert row.audit_ids == (), "prompt_only arm must not carry audit_ids"
+    assert row.correct is True, f"expected correct=True, got predicted={row.predicted!r}"
+
+    assert "prompt_only" in report.aggregates
+    agg = report.aggregates["prompt_only"]
+    assert agg.false_confidence_rate is None, "no gate — false_confidence_rate must be None"
+    assert agg.abstention_rate is None, "no gate — abstention_rate must be None"
+    assert agg.precision_at_corroborated is None, "no CORROBORATED tier — must be None"
+    assert agg.bare_confident_rate is not None, "prompt_only arm must compute bare_confident_rate"
+    assert 0.0 <= agg.accuracy_mean <= 1.0
+
+    # No MCP subprocess spawned.
+    assert len(eval_driver._spawned_procs) == prev_spawned, (
+        "prompt_only arm must not spawn any MCP subprocess"
+    )

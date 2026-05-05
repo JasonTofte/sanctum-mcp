@@ -584,6 +584,17 @@ def test_bare_confident_rate_returns_none_for_sanctum_arm() -> None:
     assert eval_driver._compute_bare_confident_rate(rows, arm="sanctum") is None
 
 
+def test_bare_confident_rate_computed_for_prompt_only_arm() -> None:
+    """prompt_only arm has no gate — bare_confident_rate must not be None."""
+    rows = (
+        _row(arm="prompt_only", claim_status=None, correct=True),
+        _row(arm="prompt_only", claim_status=None, correct=False),
+    )
+    rate = eval_driver._compute_bare_confident_rate(rows, arm="prompt_only")
+    assert rate is not None, "prompt_only arm must return a bare_confident_rate"
+    assert rate == pytest.approx(1.0)  # both rows have predicted="x" (non-marker)
+
+
 def test_bare_confident_rate_all_confident() -> None:
     rows = (
         _row(arm="bare", claim_status=None, correct=True),

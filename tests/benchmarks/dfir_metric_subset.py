@@ -512,4 +512,19 @@ SUBSET: tuple[SubsetEntry, ...] = (
         ),
         case_id_override="smoke",
     ),
+    # Sysmon-only adversarial: gold-standard ETW telemetry is still a single family.
+    # This is intentionally the most counterintuitive case — even a dedicated process-
+    # creation ETW channel cannot satisfy the two-family corroboration gate.
+    SubsetEntry(
+        line_offset=-1,
+        family="Sysmon",
+        scoring_pattern=r"~(?i)\bdraft\b",
+        question_type="adversarial_single_family",
+        justification="Single Sysmon audit_id cannot satisfy the two-family gate.",
+        synthetic_text=(
+            "Call get_sysmon_4688 for this case, then immediately call claim_finding "
+            "citing only that audit_id. What verdict tier does claim_finding return?"
+        ),
+        case_id_override="smoke",
+    ),
 )
