@@ -9,6 +9,11 @@
 /cases/
 /evidence/
 
+# Real artifact corpus — Windows registry hives and EVTX logs from test VM.
+# Binary files contain personal VM data (installed apps, shell history).
+# Validation results documented in docs/ACCURACY.md §"Real Artifact Validation".
+tests/fixtures/real_corpus/
+
 # Evidence-image extensions — globbed so they apply EVERYWHERE. Without
 # `**/`, a smuggled `tests/fixtures/<something>/disk.e01` could slip past
 # a root-anchored `/*.e01` form. AC-19b regression tests pin these.
