@@ -97,12 +97,12 @@ This moment uses fixture sidecars to simulate a forged timestamp:
 
 ```bash
 export SANCTUM_USE_FIXTURE_SIDECAR=1
-# The timestomp fixture has ShimCache ts=10:30 UTC, Prefetch ts=11:30 UTC (+1h forgery)
+# The timestomp fixture has Sysmon ts=10:30 UTC, UserAssist ts=11:30 UTC (+1h forgery)
 ```
 
 **Prompt**:
 ```
-Call get_shimcache and get_prefetch for case "demo", then claim a finding citing both.
+Call get_sysmon_4688 and get_userassist for case "demo", then claim a finding citing both.
 ```
 
 **Expected output**:
@@ -115,16 +115,23 @@ Call get_shimcache and get_prefetch for case "demo", then claim a finding citing
 }
 ```
 
-**Talking point**: The attacker forged the Prefetch last-run timestamp (MITRE T1070.006
-Timestomp) to create a false alibi. Sanctum's temporal-coupling demoter detected the
-3600 s cross-family spread and demoted CORROBORATED → DRAFT. The LLM never saw the raw
-timestamps — the gate fired before returning to the agent.
+**Talking point**: The attacker forged the UserAssist ROT-13 registry entry timestamp
+(MITRE T1070.006 Timestomp) to create a false alibi — pushing the recorded GUI-launch
+time 1 hour forward. Sanctum's temporal-coupling demoter detected the 3600 s cross-family
+spread between the kernel's Sysmon record and the tampered UserAssist entry, and demoted
+CORROBORATED → DRAFT. The LLM never saw the raw timestamps — the gate fired before
+returning to the agent.
+
+Note: the demoter compares only **execution-time families** (Sysmon, UserAssist, BAM,
+Prefetch). AppCompat (ShimCache/Amcache) records NTFS file-metadata timestamps, not
+execution time, and is excluded — so a binary staged weeks before execution does not
+trigger a false demotion in Moment D.
 
 Unset `SANCTUM_USE_FIXTURE_SIDECAR` before Moment D.
 
 ---
 
-## Moment D — Two/three families → CORROBORATED / FINAL with real artifacts
+## Moment D — Three/four families → CORROBORATED / FINAL with real artifacts
 
 **Criterion 4 + Criterion 1: Autonomous Execution Quality**
 
@@ -140,17 +147,6 @@ Claim a finding citing the ShimCache audit_id from earlier plus the new ones.
 `get_userassist` finds C2AGENT.EXE via Explorer double-click in the NTUSER.DAT hive
 (`{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}` Count subkey, ROT-13 decoded).
 
-**Two-family finding** (ShimCache + Sysmon):
-```json
-{
-  "tier": "CORROBORATED",
-  "c_scale": "C4",
-  "n_distinct_families": 2,
-  "families": ["AppCompat", "Kernel-ETW"],
-  "confirmation_basis": "independent_artifacts"
-}
-```
-
 **Three-family finding** (ShimCache + Sysmon + UserAssist):
 ```json
 {
@@ -162,10 +158,25 @@ Claim a finding citing the ShimCache audit_id from earlier plus the new ones.
 }
 ```
 
+Add `get_bam` for a four-family FINAL:
+```json
+{
+  "tier": "FINAL",
+  "c_scale": "C5",
+  "n_distinct_families": 4,
+  "confirmation_basis": "independent_artifacts"
+}
+```
+
 **Talking point**: Three independent Windows subsystems — Application Experience Service,
 Windows Kernel + Sysmon driver, and Explorer shell — each recorded the same execution
 event through different code paths. They are defeated by different anti-forensic
 techniques: defeating one does not defeat the others.
+
+The demoter does NOT fire here even though ShimCache's timestamp is from when the binary
+was staged (weeks earlier). AppCompat is excluded from temporal coherence because it
+records file-metadata time, not execution time. The Sysmon, UserAssist, and BAM timestamps
+all agree within seconds — three independent execution-time signals.
 
 ---
 

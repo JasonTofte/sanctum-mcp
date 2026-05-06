@@ -6,11 +6,13 @@ T-3   evaluate_claim demotes CORROBORATED→DRAFT when outside window       [P0]
 T-4   _check_temporal_coherence returns "incoherent" outside window       [P1]
 T-5   FINAL (3 families) + incoherent → CORROBORATED                     [P1]
 T-6   boundary: ts delta == window → "coherent" (inclusive)               [P1]
-T-8   SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS=30 overrides default       [P0]
+T-8   SANCTUM_TEMPORAL_COUPLING_WINDOWS_SECONDS=30 overrides default      [P0]
 T-9   unset env var → 5.0s default                                        [P0]
 T-14  insufficient_data when all timestamps None                          [P0]
 T-15  insufficient_data when only 1 family has a timestamp                [P0]
 T-16  regression: no first_event_ts in entries → no demotion              [P0]
+T-17  AppCompat excluded — staging gap never demotes (AC-3)               [P0]
+T-18  staging scenario: AppCompat old + 3 exec-time families → FINAL      [P0]
 
 Run with: pytest tests/test_temporal_coupling_demoter.py -v
 """
@@ -170,14 +172,18 @@ def test_evaluate_claim_demotes_corroborated_outside_window(
     ledger_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """T-3 (P0): two families, 1-hour timestamp gap → DRAFT, demoted_for_temporal=True."""
+    """T-3 (P0): two execution-time families, 1-hour gap → DRAFT, demoted_for_temporal=True.
+
+    Uses Sysmon (Kernel-ETW) + UserAssist (Explorer/NTUSER) — both are
+    execution-time families so the 3600 s spread triggers the demoter.
+    """
     base = 1700000000.0
     aid1 = _write_ledger_entry(
-        ledger_env, case_id="c1", tool="get_amcache",
+        ledger_env, case_id="c1", tool="get_sysmon_4688",
         first_event_ts=_iso(base), last_event_ts=_iso(base + 1.0),
     )
     aid2 = _write_ledger_entry(
-        ledger_env, case_id="c1", tool="get_prefetch",
+        ledger_env, case_id="c1", tool="get_userassist",
         first_event_ts=_iso(base + 3600.0), last_event_ts=_iso(base + 3601.0),
     )
 
@@ -253,15 +259,15 @@ def test_evaluate_claim_default_window_5s(
     ledger_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """T-9 (P0): env var unset → 5s default; 10s delta demotes."""
+    """T-9 (P0): env var unset → 5s default; 10s delta between exec-time families demotes."""
     monkeypatch.delenv("SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS", raising=False)
     base = 1700000000.0
     aid1 = _write_ledger_entry(
-        ledger_env, case_id="c1", tool="get_amcache",
+        ledger_env, case_id="c1", tool="get_sysmon_4688",
         first_event_ts=_iso(base),
     )
     aid2 = _write_ledger_entry(
-        ledger_env, case_id="c1", tool="get_prefetch",
+        ledger_env, case_id="c1", tool="get_userassist",
         first_event_ts=_iso(base + 10.0),
     )
 
@@ -307,50 +313,132 @@ def test_timestomp_demo_fixture_demotes_to_draft(
     """AC-6 (P1): timestomp demo fixture triggers demotion end-to-end.
 
     Scenario (MITRE ATT&CK T1070.006 — Timestomp):
-    - Amcache records C:\\Temp\\malware.exe at T = 2024-01-15T10:30 UTC (real).
-    - Prefetch last-run was FORGED to T+3600 = 2024-01-15T11:30 UTC.
+    - Sysmon EID-1 records C:\\Temp\\malware.exe at T = 2024-01-15T10:30 UTC (real).
+    - UserAssist last-run was FORGED to T+3600 = 2024-01-15T11:30 UTC.
     - Cross-family spread = 3600 s >> 5 s default window.
-    - Gate should demote CORROBORATED → DRAFT, demoted_for_temporal=True.
+    - Both are execution-time families → gate demotes CORROBORATED → DRAFT.
 
     Exercises the full path: fixture parser → timestamp extraction → ledger →
     evaluate_claim temporal demoter.
     """
-    from sanctum.parsers.amcache import parse_amcache
-    from sanctum.parsers.prefetch import parse_prefetch
+    from sanctum.parsers.sysmon import parse_sysmon
+    from sanctum.parsers.userassist import parse_userassist
 
     monkeypatch.setenv("SANCTUM_USE_FIXTURE_SIDECAR", "1")
     monkeypatch.delenv("SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS", raising=False)
 
-    amcache_path = _DEMO_FIXTURE / "cases/demo/registry/Amcache.hve"
-    prefetch_path = _DEMO_FIXTURE / "cases/demo/Prefetch/MALWARE.EXE-AABBCCDD.pf"
+    sysmon_path = _DEMO_FIXTURE / "cases/demo/logs/Microsoft-Windows-Sysmon%4Operational.evtx"
+    userassist_path = _DEMO_FIXTURE / "cases/demo/registry/NTUSER.DAT"
 
-    amcache_events = parse_amcache(amcache_path)
-    prefetch_events = parse_prefetch(prefetch_path)
+    sysmon_events = parse_sysmon(sysmon_path)
+    userassist_events = parse_userassist(userassist_path)
 
-    assert amcache_events, "demo fixture: Amcache sidecar must have at least one event"
-    assert prefetch_events, "demo fixture: Prefetch sidecar must have at least one event"
+    assert sysmon_events, "demo fixture: Sysmon sidecar must have at least one event"
+    assert userassist_events, "demo fixture: UserAssist sidecar must have at least one event"
 
     # Mirror _emit_offloaded_response's extraction: min(timestamp) per family.
-    amcache_first_ts = min(e.timestamp.isoformat() for e in amcache_events)
-    prefetch_first_ts = min(e.timestamp.isoformat() for e in prefetch_events)
+    sysmon_first_ts = min(e.timestamp.isoformat() for e in sysmon_events)
+    userassist_first_ts = min(e.timestamp.isoformat() for e in userassist_events)
 
     aid1 = _write_ledger_entry(
-        ledger_env, case_id="demo", tool="get_amcache",
-        first_event_ts=amcache_first_ts,
+        ledger_env, case_id="demo", tool="get_sysmon_4688",
+        first_event_ts=sysmon_first_ts,
     )
     aid2 = _write_ledger_entry(
-        ledger_env, case_id="demo", tool="get_prefetch",
-        first_event_ts=prefetch_first_ts,
+        ledger_env, case_id="demo", tool="get_userassist",
+        first_event_ts=userassist_first_ts,
     )
 
     result = evaluate_claim(
         case_id="demo",
-        hypothesis="C:\\Temp\\malware.exe executed — Amcache+Prefetch corroboration with forged Prefetch timestamp",
+        hypothesis="C:\\Temp\\malware.exe executed — Sysmon+UserAssist corroboration with forged UserAssist timestamp",
         audit_ids=[aid1, aid2],
     )
 
     assert result.tier == FindingConfidence.DRAFT, (
         f"Expected DRAFT (timestomp demotion), got {result.tier}. "
-        f"Amcache ts={amcache_first_ts}, Prefetch ts={prefetch_first_ts}"
+        f"Sysmon ts={sysmon_first_ts}, UserAssist ts={userassist_first_ts}"
     )
     assert result.demoted_for_temporal is True
+
+
+# ─── T-17: AC-3 regression — AppCompat excluded from temporal coherence ───────
+
+
+def test_appcompat_excluded_staging_gap_does_not_demote(
+    ledger_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-17 (P0): AppCompat + one exec-time family at t, t+3600 → no demotion.
+
+    AppCompat (ShimCache/Amcache) records NTFS $STANDARD_INFORMATION
+    last-modified time — a file-metadata timestamp unrelated to execution.
+    A 3600 s spread between AppCompat staging time and Sysmon execution time
+    is normal staged-malware behaviour, not a timestomp signal.
+    """
+    monkeypatch.delenv("SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS", raising=False)
+    base = 1700000000.0
+    aid1 = _write_ledger_entry(
+        ledger_env, case_id="c1", tool="get_shimcache",
+        first_event_ts=_iso(base),  # staging time (weeks before execution)
+    )
+    aid2 = _write_ledger_entry(
+        ledger_env, case_id="c1", tool="get_sysmon_4688",
+        first_event_ts=_iso(base + 3600.0),  # execution time
+    )
+
+    result = evaluate_claim(
+        case_id="c1",
+        hypothesis="binary staged then executed",
+        audit_ids=[aid1, aid2],
+    )
+
+    # AppCompat is excluded → only 1 execution-time family → insufficient_data
+    # → no temporal demotion, tier stays at CORROBORATED (2 distinct families).
+    assert result.tier == FindingConfidence.CORROBORATED
+    assert result.demoted_for_temporal is False
+
+
+# ─── T-18: AC-1 regression — real-corpus staging scenario reaches FINAL ───────
+
+
+def test_staging_scenario_three_exec_families_reaches_final(
+    ledger_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-18 (P0): AppCompat (old) + BAM + Sysmon + UserAssist (all recent) → FINAL.
+
+    Mirrors the real-corpus case: ShimCache records binary staging weeks
+    before execution; three execution-time families agree within the window.
+    """
+    monkeypatch.delenv("SANCTUM_TEMPORAL_COUPLING_WINDOW_SECONDS", raising=False)
+    staging = 1690000000.0  # ~3 weeks before execution
+    execution = 1700000000.0
+
+    aid_shim = _write_ledger_entry(
+        ledger_env, case_id="c1", tool="get_shimcache",
+        first_event_ts=_iso(staging),
+    )
+    aid_bam = _write_ledger_entry(
+        ledger_env, case_id="c1", tool="get_bam",
+        first_event_ts=_iso(execution),
+    )
+    aid_sys = _write_ledger_entry(
+        ledger_env, case_id="c1", tool="get_sysmon_4688",
+        first_event_ts=_iso(execution + 1.0),
+    )
+    aid_ua = _write_ledger_entry(
+        ledger_env, case_id="c1", tool="get_userassist",
+        first_event_ts=_iso(execution + 2.0),
+    )
+
+    result = evaluate_claim(
+        case_id="c1",
+        hypothesis="binary staged then executed on target host",
+        audit_ids=[aid_shim, aid_bam, aid_sys, aid_ua],
+    )
+
+    # AppCompat excluded → 3 exec-time families (BAM, Sysmon, UserAssist) within 2s
+    # → coherent → 4 distinct families total → FINAL, no temporal demotion.
+    assert result.tier == FindingConfidence.FINAL
+    assert result.demoted_for_temporal is False

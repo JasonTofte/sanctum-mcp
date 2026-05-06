@@ -44,6 +44,21 @@ ALL_FAMILIES: Final = frozenset(
     }
 )
 
+# Families whose first_event_ts records *execution time* (kernel or user-space
+# process-create / GUI-launch timestamp).  AppCompat is excluded because
+# ShimCache and Amcache record the binary's NTFS $STANDARD_INFORMATION
+# last-modified time — a file-metadata timestamp that is unrelated to when
+# the binary ran and is typically weeks or years older than execution events.
+# Only these four families participate in the temporal-coupling demoter.
+EXECUTION_TIME_FAMILIES: Final = frozenset(
+    {
+        FAMILY_EXPLORER_NTUSER,
+        FAMILY_BACKGROUND_SERVICE,
+        FAMILY_KERNEL_ETW,
+        FAMILY_SYSMAIN,
+    }
+)
+
 
 # Tool name → family. Tools whose role is *querying* but not contributing
 # evidence (e.g., ``claim_finding`` itself) are intentionally absent and
