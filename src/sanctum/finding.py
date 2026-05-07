@@ -63,7 +63,7 @@ from sanctum.audit import (
     classify_confidence,
 )
 from sanctum.deception import DeceptionSignal
-from sanctum.families import resolve_family
+from sanctum.families import EXECUTION_TIME_FAMILIES, resolve_family
 
 # Confirmation basis — *how* a finding's corroboration was achieved, surfaced
 # to callers so a downstream consumer can distinguish "the gate just barely
@@ -238,12 +238,17 @@ def evaluate_claim(
     )
 
     # Layer 3 — temporal-coupling demoter (ARCH-002: demote-only, never promote).
-    # Build family→first_event_ts from the first audit_id per family.
+    # Build family→first_event_ts from the first audit_id per family, then
+    # restrict to EXECUTION_TIME_FAMILIES.  AppCompat (ShimCache/Amcache)
+    # records NTFS $STANDARD_INFORMATION last-modified time — a file-metadata
+    # timestamp unrelated to when the binary ran — so including it produces
+    # false positives for staged malware (placed weeks before execution).
     family_ts: dict[str, str | None] = {}
     for aid in deduped_ids:
         fam = resolve_family(entries[aid]["tool"])
         if fam not in family_ts:
             family_ts[fam] = entries[aid].get("first_event_ts")
+    family_ts = {f: ts for f, ts in family_ts.items() if f in EXECUTION_TIME_FAMILIES}
 
     window = float(
         os.environ.get(

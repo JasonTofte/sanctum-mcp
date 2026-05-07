@@ -318,6 +318,29 @@ parsing (the fixture uses sidecar mode — week 3), or the
 required and ships in week 3 — see
 [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md) §"Known limitations").
 
+### Full multi-family investigation runner
+
+[`scripts/dfir_investigation.py`](scripts/dfir_investigation.py) drives all six tools
+against a real case (`real_c2agent_001`) and prints a structured summary — no LLM
+required. It demonstrates the complete confidence tier progression (DRAFT → CORROBORATED)
+and the citation-integrity gate (`ClaimFindingError` on a fabricated `audit_id`) in a
+single reproducible run:
+
+```bash
+SANCTUM_CASES_ROOT=tests/fixtures/real_corpus/cases \
+  SANCTUM_LEDGER_HMAC_KEY=<32-byte hex key> \
+  SANCTUM_LEDGER_PATH=/tmp/sanctum_ledger/ledger.jsonl \
+  SANCTUM_SKIP_MOUNT_CHECK=1 \
+  SANCTUM_OUTPUT_ROOT=/tmp/sanctum_out \
+  python3 scripts/dfir_investigation.py
+```
+
+Five-family artifact traversal completes in ~8 seconds. Manual equivalent (Registry
+Explorer + EvtxECmd + PECmd tool-switching) takes a skilled analyst 30–90 minutes. The
+gate also replaces a manual peer-review step — DRAFT → CORROBORATED is deterministic,
+not judgment-dependent. See [`docs/DEMO.md`](docs/DEMO.md) §"Scripted investigation
+runner" for full output and mapping to judging criteria.
+
 ## Local development
 
 ```bash
