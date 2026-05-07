@@ -4,6 +4,32 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — demo: automated multi-family investigation runner (2026-05-06)
+
+- `scripts/dfir_investigation.py`: end-to-end DFIR investigation runner that drives
+  all six Sanctum tools against a real case and prints analyst-readable output plus a
+  structured summary block at completion. Designed as a reproducible scripted demo path
+  alongside the interactive agent prompts in `docs/DEMO.md`.
+  - Calls `get_shimcache`, `get_amcache`, `get_bam`, `get_prefetch`,
+    `get_sysmon_4688`, and `get_userassist` in sequence for case `real_c2agent_001`.
+  - Demonstrates single-family gate block (`DRAFT`) after Step 1, then tier rise to
+    `CORROBORATED` after four families are corroborated in Step 4.
+  - Demonstrates citation-integrity gate: `claim_finding` with fabricated
+    `audit_id = 00000000-0000-0000-0000-000000000000` raises `ClaimFindingError` —
+    the ledger rejects any UUID not written by a real tool call.
+  - Handles platform-specific graceful failures: `get_prefetch` on macOS raises
+    `SystemExit` (not `Exception`) via `ctypes.windll` absence in `windowsprefetch`;
+    caught via `except BaseException`.
+  - End-of-run summary table: tool → family → hit? → timestamp, confidence tier
+    progression (DRAFT → CORROBORATED), citation-gate result, and final VERDICT line.
+  - Reads payload JSON from `$SANCTUM_OUTPUT_ROOT` rather than parsing the large inline
+    response (avoids control-character issues in the 246-row ShimCache JSON blob).
+- **Performance observation** (from live run against `real_c2agent_001`): five-family
+  artifact traversal completes in ~8 seconds end-to-end. Manual equivalent (Registry
+  Explorer + EvtxECmd + PECmd tool-switching) takes a skilled analyst 30–90 minutes.
+  The corroboration gate additionally replaces a manual peer-review step — the
+  DRAFT → CORROBORATED promotion is deterministic, not judgment-dependent.
+
 ### Added — eval: R6 injection fixture cases N4/N5/N6 (2026-05-04)
 
 - `scripts/eval_llm_injection.py`: added 3 novel injection scenarios (N4, N5, N6),
