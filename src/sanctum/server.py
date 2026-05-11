@@ -377,16 +377,6 @@ async def _emit_offloaded_response(
     if summary_extra:
         summary.update(summary_extra)
 
-    # Include sanitized evidence rows inline so the LLM can reason about
-    # what was found.  ``claim_finding``'s payload has no ``rows`` key so
-    # this branch is skipped there (AC-13 is unaffected).  The outer
-    # ``sanitize(summary_raw)`` call below strips injection patterns from
-    # the row values before they reach the LLM, and ``wrap_evidence``
-    # labels the whole block as untrusted data.
-    rows = full_payload.get("rows")
-    if rows is not None:
-        summary["rows"] = rows
-
     summary_raw = json.dumps(summary, ensure_ascii=False, sort_keys=False)
     return wrap_evidence(sanitize(summary_raw).payload)
 
