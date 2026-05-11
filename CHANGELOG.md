@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — AC-8 inline-summary byte cap regression (2026-05-11)
+
+- `server._emit_offloaded_response`: removed 9-line `rows`-inline block that was
+  introduced in PR #75. The block violated the payload-offload invariant: with 200
+  events the inline summary ballooned to 65 KB (vs. the < 1024 B AC-8 cap), flooding
+  the LLM context window. Rows are available via `payload_ref` — the entire point of
+  the offload pattern.
+  Restores `test_get_amcache_summary_response_under_1024_bytes` (was 65,616 B, now
+  passes at < 1024 B).
+
 ### Added — demo: automated multi-family investigation runner (2026-05-06)
 
 - `scripts/dfir_investigation.py`: end-to-end DFIR investigation runner that drives
