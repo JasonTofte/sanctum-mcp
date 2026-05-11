@@ -114,16 +114,10 @@ hackathon submission.
 OPUS_4_7_PRICING: dict[str, float] = {
     "input": 5.00,  # USD per million input tokens
     "cache_write": 6.25,  # USD per million tokens written to cache
-    "cache_read": 0.30,  # USD per million tokens read from cache
+    "cache_read": 0.50,  # USD per million tokens read from cache (10% of $5 input)
     "output": 25.00,  # USD per million output tokens
 }
-"""AC-6 — Opus 4.7 pricing.
-
-UNVERIFIED_CLAIM: cache multipliers track Opus 4 ratios at the $5/MTok
-input base. Verify against the Anthropic prompt-caching docs at
-``docs.claude.com/en/docs/build-with-claude/prompt-caching`` before
-publishing the Numbers table in ``docs/ACCURACY.md``.
-"""
+"""AC-6 — Opus 4.7 pricing verified 2026-05-01 against platform.claude.com/docs/en/about-claude/pricing."""
 
 
 # --- Stable schema dataclasses (AC-4) -----------------------------------
@@ -235,6 +229,7 @@ class EvalReport:
     aggregates: Mapping[str, ArmAggregate]  # key = arm name; frozen post-init
     partial: bool = False
     halt_reason: str | None = None
+    dep_versions: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         # `frozen=True` only blocks rebinding `self.aggregates`; the underlying
