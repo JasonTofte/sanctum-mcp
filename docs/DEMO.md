@@ -25,7 +25,7 @@ The demo shows this live, with a real Claude agent hitting a real gate it cannot
 ## Setup (before each demo run)
 
 ```bash
-cd /Users/jasontofte/hackathons/find-evil
+cd /path/to/sanctum-mcp   # your local clone of the repo
 
 # Reset ledger and output between takes
 bash scripts/demo_reset.sh
