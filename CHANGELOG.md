@@ -4,6 +4,12 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — docs/ARCHITECTURE.md (2026-06-14)
+
+- New architecture doc: the trust-boundary flow (tool call and finding), the module map,
+  the three `claim_finding` gate layers, and a per-layer threat model. Linked from the
+  README so the front door stays short while depth is one click away.
+
 ### Changed — judge-facing docs rewritten for clarity (2026-06-14)
 
 - `README.md` and `docs/DEMO.md` rewritten in plain language (~grade-12 reading level),
