@@ -90,6 +90,8 @@ The reference client is Claude Code with Opus 4.7, but the guarantees are enforc
 
 Memory-based tools (process lists, network connections, code-injection markers) are planned for v2. They have no evidence family yet, so they cannot feed the gate.
 
+For the trust-boundary flow, the module map, the three gate layers, and the threat model per layer, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## How it meets the judging criteria
 
 | Criterion | How Sanctum answers it |
