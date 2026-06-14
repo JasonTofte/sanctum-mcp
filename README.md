@@ -1,296 +1,119 @@
-# Sanctum — An architecturally-hardened DFIR MCP server
+# Sanctum — a hardened forensics server for AI agents
 
-> **Benchmark (DFIR-Metric subset, N=43 questions × 3 runs, claude-opus-4-7):**
-> C1-serial **99.2%** \[95.7%, 99.9%\] · C2-parallel **100.0%** \[97.1%, 100.0%\] · Bare LLM **16.3%** \[10.9%, 23.6%\] · **+82.9 pp gap** (Wilson 95% CIs)
-> precision@CORROBORATED **97.2%** (C1) / **100.0%** (C2) · false confidence rate **2.8%** (C1) / **0.0%** (C2)
-> Full results: [`docs/ACCURACY.md`](docs/ACCURACY.md)
+> **Results (DFIR-Metric subset, 43 questions × 3 runs, Claude Opus 4.7):**
+> Sanctum **99.2%** [95.7, 99.9] vs. a bare model **16.3%** [10.9, 23.6] — an **82.9-point gap** (Wilson 95% CIs). Precision on CORROBORATED findings **97.2%**; false-confidence rate **2.8%**. Method: [`docs/ACCURACY.md`](docs/ACCURACY.md).
+>
+> **Independent check — NIST CFReDS Data Leakage (Windows 7, NIST-authored answer key):** all 8 applications the answer key lists were found. The three case-defining tools (Eraser, CCleaner, Google Drive) were each confirmed across three separate evidence families. [`docs/DATASET_NIST_DATALEAKAGE.md`](docs/DATASET_NIST_DATALEAKAGE.md).
 
-**Status**: 0.3.0 — quickstart runs end-to-end against a synthetic fixture ([`scripts/quickstart.py`](scripts/quickstart.py)); six real-mode parsers shipped (Amcache, ShimCache, BAM, UserAssist, Prefetch, Sysmon-EVTX); two-layer [`claim_finding`](src/sanctum/finding.py) gate live.
-**Target**: SANS `FIND EVIL!` Hackathon, submission deadline 2026-06-15.
-**Scope**: **Windows host-based execution-evidence forensics**, not general DFIR. Network artifacts, browser history, cloud logs, email, and cross-platform forensics are **explicit non-goals**. **Memory-resident artifacts** (live process listings, network connections, code injection markers — `get_pslist`, `get_netscan`, `get_malfind`, `get_cmdline`, `get_dlls`, `get_handles`) are **deferred to v2**: they have no defined family in the current five-family triangulation scheme and would require a separate threat model before they could safely contribute to `claim_finding` corroboration counts. Depth over breadth per the hackathon brief.
+**Status:** 0.4.1. The quickstart runs end to end. Six parsers ship in real mode (Amcache, ShimCache, BAM, UserAssist, Prefetch, Sysmon). The `claim_finding` gate is live.
+**Built for:** the SANS `FIND EVIL!` hackathon (deadline 2026-06-15).
+**Scope:** Windows execution evidence only — proving *what programs ran*. Network, browser, cloud, email, and memory artifacts are out of scope by design. Depth on one job beats shallow coverage of many.
 
 ---
 
-## What this is
+## What it is
 
-A purpose-built **Model Context Protocol (MCP) server** that exposes a narrow, typed set of **Windows host-based execution-evidence** forensic tools to an agentic LLM — with architectural guarantees against the two most dangerous failure modes of autonomous AI-assisted incident response:
+Sanctum lets an AI agent search a Windows machine for signs of an intruder. It stops the agent from being tricked by the evidence or from damaging it. Sanctum is a Model Context Protocol (MCP) server: it hands the agent a small, fixed set of forensic tools and nothing else.
 
-1. **Confident-wrong findings under attacker-influenced evidence.** Forensic evidence is attacker-authored — malware strings, log entries, filenames, and registry values can contain text crafted to hijack an LLM that reads them. Sygnia demonstrated in August 2025 that a PowerShell script block can make an LLM-MDR summarizer report a Mimikatz credential dump as *"Scheduled WMI maintenance task."* Sanctum quarantines all tool output inside an `<evidence-untrusted>` delimiter, strips known injection patterns before the LLM sees the bytes, and routes findings through a typed `claim_finding(hypothesis, audit_ids[])` function that refuses provenance-broken claims at the input boundary and grades single-family claims as `DRAFT` (or `DRAFT_TAMPER_SUSPECTED` when a deception heuristic also fires on the same single-family claim) rather than `CORROBORATED` or `FINAL`. *This is the IR-accuracy primitive: at machine speed, a confident wrong answer is worse than an honest abstention.*
+AI agents fail this job two ways. Sanctum blocks both.
 
-2. **Evidence loss / anti-forensic destruction.** The server physically cannot execute destructive commands because the destructive tool surface is not exposed. There is no `execute_shell` tool. Evidence is mounted read-only at the OS level; every tool invocation's input and output is hash-anchored and written to an append-only audit ledger — so a jailbroken agent cannot corrupt the evidence it is meant to investigate.
+**1. They state false findings with confidence.** The evidence is written by the attacker. Malware names, log lines, and registry values can hide text that hijacks an AI reading them. In August 2025, Sygnia showed an attacker could make an AI report a Mimikatz credential theft as a *"scheduled maintenance task."* Sanctum wraps every tool result as untrusted, strips known injection text first, and routes findings through one typed function, `claim_finding`. That function refuses claims it cannot trace to real evidence, and it labels a single-source finding as a draft, not a confirmed result. At machine speed, a confident wrong answer is worse than an honest "not yet proven."
 
-## Why this shape
+**2. They destroy the evidence.** Sanctum cannot run a destructive command, because no such tool exists in it. There is no shell. Evidence is mounted read-only at the operating-system level. Every tool call is hashed and written to an append-only log. A hijacked agent still cannot alter the case it is meant to investigate.
 
-GTG-1002 ([Anthropic, Nov 2025](https://www.anthropic.com/news/disrupting-AI-espionage)) documented attackers defeating prompt-based guardrails via role-play jailbreak at 80–90% autonomy. The hackathon's `Constraint Implementation` judging criterion asks directly: *"Are guardrails architectural or prompt-based?"* A guardrail expressed as a system-prompt instruction fails whenever a jailbreak frames injected text as authoritative. A guardrail expressed as *the typed function doesn't exist* doesn't.
+## Why this is built in, not prompted
 
-## The senior-analyst gate
+In November 2025, Anthropic reported attackers defeating prompt-based safety rules through role-play jailbreaks, at up to 90% automation ([GTG-1002](https://www.anthropic.com/news/disrupting-AI-espionage)). The hackathon asks the right question: *are the guardrails built into the system, or just written in the prompt?*
 
-Findings cannot be reported from a single artifact source. A "program X was executed" claim requires **at least two distinct artifact families**. The five families and their members:
+A rule written in a prompt fails the moment a jailbreak tells the model to ignore it. A rule enforced by *a function that does not exist* cannot be talked around. Sanctum's guarantees live in the server, not the prompt.
 
-| Family              | Members                 | Trust root                                |
-|---------------------|-------------------------|-------------------------------------------|
-| **AppCompat**       | ShimCache, Amcache      | Application Experience Service / CSRSS    |
-| **Explorer / NTUSER** | UserAssist            | `explorer.exe` + per-user NTUSER.dat      |
-| **Background service** | BAM                  | `bam.sys` kernel driver + SYSTEM registry |
-| **Kernel ETW**      | Sysmon / EventID 4688   | Windows Event Log + `sysmon.exe`          |
-| **SysMain**         | Prefetch                | `SysMain` service + `C:\Windows\Prefetch\` |
+## How the gate works
 
-Why families rather than individual artifacts: ShimCache and Amcache are both written by the AppCompat subsystem, so `BaseFlushAppcompatCache` (one syscall) or `AntiForensic.NET` (one tool) defeats them together. An internal architecture audit flagged this coupling — two audit_ids pointing into the **same** family count as one source for the gate. A `{ShimCache, Amcache}` pair is a single-family finding, not a corroborated one.
+A finding needs more than one source. To claim "program X ran," the agent must cite **at least two independent evidence families**. Windows records program execution in five places, each owned by a different part of the system:
 
-The five families listed are produced by **distinct trust roots**, so tampering with one leaves fingerprints in the others. Encoding this triangulation as a typed function — [`claim_finding(hypothesis, audit_ids[])`](src/sanctum/finding.py) — forces the agent to behave like a senior analyst: **single-family input is a hypothesis; multi-family input is evidence**.
+| Family | Where it lives | Owner |
+|---|---|---|
+| AppCompat | ShimCache, Amcache | Application Experience service |
+| Explorer | UserAssist | `explorer.exe` + user registry |
+| Background service | BAM | `bam.sys` driver |
+| Kernel ETW | Sysmon / Event 4688 | Event Log + Sysmon |
+| SysMain | Prefetch | SysMain service |
 
-**Known limit — BAM ↔ AppCompat shared SYSTEM hive.** BAM (`SYSTEM\CurrentControlSet\Services\bam\...`) and AppCompat (`SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache`) both reside in the SYSTEM registry hive, so a single raw hive replacement can desynchronize both families simultaneously. They remain distinct families because they have separate *writers* (`bam.sys` vs. the Application Experience Service), but a `{BAM, AppCompat}` two-family finding should be noted as weakly corroborated in an IR report when no third corroborator is available. The ≥2-families = CORROBORATED rule is unchanged; this is a documented caveat, not a gate change. See [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md) §"Family coupling: shared-hive risk (BAM ↔ AppCompat)".
+Because each family is written by a different part of Windows, faking one leaves the others intact. Tampering shows up as disagreement. `claim_finding` counts the distinct families behind a claim and grades it:
 
-The function operates as a **two-layer gate**:
+- **DRAFT** — one family. A hypothesis, not yet evidence.
+- **CORROBORATED** — two or more families agree.
+- **FINAL** — three or more families agree.
+- **DRAFT_TAMPER_SUSPECTED** — anti-forensic traces are present, so the gate refuses to sound confident no matter how many families agree.
 
-- **Layer 1 — provenance-integrity refusal.** `claim_finding` raises `ClaimFindingError` when inputs cannot be validated as ledger-grounded: empty `audit_ids[]`, audit_ids whose ledger entries are missing, unknown tool names. These are *refused*, not graded — the call returns no `Finding` at all. Layer 1 is the "refuses" surface in the opener above: provenance-broken claims do not reach the grading layer.
-- **Layer 2 — confidence grading.** When inputs are provenance-clean, Layer 2 emits a four-tier verdict: `DRAFT_TAMPER_SUSPECTED < DRAFT < CORROBORATED < FINAL`. Single-family inputs return `DRAFT`. ≥2 distinct families return `CORROBORATED`. ≥3 distinct families return `FINAL`. A deception-signal hit on otherwise-clean inputs demotes the verdict to `DRAFT_TAMPER_SUSPECTED` regardless of family count — the gate fails-safe by *graduation*, not suppression. `DRAFT_TAMPER_SUSPECTED` is Sanctum's architectural answer to LLM hallucination-on-tampered-evidence: when anti-forensic traces are present (MITRE ATT&CK T1562.x class), the gate refuses to emit a confident verdict even if the agent's narrative sounds confident. Promotion from `DRAFT` to `CORROBORATED` is a **new ledger entry**, not a mutation of the prior one (see [`docs/THREAT_MODEL_LEDGER.md`](docs/THREAT_MODEL_LEDGER.md)).
-- **Layer 3 — temporal-coupling demoter (ARCH-002, demote-only).** MITRE ATT&CK T1070.006 (Timestomp) lets an attacker forge one family's evidence timestamps to make two independent-looking families *appear* to agree on execution time — clearing Layer 2's family-count gate without running the binary at the claimed time. The temporal demoter catches this: when the `first_event_ts` values across contributing families span more than a configurable window (default ±5 s), the tier is demoted one step (`FINAL → CORROBORATED`, `CORROBORATED → DRAFT`) and `demoted_for_temporal=True` is recorded in the ledger. The demoter is strictly monotone-decreasing (no confidence can be gained by manipulating timestamps) — enforced by `_TEMPORAL_DEMOTION`'s closed dict and the T-7 AST absence test at every merge. See [`docs/ADR_TEMPORAL_DEMOTER.md`](docs/ADR_TEMPORAL_DEMOTER.md) and [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md) §"Layer 3".
+Two families that share a registry hive (BAM and AppCompat) are flagged as weaker. A timestamp-forgery check can lower a tier if the families disagree on *when* the program ran. The math and threat model are in [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md).
 
-This is the **external-signal self-correction primitive** in the sense of Kamoi *et al.* (TACL 2024, [arXiv:2406.01297](https://arxiv.org/abs/2406.01297)): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection (the lineage Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows degrades reasoning on average).
-
-Quantitative justification for the `≥2` threshold — and the stratified
-`CORROBORATED | FINAL` case — lives in
-[`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md).
-The related strip-then-truncate correctness proof for
-`sanctum.sanitize` lives in
-[`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md).
-Every numeric claim in both docs is regression-tested by
-[`scripts/validate_threat_model_math.py`](scripts/validate_threat_model_math.py).
+The gate is a plain function at the server boundary ([`src/sanctum/finding.py`](src/sanctum/finding.py)). It runs the same way no matter what the model believes or is told to conclude. No prompt can switch it off.
 
 ## Architecture
 
-The diagram below shows Claude Code + Opus 4.7 as the reference MCP client
-(per the hackathon brief), but Sanctum's architectural invariants are
-enforced server-side and hold for **any** compliant stdio MCP client —
-Cline, Claude Desktop, Continue, or the OpenAI MCP shim. See
-[`docs/LLM_AGNOSTIC.md`](docs/LLM_AGNOSTIC.md) for the contract and
-[`scripts/smoke_test_mcp_stdio.sh`](scripts/smoke_test_mcp_stdio.sh) for the
-protocol-compatibility smoke test.
+The reference client is Claude Code with Opus 4.7, but the guarantees are enforced in the server and hold for any standard MCP client (Cline, Claude Desktop, the OpenAI MCP shim). See [`docs/LLM_AGNOSTIC.md`](docs/LLM_AGNOSTIC.md).
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│ Claude Code (Opus 4.7)                                         │
-│   ├── Project .claude/settings.json                            │
-│   │     ├── permissions.deny: Edit|Write on /cases, /evidence  │
-│   │     ├── permissions.allow: NAMED Bash commands only        │
-│   │     │                       (no wildcard)                  │
-│   │     └── PreToolUse hook: case-data-guard.sh                │
-│   └── MCP client ─── stdio transport ─── ▼                     │
-└────────────────────────────────────────────────────────────────┘
-                                           │
-                         ┌─────────────────▼──────────────────┐
-                         │ sanctum-mcp (this repo)            │
-                         │                                    │
-                         │  Typed tools only. No shell        │
-                         │  passthrough. All output sanitised │
-                         │  and wrapped in <evidence-untrusted>│
-                         │                                    │
-                         │  Windows execution-evidence set    │
-                         │  (six real-mode parsers shipped):  │
-                         │    • get_amcache                   │
-                         │    • get_prefetch                  │
-                         │    • get_shimcache                 │
-                         │    • get_userassist                │
-                         │    • get_bam                       │
-                         │    • get_sysmon_4688               │
-                         │    • get_mft_timeline              │
-                         │    • get_usnjrnl                   │
-                         │                                    │
-                         │  Memory set (v2 — out of scope     │
-                         │  for v1; no family defined yet):   │
-                         │    • get_pslist        (deferred)  │
-                         │    • get_netscan       (deferred)  │
-                         │    • get_malfind       (deferred)  │
-                         │    • get_cmdline       (deferred)  │
-                         │    • get_dlls          (deferred)  │
-                         │    • get_handles       (deferred)  │
-                         │                                    │
-                         │  Finding gates:                    │
-                         │    • claim_finding(hypothesis,     │
-                         │                    audit_ids[])    │
-                         │      — requires ≥2 independent     │
-                         │        artifact sources            │
-                         │                                    │
-                         │  Audit ledger:                     │
-                         │    • append-only JSONL             │
-                         │    • HMAC-SHA-256 chain            │
-                         │      (key externalised via env)    │
-                         │    • RFC 3161 TSA witness (opt-in) │
-                         │      via sanctum.notary            │
-                         │    • every tool call → audit_id    │
-                         │    • every finding → audit_ids[]   │
-                         └────────────────────────────────────┘
-                                           │
-                         ┌─────────────────▼──────────────────┐
-                         │ SIFT Workstation (Ubuntu 22.04)    │
-                         │   ~241 DFIR tools, read-only mount │
-                         │   of /cases/<case_id>/evidence.raw │
-                         └────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ AI agent (reference client: Claude Code)      │
+│   reaches Sanctum over MCP stdio. No shell.    │
+└───────────────────────┬───────────────────────┘
+                        ▼
+┌──────────────────────────────────────────────┐
+│ sanctum-mcp (this repo)                       │
+│                                               │
+│  Typed tools only. No shell passthrough.      │
+│  Every result is stripped of injection text   │
+│  and wrapped as <evidence-untrusted>.         │
+│                                               │
+│  Execution-evidence tools (6, real mode):     │
+│    get_amcache     get_userassist             │
+│    get_shimcache   get_bam                     │
+│    get_prefetch    get_sysmon_4688            │
+│                                               │
+│  Finding gate:                                │
+│    claim_finding(hypothesis, audit_ids[])     │
+│    needs >= 2 independent families            │
+│                                               │
+│  Audit log:                                   │
+│    append-only JSONL, HMAC-SHA-256 chained    │
+│    every tool call -> audit_id                 │
+│    optional RFC 3161 timestamp                 │
+└───────────────────────┬───────────────────────┘
+                        ▼
+┌──────────────────────────────────────────────┐
+│ Evidence, mounted read-only                   │
+│   /cases/<id>/evidence  (OS-level ro)          │
+└──────────────────────────────────────────────┘
 ```
 
-> **The gate's correctness is a typed-function property and is independent of agent cognition.** The family-corroboration check in `claim_finding()` runs at the MCP server boundary regardless of what the LLM believes, infers, or is prompted to conclude. No prompt instruction, jailbreak, or role-play framing can override a typed-function absence.
+Memory-based tools (process lists, network connections, code-injection markers) are planned for v2. They have no evidence family yet, so they cannot feed the gate.
 
-## Scoring model alignment
+## How it meets the judging criteria
 
-| Rubric axis | How Sanctum scores |
+| Criterion | How Sanctum answers it |
 |---|---|
-| Autonomous Execution Quality *(co-equal 1/6 weight; first tiebreaker; Stage 1 gating)* | `claim_finding(hypothesis, audit_ids[])` is an **external-signal self-correction primitive** in the sense of Kamoi (TACL 2024): the agent's claim is checked against an *independent* signal — the artifact-family coupling derived from distinct OS trust roots — not against the agent's own introspection. A single-family claim returns DRAFT, forcing the agent to gather a second-family corroborator before promoting to CORROBORATED. This is the form of self-correction Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows empirically helps; intrinsic "reflect on mistakes" loops are not used because Huang shows they degrade reasoning on average. |
-| IR Accuracy | Measured against DFIR-Metric (Cherif et al., [arXiv:2505.19973](https://arxiv.org/abs/2505.19973), May 2025 — the closest published DFIR-LLM benchmark), whose best reported score is GPT-4.1 at 38.52% TUS@4 on Module III (disk/memory forensic tasks). **Sanctum 99.2% \[95.7%, 99.9%\] vs bare-LLM 16.3% \[10.9%, 23.6%\], 82.9 pp non-overlapping gap** (N=43 questions, N_runs=3, Wilson 95% CIs; precision@CORROBORATED 97.2%, false confidence rate 2.8%). Regression table in [`docs/ACCURACY.md`](docs/ACCURACY.md). |
-| Breadth & Depth | Complete Windows execution-evidence triangulation set across five artifact families (AppCompat, Explorer/NTUSER, Background-service, Kernel-ETW, SysMain); depth over breadth per brief. Memory-resident artifacts are explicit v2 scope — see [Scope](#) above and [Status / roadmap](#status--roadmap) below. |
-| Constraint Implementation | **Architectural** at the server (typed-tool boundary, hash-anchored I/O, no shell passthrough); client-side hooks are defense-in-depth, not the real guarantee — see [§Limits of structural defenses](#limits-of-structural-defenses). Sanitization residuals (curated-allowlist limits, novel-vector exposure) named explicitly in [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md). Bypass test suite in [`tests/test_bypass.py`](tests/test_bypass.py) enumerates documented attack classes (see [Bypass coverage](#bypass-coverage) below) |
-| Audit Trail Quality | Every finding cites `audit_ids[]`; `claim_finding` refuses calls whose audit_ids don't resolve to ledger entries — eliminating LLM-fabricated-citation as a route to a CORROBORATED verdict. The HMAC chain ensures an attacker with ledger write access cannot retroactively insert a fake entry to satisfy the gate. |
-| Usability / Documentation | Pinned SIFT commit SHA; Docker reproduction path; single-command install |
+| **Constraint Implementation** | Built into the server: no shell tool exists, evidence is read-only, all input and output is hashed and logged. Prompt hooks are extra, not the guarantee. Bypass tests: [`tests/test_bypass.py`](tests/test_bypass.py). |
+| **IR Accuracy** | 99.2% vs. 16.3% for a bare model on the same questions ([`docs/ACCURACY.md`](docs/ACCURACY.md)), plus the independent NIST check above. Findings are graded; single-source claims stay DRAFT. |
+| **Audit Trail** | Every finding cites `audit_ids` that must resolve to real log entries. The HMAC chain stops anyone editing the log after the fact. |
+| **Autonomous Execution** | The gate is the agent's outside check. A one-source claim returns DRAFT, which pushes the agent to find a second family before confirming. |
+| **Breadth & Depth** | All five Windows execution-evidence families, in depth. Memory artifacts are v2. |
+| **Usability & Docs** | One-command quickstart, pinned dependencies, Docker path. |
 
-## Bypass coverage
+## What it can't do
 
-The FIND EVIL! Constraint Implementation rubric asks *"were guardrails tested
-for bypass?"* — the table below answers directly. Each row maps a failure-mode
-class from [`docs/FAILURE_MODES.md`](docs/FAILURE_MODES.md) (or a documented
-gap class `G*`) to the specific test in [`tests/test_bypass.py`](tests/test_bypass.py)
-that exercises it.
+These are the v1 limits, stated plainly so judges and operators can judge fit.
 
-| Attack class | Failure mode | Test |
-|---|---|---|
-| `Bash(*)` wildcard in allowlist auto-accepts every bash command; PreToolUse `ask`/`deny` is silently ignored for auto-accepted tools (cc #41151, #31523) | State 1 — silent corruption | Enforced by project `.claude/settings.local.json` design (no wildcard). Lint-level concern; not a code-path test. |
-| MCP tool-call bypasses PreToolUse hook (cc #33106) | State 2 — fail-open relative to hooks | `test_state2_no_write_exec_verb_exposed` — server cannot expose a destructive verb; hooks become irrelevant. |
-| Evidence-driven prompt injection (Sygnia 2025-08; GTG-1002 role-play) | State 3 — silent corruption | `test_state3_*` — 5 tests: classic, Sygnia RED TEAM, bidi/zero-width, system override, role-play. |
-| Case-path traversal via `case_id` | State 4 — fail-closed | `test_state4_*` — 3 tests: `..`, absolute, nonexistent. |
-| Audit ledger tampered post-hoc | State 5 — fail-closed on detection | `test_state5_audit_ledger_tamper_detected`. |
-| Demo sampling non-determinism | State 6 — scoring-axis only | Mitigated by hook-induced demo triggers; no code test. |
-| Symlink escape via `<case>/registry/Amcache.hve` → outside case dir | Gap G2 | `test_gap_symlink_inside_case_dir_refused`. |
-| Unicode / bidi / zero-width / newline / shell-metachar in `case_id` | Gap G3 | `test_gap_*_in_case_id_refused` — 5 tests. |
-| Ledger-file-missing on `verify_chain` | Gap G4 — INTENTIONAL fail-open (defense at FS layer) | `test_gap_verify_chain_missing_ledger_is_vacuous_truth` pins the design choice. |
-| Injection pattern placed across `MAX_PAYLOAD_BYTES` truncation boundary | Gap G5 | `test_gap_injection_pattern_survives_across_truncation_boundary` + `..._near_but_below_cutoff_is_stripped`. |
-| Judge-style five-vector exfiltration scenario | Integration | `test_integration_five_exfil_vectors_all_refused`. |
+- **The model can still misread correct evidence.** Sanctum controls what evidence the agent sees and how findings are cited. It does not control how the model reads a correct result. That depends on the model (Opus 4.7) and is measured separately in [`docs/ACCURACY.md`](docs/ACCURACY.md).
+- **The injection filter is a list of known patterns.** It catches the Sygnia 2025 set and common Unicode tricks. It cannot catch a pattern no one has seen. Defense in depth, not a guarantee. See [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md).
+- **The accuracy benchmark is a subset the team wrote** from DFIR-Metric. An outside question set would be stronger. The parser layer is now checked against independent NIST evidence (see Results), which closes part of this gap.
+- **Live-evidence coverage is partial.** The NIST check ran on a Windows 7 image, where only three of the five families exist (BAM and Sysmon arrived in later Windows). A full five-family run needs a modern, Sysmon-equipped host.
+- **A kernel rootkit that forges several families at once defeats the count** by design. v1 leans on the tamper-detection layer and the signed log at this tier. See [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md#scope-and-threat-model-boundary).
 
-Unit-level coverage also lives in
-[`test_server_boundaries.py`](tests/test_server_boundaries.py),
-[`test_audit.py`](tests/test_audit.py), and
-[`test_sanitize.py`](tests/test_sanitize.py). The `test_bypass.py` suite is the
-consolidated adversarial-scenario view.
+## Try it in 5 minutes
 
-The bypass suite tests **server-side stripping and rejection invariants**.
-End-to-end LLM behavioural robustness against novel injection (whether
-Opus 4.7 still misinterprets evidence after sanitization passes) is
-out of scope for v1 and tracked as a v2 followup —
-see [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md)
-§"Residual obligations" and §"Limits of structural defenses" below.
-
-## Limits of structural defenses
-
-The architectural guarantees above bound a specific class of failures.
-They do not bound everything; calling the limits out explicitly so
-judges and operators can assess applicability.
-
-- **Interpretation hallucination is not bounded.** Parsers return
-  structurally-correct evidence (`cmd.exe`, `2026-04-12T18:30:00Z`,
-  `family=AppCompat`); the LLM may still narrate that data
-  incorrectly ("`cmd.exe` is Mimikatz"). Sanctum's structural
-  boundaries constrain the extraction surface and the citation
-  surface, not the LLM's interpretation of validly extracted
-  evidence. IR-Accuracy is bounded by the underlying model
-  (Opus 4.7) and is benchmarked separately —
-  see [`docs/ACCURACY.md`](docs/ACCURACY.md) for methodology.
-
-- **Sanitization is a curated allowlist of known injection
-  patterns.** [`sanctum.sanitize.strip_known_injection_patterns()`](src/sanctum/sanitize.py)
-  covers the Sygnia 2025 catalogue, Unicode Tag block, variation
-  selectors, bidi/zero-width, and emoji-smuggling vectors
-  ([arXiv:2510.05025](https://arxiv.org/abs/2510.05025)); it cannot
-  cover patterns not yet known. Defense-in-depth, not exhaustive
-  defense — see
-  [`docs/THREAT_MODEL_SANITIZATION.md`](docs/THREAT_MODEL_SANITIZATION.md)
-  §"Residual obligations".
-
-- **Kernel-mode rootkit equivalence is out of scope for v1.** The
-  family-count gate's threat model assumes per-family compromise
-  events are independent. A rootkit able to forge multiple
-  families with one privileged operation defeats the gate by
-  construction. v1 defense at this tier shifts to the deception
-  layer (destruction signatures leave traces even when forgery
-  does not) and the HMAC-chained ledger (post-hoc tamper detection
-  across the entire tool-call sequence). See
-  [`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md#scope-and-threat-model-boundary)
-  §"Scope and threat-model boundary".
-
-- **Hooks are defense-in-depth, not the real guarantee.** The
-  PreToolUse and PostToolUse hooks in the recommended
-  `.claude/settings.json` raise the cost of bypass attempts but can
-  be disabled at the framework level (cc#33106 covers a known
-  PreToolUse-on-`mcp__*` gap). The **real** guarantee is the
-  server-side typed-tool boundary — destructive verbs are not
-  exposed as MCP tools, period. Switch the client (Cline, Claude
-  Desktop, OpenAI MCP shim) and the server-side guarantee is
-  unchanged; switch off the hook and the server-side guarantee is
-  unchanged.
-
-- **Evaluation corpus is synthetic and self-authored.** The 43-question
-  benchmark in [`tests/benchmarks/dfir_metric_subset.py`](tests/benchmarks/dfir_metric_subset.py)
-  is derived from DFIR-Metric (Cherif et al., [arXiv:2505.19973](https://arxiv.org/abs/2505.19973))
-  plus Sanctum-authored fixture cases. Questions were written by the same
-  team that built the tools; an independent holdout corpus would be a
-  stronger validity signal.
-
-- **Parallel-tool eval is complete but on a synthetic corpus.** `SANCTUM_PARALLEL_TOOLS=1`
-  (C2) scores **100.0% [97.1%, 100.0%]** (N=43×3=129, Wilson 95% CI) and
-  is 21% faster (610 vs 770 ms/MB) — strictly dominating C1-serial on both
-  axes. Both figures apply only to the synthetic fixture corpus; live-evidence
-  accuracy has not been measured.
-
-- **No live-evidence test.** All evaluation runs against synthetic
-  fixture files, not real disk images or memory captures. Parser
-  correctness on real-world artifacts (encoding edge cases, partial
-  records, anti-forensic traces) has not been measured.
-
-- **No structured-bare ablation.** The 82.9 pp accuracy gap combines the
-  contribution of the typed parsers (structured evidence) and the
-  family-corroboration gate (architectural constraint). A structured-bare
-  arm — same parsers, gate disabled — would isolate how much of the gap
-  each component explains. Planned for a future session.
-
-These limits aren't oversights; they are the v1 scope claim. v2
-followups for each are tracked in the relevant threat-model docs.
-
-## Status / roadmap
-
-- **Week 1 (P0)**: end-to-end skeleton. One typed tool (`get_amcache`), hardened `settings.json`, JSONL audit ledger, one CFReDS case loaded. Prove the architecture closes the loop.
-- **Week 2**: typed parser layer + frozen `ExecutionEvent` contract under `src/sanctum/parsers/` (Amcache, ShimCache, Prefetch, Sysmon, BAM, UserAssist) consuming `<artifact>.sanctum-fixture.json` ingestion via `SANCTUM_USE_FIXTURE_SIDECAR=1`. The discriminator map in `sanctum.families.TOOL_TO_FAMILY` is the contract this layer writes against. Sanitization layer integrated.
-- **Week 3 (parser real-mode landed)**: real parser bodies replace the `PartialImplementationError` fail-loud path — `regipy` for registry hives (Amcache, ShimCache, BAM, UserAssist), `python-evtx` for Sysmon EVTX, `windowsprefetch` for Prefetch. Fixture mode (`SANCTUM_USE_FIXTURE_SIDECAR=1`) remains as the offline-test path.
-- **Week 4 (shipped, PR #33)**: triangulation gate (`claim_finding`) — wires the `FindingConfidence` enum into a typed two-layer function; the DRAFT→CORROBORATED transition is the demo's self-correction beat. See [§The senior-analyst gate](#the-senior-analyst-gate) above for the Layer-1-refusal / Layer-2-grading split.
-- **Week 5 (shipped, PRs #54–#56)**: `sanctum.deception` reason-code layer (forensic-deception detection — see [`docs/THREAT_MODEL_DECEPTION.md`](docs/THREAT_MODEL_DECEPTION.md)). `claim_finding` two-layer gate wired. `async def` migration + `SANCTUM_PARALLEL_TOOLS` parallel dispatch gate (ARCH-001/004 — see [`docs/ADR_ASYNC_MIGRATION.md`](docs/ADR_ASYNC_MIGRATION.md)). Reflexion `<reflect>` loop **dropped** — Huang ICLR 2024 ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798)) shows intrinsic self-correction degrades reasoning; the family gate is the empirically-supported external-signal alternative. **Memory tool set deferred to v2.**
-- **Week 6 (shipped)**: wallclock per-MB measurement harness (`scripts/measure_wallclock.py`), Pareto frontier chart (`docs/figures/pareto.png`), accuracy corpus fixtures (`tests/fixtures/accuracy_corpus/`). bypass test suite [`tests/test_bypass.py`](tests/test_bypass.py) — 16 tests mapping to documented attack classes; see [Bypass coverage](#bypass-coverage) above.
-- **Week 7 (shipped, commits 9f797a4 + 805dd38)**: temporal-coupling demoter — Layer 3 of `claim_finding`, demote-only (ARCH-002), defends against T1070.006 Timestomp. See [`docs/ADR_TEMPORAL_DEMOTER.md`](docs/ADR_TEMPORAL_DEMOTER.md).
-- **Week 8**: demo recording + submission prep.
-- **Week 9**: submission (deadline 2026-06-15).
-
-## Dataset choice — license-safe only
-
-- **NIST CFReDS** (17 U.S.C. §105 — public domain domestically) — primary ground truth.
-- **DFRWS challenges** — complementary cases with published solutions.
-
-*Explicitly not used* for redistribution: M57-Patents (answers faculty-gated), Ali Hadi challenges (unclear license), CyberDefenders (ToS restrictions).
-
-## Prior art referenced
-
-- **Valhuntir** (Steve Anson / AppliedIR, MIT — ~90 tools across 11 packages with optional OpenSearch indexing as of 2026-04-25) — reference example from the hackathon brief and the closest near-neighbour project. Valhuntir's README cautions: *"If you just tell Valhuntir to 'Find Evil' it will more than likely hallucinate rather than provide meaningful results."* Sanctum's thesis is the architectural answer to that limitation: **the gate's correctness is a typed-function property and is independent of agent cognition** — the family-corroboration check runs at the MCP server boundary regardless of what the LLM believes or is prompted to conclude. Sanctum deliberately ships a narrower, deeper slice rather than mimicking Valhuntir's breadth, with three load-bearing primitives that Valhuntir's public README does not claim:
-  1. **`claim_finding(hypothesis, audit_ids[])` family-corroboration gate** as a typed function — a single-family claim returns `DRAFT`, ≥2 distinct artifact families returns `CORROBORATED` ([`docs/THREAT_MODEL_TRIANGULATION.md`](docs/THREAT_MODEL_TRIANGULATION.md)). This is the IR-accuracy primitive: at machine speed, *the gate refuses confident-wrong findings by construction*, forcing an honest abstention when one source is all the evidence supports. Valhuntir's README documents "evidence-trail-exists" provenance enforcement, but not a ≥2-independent-family count. The five-family scheme with distinct trust roots is what makes the gate resistant to single-syscall multi-artifact tampering (`BaseFlushAppcompatCache`, `AntiForensic.NET`).
-  2. **Hash-locked install path** — `pip install -r requirements.txt --require-hashes` rejects any wheel whose SHA-256 doesn't match the lockfile, defeating the compromised-mirror attack on a server that handles attacker-influenced bytes ([`docs/THREAT_MODEL_DEPENDENCIES.md`](docs/THREAT_MODEL_DEPENDENCIES.md) §"Posture ladder" rung 2).
-  3. **HMAC-chained audit ledger as audit_id forgery defense** — each row's MAC depends on the prior row's, so a post-hoc edit anywhere in history invalidates every subsequent row. The IR-accuracy purpose: the family-corroboration gate refuses `claim_finding` calls whose `audit_ids[]` don't resolve to ledger entries, so an LLM cannot fabricate a citation to satisfy the gate; the HMAC chain ensures an attacker with ledger write access cannot retroactively insert a fake entry to match a fabricated audit_id either. Valhuntir's README documents per-row independent SHA-256 hashing, which catches per-row edits but not insertion / deletion / reorder. Optional RFC 3161 TSA stamping ([`docs/THREAT_MODEL_LEDGER.md`](docs/THREAT_MODEL_LEDGER.md)) extends forgery-detection across HMAC-key compromise.
-
-  Comparison drawn from Valhuntir's public README at the as-of date above; Sanctum has not audited Valhuntir's implementation. Valhuntir's strengths — Examiner Portal browser UI, OpenSearch-backed scale, RAG knowledge corpus, OpenCTI/REMnux integrations — are out of v1 scope for Sanctum by design (see [Scope](#)).
-- **Protocol SIFT** (teamdfir) — the POC this hackathon extends. Protocol SIFT is a Claude Code configuration bundle with no MCP server; Sanctum provides the out-of-process architectural boundary Protocol SIFT lacks.
-- **Sygnia** "When Your Logs Lie to You" (Aug 2025) — the concrete evidence-driven prompt-injection PoC Sanctum's sanitization layer is designed against.
-- **Greshake et al.**, *Not what you've signed up for* (arXiv 2302.12173) — the theoretical foundation for indirect prompt injection.
-- **Reflexion** (Shinn et al., [arXiv:2303.11366](https://arxiv.org/abs/2303.11366)) and **Self-Refine** (Madaan et al., [arXiv:2303.17651](https://arxiv.org/abs/2303.17651)) — the intrinsic self-correction lineage Sanctum *deliberately does not adopt* after Huang ICLR 2024 showed these methods degrade reasoning when no external signal is present. The family-coupling gate is the external-signal alternative in Kamoi TACL 2024's taxonomy.
-- **Huang et al.**, *Large Language Models Cannot Self-Correct Reasoning Yet* ([arXiv:2310.01798](https://arxiv.org/abs/2310.01798), ICLR 2024) — the negative result that anchors Sanctum's choice of architecture-over-introspection self-correction.
-- **Kamoi et al.**, *When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs* ([arXiv:2406.01297](https://arxiv.org/abs/2406.01297), TACL 2024) — the survey that defines the intrinsic-vs-external-signal taxonomy Sanctum cites.
-- **Conlan, Baggili, Breitinger**, *Anti-Forensics: Furthering Digital Forensic Science Through a New Extended, Granular Taxonomy* (DFRWS 2016) — taxonomic foundation for the `sanctum.deception` reason codes.
-
-## Try Sanctum in 5 minutes
-
-For reviewers who want to *see* the family-corroboration gate fire
-without setting up a SIFT VM or downloading a CFReDS image:
+See the gate fire without a SIFT VM or a downloaded disk image:
 
 ```bash
 python3 -m venv .venv
@@ -299,83 +122,34 @@ pip install -e '.[dev]'
 python3 scripts/quickstart.py
 ```
 
-The quickstart drives the MCP stdio server end-to-end against a
-synthetic public-domain fixture (`tests/fixtures/case_temp_exec_001_synthetic`).
-It launches the server, performs the MCP `initialize` handshake, lists
-the advertised typed tools (verifying *no* shell-passthrough surface),
-calls `get_amcache`, and then calls `claim_finding` with that single
-`audit_id`. The expected verdict is `DRAFT` with
-`confirmation_basis = single_family` — the gate refusing to promote a
-single-family claim, which is the architectural primitive in
-[CLAUDE.md](CLAUDE.md) invariant 5. Run completes in seconds; if it
-ends in `PASS — gate fired correctly.` the install is healthy.
+The quickstart starts the MCP server, lists the typed tools (showing there is no shell tool), calls `get_amcache`, then calls `claim_finding` with that one source. The expected result is **DRAFT** — the gate refusing to confirm a single-family claim. It ends in `PASS — gate fired correctly.` if the install is healthy. No LLM needed.
 
-What the quickstart proves: the typed-function gate is deterministic
-and observable without an LLM in the loop. What it does **not** prove:
-end-to-end agent behavioural quality, real `regipy`/`python-evtx`
-parsing (the fixture uses sidecar mode — week 3), or the
-`CORROBORATED` / `FINAL` tiers (a second-family `get_*` tool body is
-required and ships in week 3 — see
-[`docs/REPRODUCTION.md`](docs/REPRODUCTION.md) §"Known limitations").
+For a full multi-family run that walks DRAFT → CORROBORATED and shows the gate rejecting a fake citation, see [`scripts/dfir_investigation.py`](scripts/dfir_investigation.py) and [`docs/DEMO.md`](docs/DEMO.md).
 
-### Full multi-family investigation runner
-
-[`scripts/dfir_investigation.py`](scripts/dfir_investigation.py) drives all six tools
-against a real case (`real_c2agent_001`) and prints a structured summary — no LLM
-required. It demonstrates the complete confidence tier progression (DRAFT → CORROBORATED)
-and the citation-integrity gate (`ClaimFindingError` on a fabricated `audit_id`) in a
-single reproducible run:
+## Install and develop
 
 ```bash
-SANCTUM_CASES_ROOT=tests/fixtures/real_corpus/cases \
-  SANCTUM_LEDGER_HMAC_KEY=<32-byte hex key> \
-  SANCTUM_LEDGER_PATH=/tmp/sanctum_ledger/ledger.jsonl \
-  SANCTUM_SKIP_MOUNT_CHECK=1 \
-  SANCTUM_OUTPUT_ROOT=/tmp/sanctum_out \
-  python3 scripts/dfir_investigation.py
-```
-
-Five-family artifact traversal completes in ~8 seconds. Manual equivalent (Registry
-Explorer + EvtxECmd + PECmd tool-switching) takes a skilled analyst 30–90 minutes. The
-gate also replaces a manual peer-review step — DRAFT → CORROBORATED is deterministic,
-not judgment-dependent. See [`docs/DEMO.md`](docs/DEMO.md) §"Scripted investigation
-runner" for full output and mapping to judging criteria.
-
-## Local development
-
-```bash
-# Requires Python 3.10+
+# Python 3.10+
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 
-# Run MCP server (stdio transport)
-python -m sanctum.server
-
-# Run test suite
-pytest
+python -m sanctum.server   # run the MCP server (stdio)
+pytest                     # run the tests
 ```
 
-Full reproduction instructions — including the SIFT VM setup — are in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
+Operators install with hash-locked wheels: `pip install -r requirements.txt --require-hashes`. Full setup, including the SIFT VM, is in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
-### Worktree-isolated Claude Code sessions
+## Datasets
 
-`scripts/claude-session.sh` spawns Claude Code inside a disposable git
-worktree so each session lives on its own branch.
+Only license-safe data is used or redistributed: **NIST CFReDS** (public domain) as primary ground truth, and **DFRWS** challenges. M57-Patents, Ali Hadi, and CyberDefenders cases are referenced but not redistributed.
 
-```bash
-# one-time: add a global shortcut
-ln -s "$PWD/scripts/claude-session.sh" ~/.local/bin/claude-sanctum
+## Prior work
 
-# from then on, from anywhere:
-claude-sanctum                    # auto-named disposable session
-claude-sanctum feat/triangulation # named, preserved on exit
-claude-sanctum --help
-```
-
-Disposable sessions (auto-named) are removed on exit. Named sessions are
-preserved so you can resume them later. Clean-room shell — no dependencies
-beyond `git`, `bash`, and the `claude` CLI.
+- **Valhuntir** (Steve Anson / AppliedIR) — the closest near-neighbour and a reference in the brief. Its README warns that telling it to "find evil" will "more than likely hallucinate." Sanctum is the architectural answer: the gate's correctness is a property of a typed function, not of the model. Sanctum ships a narrower, deeper slice with three primitives Valhuntir's README does not claim — the two-family corroboration gate, hash-locked installs, and an HMAC-chained log that catches insert, delete, and reorder.
+- **Protocol SIFT** (teamdfir) — the proof of concept this extends, with no server boundary of its own.
+- **Sygnia, "When Your Logs Lie to You"** (Aug 2025) — the injection attack Sanctum's filter is built against.
+- Research behind the design: Greshake et al. (indirect injection), Huang et al. ICLR 2024 (models cannot reliably self-correct from introspection), and Kamoi et al. TACL 2024 (the external-signal correction the gate uses instead). Full list in [`docs/ACCURACY.md`](docs/ACCURACY.md) and the threat-model docs.
 
 ## License
 

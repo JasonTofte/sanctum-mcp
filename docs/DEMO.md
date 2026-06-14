@@ -1,192 +1,140 @@
-# Sanctum — Live Demo Guide
+# Sanctum — demo guide
 
-Four moments that together prove the submission's core claims: architectural constraint
-enforcement, citation integrity, temporal coherence, and forensic certainty vocabulary.
+Five beats that prove the core claims: the guardrail is built in, not prompted; citations cannot be faked; forged timestamps get caught; and the same engine works on an outside case.
 
-The demo runs entirely on macOS against real Windows 11 ARM64 artifacts. No Windows VM
-is needed during the demo itself — the artifacts were captured from a hardened Parallels
-test VM and committed to the local evidence corpus (gitignored).
+The live demo runs on macOS against real Windows 11 artifacts captured from a hardened test VM (committed locally, gitignored). No Windows VM is needed while recording.
 
 ---
 
-## The central claim
+## The one claim to land
 
-Sanctum's family-corroboration gate is **architectural**, not cosmetic:
+The corroboration gate is built into the server. It is not a prompt the model can argue with.
 
 | Approach | How it works | How it fails |
 |---|---|---|
-| Prompt instruction | "Only report CORROBORATED if you saw two sources" | Adversarial prompt overrides the instruction |
-| **Architectural gate** | `claim_finding()` checks the HMAC-chained ledger — returns DRAFT until ≥2 distinct artifact families | No prompt to override; the gate is a typed Python function |
+| Prompt rule | "Only say CORROBORATED if you saw two sources" | A jailbreak tells the model to ignore it |
+| **Built-in gate** | `claim_finding()` checks the signed log and returns DRAFT until two families agree | Nothing to override — it is a typed function |
 
-The demo shows this live, with a real Claude agent hitting a real gate it cannot override.
+The demo shows a real Claude agent hitting a real gate it cannot talk past.
 
 ---
 
-## Setup (before each demo run)
+## Setup (before each take)
 
 ```bash
 cd /path/to/sanctum-mcp   # your local clone of the repo
-
-# Reset ledger and output between takes
-bash scripts/demo_reset.sh
-
-# Open Claude Code — Sanctum MCP server starts automatically via settings.local.json
+bash scripts/demo_reset.sh   # reset the log and output between takes
+# Open Claude Code — the Sanctum server starts from settings.local.json
 ```
 
-Real forensic artifacts live at
-`tests/fixtures/real_corpus/cases/real_c2agent_001/` —
-a Windows 11 ARM64 Parallels VM running Sysmon64a with the SwiftOnSecurity config.
-The attack scenario: `C:\Temp\c2agent.exe` (notepad.exe renamed) launched via
-PowerShell and Explorer.
+The case `real_c2agent_001` holds real artifacts from a Windows 11 VM running Sysmon. The scenario: `C:\Temp\c2agent.exe` (notepad renamed) was launched by PowerShell and by Explorer.
 
 ---
 
-## Moment A — Gate fires on single-family claim
+## Beat 1 — the gate refuses a single-source claim
 
-**Criterion 4: Constraint Implementation**
+*Criterion: Constraint Implementation*
 
-**Prompt to the agent**:
+Prompt:
 ```
-Call get_shimcache for case "real_c2agent_001", then immediately try to claim a
-finding about C2AGENT.EXE citing only that audit_id.
+Call get_shimcache for case "real_c2agent_001", then try to claim a finding
+about C2AGENT.EXE citing only that audit_id.
 ```
 
-`get_shimcache` returns 246 real ShimCache entries from the live SYSTEM hive.
-C2AGENT.EXE appears at entry 5 with a real last-modified timestamp.
-
-**Expected `claim_finding` output** (DRAFT, not CORROBORATED):
+`get_shimcache` returns 246 real entries; C2AGENT.EXE is entry 5. The claim comes back DRAFT, not confirmed:
 ```json
-{
-  "tier": "DRAFT",
-  "c_scale": "C2",
-  "n_distinct_families": 1,
-  "confirmation_basis": "single_family"
-}
+{ "tier": "DRAFT", "c_scale": "C2", "n_distinct_families": 1, "confirmation_basis": "single_family" }
 ```
 
-**Talking point**: The gate doesn't ask the LLM to reconsider — the typed function
-enforces the ≥2-family rule at the boundary. The agent cannot talk its way past it.
+Say: the gate does not ask the model to reconsider. The function enforces the two-family rule at the boundary. The agent cannot argue past it.
 
 ---
 
-## Moment B — Citation integrity: fabricated audit_id rejected
+## Beat 2 — a fake citation is rejected
 
-**Criterion 4: Constraint Implementation (anti-fabrication layer)**
+*Criterion: Constraint Implementation (anti-fabrication)*
 
-**Prompt**:
+Prompt:
 ```
 Try calling claim_finding with audit_ids=["00000000-0000-0000-0000-000000000000"].
 ```
 
-**Expected response** (`isError: true`):
+Result (`isError: true`):
 ```
 ClaimFindingError: audit_id "00000000-0000-0000-0000-000000000000" not found in ledger
 ```
 
-**Talking point**: Every real tool call writes an audit_id to the HMAC-SHA-256-chained
-ledger before returning. An LLM cannot invent a citation that satisfies the gate — the
-ledger check is a typed function, not a trust assertion.
+Say: every real tool call writes an audit_id into the HMAC-chained log before it returns. The model cannot invent a citation that satisfies the gate. The check is a function, not a matter of trust.
 
 ---
 
-## Moment C — Temporal-coupling demotion (T1070.006 defense)
+## Beat 3 — a forged timestamp gets caught
 
-**Criterion 4: Constraint Implementation + Criterion 2: T1070.006 Timestomp defense**
+*Criterion: Constraint Implementation + Timestomp (T1070.006) defense*
 
-This moment uses fixture sidecars to simulate a forged timestamp:
-
+This beat uses a fixture with a forged time: Sysmon at 10:30, UserAssist at 11:30 (a one-hour lie).
 ```bash
 export SANCTUM_USE_FIXTURE_SIDECAR=1
-# The timestomp fixture has Sysmon ts=10:30 UTC, UserAssist ts=11:30 UTC (+1h forgery)
 ```
 
-**Prompt**:
+Prompt:
 ```
 Call get_sysmon_4688 and get_userassist for case "demo", then claim a finding citing both.
 ```
 
-**Expected output**:
+Result:
 ```json
-{
-  "tier": "DRAFT",
-  "demoted_for_temporal": true,
-  "c_scale": "C2",
-  "n_distinct_families": 2
-}
+{ "tier": "DRAFT", "demoted_for_temporal": true, "c_scale": "C2", "n_distinct_families": 2 }
 ```
 
-**Talking point**: The attacker forged the UserAssist ROT-13 registry entry timestamp
-(MITRE T1070.006 Timestomp) to create a false alibi — pushing the recorded GUI-launch
-time 1 hour forward. Sanctum's temporal-coupling demoter detected the 3600 s cross-family
-spread between the kernel's Sysmon record and the tampered UserAssist entry, and demoted
-CORROBORATED → DRAFT. The LLM never saw the raw timestamps — the gate fired before
-returning to the agent.
+Say: the attacker forged the UserAssist time to build a false alibi. Two families agreed on *what* ran, so a naive count would say CORROBORATED. But they disagreed on *when* by an hour, so the gate lowered the tier. The model never saw the raw times — the gate fired first.
 
-Note: the demoter compares only **execution-time families** (Sysmon, UserAssist, BAM,
-Prefetch). AppCompat (ShimCache/Amcache) records NTFS file-metadata timestamps, not
-execution time, and is excluded — so a binary staged weeks before execution does not
-trigger a false demotion in Moment D.
-
-Unset `SANCTUM_USE_FIXTURE_SIDECAR` before Moment D.
+Unset `SANCTUM_USE_FIXTURE_SIDECAR` before the next beat.
 
 ---
 
-## Moment D — Three/four families → CORROBORATED / FINAL with real artifacts
+## Beat 4 — three families agree → FINAL
 
-**Criterion 4 + Criterion 1: Autonomous Execution Quality**
+*Criterion: Constraint Implementation + Autonomous Execution*
 
-**Prompt**:
+Prompt:
 ```
 Now call get_sysmon_4688 and get_userassist for case "real_c2agent_001".
 Claim a finding citing the ShimCache audit_id from earlier plus the new ones.
 ```
 
-`get_sysmon_4688` returns 759 real Sysmon events. C2AGENT.EXE appears in event ID 1:
-`parent=powershell.exe`, real MD5+SHA256 hashes.
-
-`get_userassist` finds C2AGENT.EXE via Explorer double-click in the NTUSER.DAT hive
-(`{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}` Count subkey, ROT-13 decoded).
-
-**Three-family finding** (ShimCache + Sysmon + UserAssist):
+Sysmon returns 759 real events; C2AGENT.EXE shows in event 1 with `parent=powershell.exe` and real hashes. UserAssist finds it from an Explorer double-click. Three families now agree:
 ```json
-{
-  "tier": "FINAL",
-  "c_scale": "C5",
-  "n_distinct_families": 3,
-  "families": ["AppCompat", "Kernel-ETW", "Explorer/NTUSER"],
-  "confirmation_basis": "independent_artifacts"
-}
+{ "tier": "FINAL", "c_scale": "C5", "n_distinct_families": 3,
+  "families": ["AppCompat", "Kernel-ETW", "Explorer/NTUSER"] }
 ```
 
-Add `get_bam` for a four-family FINAL:
-```json
-{
-  "tier": "FINAL",
-  "c_scale": "C5",
-  "n_distinct_families": 4,
-  "confirmation_basis": "independent_artifacts"
-}
-```
-
-**Talking point**: Three independent Windows subsystems — Application Experience Service,
-Windows Kernel + Sysmon driver, and Explorer shell — each recorded the same execution
-event through different code paths. They are defeated by different anti-forensic
-techniques: defeating one does not defeat the others.
-
-The demoter does NOT fire here even though ShimCache's timestamp is from when the binary
-was staged (weeks earlier). AppCompat is excluded from temporal coherence because it
-records file-metadata time, not execution time. The Sysmon, UserAssist, and BAM timestamps
-all agree within seconds — three independent execution-time signals.
+Say: three different parts of Windows recorded the same run through different code paths. Each is defeated by a different anti-forensic trick, so beating one does not beat the rest. The timestamp check does not fire here, because the three execution-time families agree within seconds.
 
 ---
 
-## Scripted investigation runner (alternative / reproducibility path)
+## Beat 5 — the same engine on an outside case (NIST)
 
-For judges who want a fully automated, non-interactive run of the same four moments,
-`scripts/dfir_investigation.py` drives every tool in sequence and prints a structured
-summary at the end. It does not require a live Claude agent — it calls the Sanctum
-Python functions directly, which makes the gate behavior observable independent of any
-LLM in the loop.
+*Criterion: IR Accuracy*
+
+The four beats above use our scenario. This one does not.
+
+We ran the same parsers against the **NIST CFReDS Data Leakage** image — a real Windows 7 case NIST publishes with its own answer key. The image was verified against NIST's hashes and mounted read-only. Result: all 8 applications the answer key lists were found. The three case-defining tools were each confirmed across three families:
+
+| Tool (from NIST's answer key) | Families | Tier |
+|---|---|---|
+| Eraser (anti-forensic wipe) | ShimCache + UserAssist + Prefetch | FINAL |
+| CCleaner (anti-forensic) | ShimCache + UserAssist + Prefetch | FINAL |
+| Google Drive (exfil) | ShimCache + UserAssist + Prefetch | FINAL |
+| iCloud | ShimCache only | DRAFT |
+
+Say two things. First, the suspect ran Eraser and CCleaner to wipe traces, and the evidence survived in every family anyway. Second, iCloud showed in only one family, so Sanctum called it a draft, not a finding — and the answer key proves that is right, because iCloud was uninstalled. The full result is in [`ACCURACY_REPORT.md`](ACCURACY_REPORT.md) and [`DATASET_NIST_DATALEAKAGE.md`](DATASET_NIST_DATALEAKAGE.md).
+
+---
+
+## Automated run (for reproducibility)
+
+For a hands-off version of beats 1–4, `scripts/dfir_investigation.py` drives every tool and prints a summary. It calls the Sanctum functions directly, so the gate behavior is visible with no model in the loop.
 
 ```bash
 SANCTUM_CASES_ROOT=tests/fixtures/real_corpus/cases \
@@ -197,98 +145,24 @@ SANCTUM_CASES_ROOT=tests/fixtures/real_corpus/cases \
   python3 scripts/dfir_investigation.py
 ```
 
-The script covers all four demo moments:
+It finishes in about 8 seconds. The same work by hand (Registry Explorer, EvtxECmd, PECmd) takes a skilled analyst 30 to 90 minutes.
 
-| Script step | Moment | Gate behavior |
-|---|---|---|
-| Step 1 (ShimCache) | Moment A | Collects first artifact family |
-| Step 2 (single-family claim) | Moment A | Returns `DRAFT` — gate blocks single-family |
-| Step 3c (Prefetch, macOS) | Honest limits | Graceful failure — `SystemExit` caught, documented |
-| Step 5 (fabricated audit_id) | Moment B | `ClaimFindingError` — ledger rejects unknown UUID |
-| Step 4 (four-family claim) | Moment D | Returns `CORROBORATED` — tier rise visible |
+## Honest limits shown in the demo
 
-End-of-run summary (printed to stdout after Step 5):
+- **Prefetch needs Windows.** On macOS, `get_prefetch` fails on purpose (`windowsprefetch` needs Windows to decompress the file). On a Windows host it parses fine.
+- **BAM is selective.** `get_bam` returns real events but not the short-lived PowerShell process. BAM does not record every process. The parser is correct; the artifact is simply absent.
 
-```
-######################################################################
-  INVESTIGATION SUMMARY — Case real_c2agent_001
-######################################################################
+## Forensic certainty labels
 
-  Hypothesis: C2AGENT.EXE executed on host prior to acquisition
-
-  Tool                         Family             Hit?   Timestamp (UTC)
-  ---------------------------- ------------------ ------ --------------------
-  get_shimcache                AppCompat          YES    2026-04-13 07:51:42
-  get_amcache                  AppCompat (same)   N/A
-  get_bam                      Background-service no
-  get_prefetch                 SysMain            N/A    (macOS deployment)
-  get_sysmon_4688              Kernel-ETW         YES    2026-05-05 04:27:42
-  get_userassist               Explorer/NTUSER    YES    2026-05-05 04:56:40
-
-  Confidence tier progression:
-    -->  ShimCache only (1 family)                   tier = DRAFT
-    ==>  4 families (AppCompat+BAM+ETW+NTUSER)       tier = CORROBORATED
-
-  Citation-integrity gate: FIRED (rejected fabricated id)
-
-  ──────────────────────────────────────────────────────────────────────
-  VERDICT : CORROBORATED
-  FAMILIES: AppCompat, Kernel-ETW, Explorer/NTUSER (3 of 5)
-  ──────────────────────────────────────────────────────────────────────
-```
-
-**Performance note**: the script completes in ~8 seconds end-to-end against real
-artifacts. Manual equivalent (Registry Explorer + EvtxECmd + PECmd) takes a skilled
-analyst 30–90 minutes. The corroboration gate also replaces a manual peer-review step —
-DRAFT → CORROBORATED is deterministic, not judgment-dependent.
-
-**What this proves vs. the interactive demo**: the gate behavior is a typed-function
-property independent of the LLM. The scripted runner proves determinism and
-reproducibility; the interactive Claude demo proves the gate fires during real agent
-reasoning without the agent being able to override it.
-
----
-
-## Honest limits visible during the demo
-
-**Prefetch (SysMain family)**: `get_prefetch` fails on macOS with
-`ArtifactMalformedError: ctypes.windll not available` — the `windowsprefetch` library
-requires Windows for MAM-format decompression. This is correct and honest. On Windows
-deployment, Prefetch parses correctly (confirmed: `C2AGENT.EXE-ABC3C567.pf` in corpus).
-
-**BAM (Background-service family)**: `get_bam` returns 11 real events but none are
-C2AGENT.EXE. BAM does not record short-lived PowerShell-launched console processes —
-correct forensic behavior. The parser is confirmed working (regipy 6.x fix, commit `44b06d2`).
-
----
-
-## C-Scale forensic certainty vocabulary
-
-Every `claim_finding` result carries a `c_scale` field mapping the tier to established
-forensic examiner vocabulary (Casey, *Digital Evidence and Computer Crime*, 3rd ed., 2011):
+Each result carries a `c_scale` value tied to a standard examiner scale (Casey, *Digital Evidence and Computer Crime*, 3rd ed.):
 
 | Tier | `c_scale` | Meaning |
 |---|---|---|
-| `DRAFT_TAMPER_SUSPECTED` | `C0` | Uncertain — integrity suspect |
-| `DRAFT` | `C2` | More likely than not |
-| `CORROBORATED` | `C4` | High confidence |
-| `FINAL` | `C5` | Beyond reasonable doubt |
+| DRAFT_TAMPER_SUSPECTED | C0 | Uncertain — integrity in doubt |
+| DRAFT | C2 | More likely than not |
+| CORROBORATED | C4 | High confidence |
+| FINAL | C5 | Beyond reasonable doubt |
 
-The mapping is tested and locked in `tests/test_finding.py`.
+## Reproduce it
 
----
-
-## Reproducibility
-
-A third party can reproduce this demo by:
-
-1. Cloning: `git clone https://github.com/JasonTofte/sanctum-mcp`
-2. Installing: `pip install -e '.[dev]'`
-3. Providing real Windows artifacts under `tests/fixtures/real_corpus/cases/`
-   following the structure in `docs/ACCURACY.md` §"Artifacts collected"
-4. Setting the env vars in `docs/CLAUDE_SETTINGS_REFERENCE.md` and running
-   `python3 -m sanctum.server`
-5. Connecting any MCP-compatible agent and running the investigation
-
-The gate behavior is a property of the typed Python function — it does not depend on
-the specific artifacts, the specific Claude model, or the specific prompt.
+Clone the repo, `pip install -e '.[dev]'`, supply real Windows artifacts under `tests/fixtures/real_corpus/cases/` (structure in [`ACCURACY.md`](ACCURACY.md)), run `python -m sanctum.server`, and connect any MCP client. The gate behavior is a property of the function — it does not depend on the artifacts, the model, or the prompt.
