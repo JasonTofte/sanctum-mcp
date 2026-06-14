@@ -4,6 +4,16 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed — judge-facing docs rewritten for clarity (2026-06-14)
+
+- `README.md` and `docs/DEMO.md` rewritten in plain language (~grade-12 reading level),
+  trimmed, and de-jargoned. Fixed stale claims: status now 0.4.1 (was 0.3.0); the
+  "no live-evidence test" / "synthetic, self-authored corpus" limits replaced to reflect
+  the NIST live-evidence validation; architecture diagram corrected to the six shipped
+  parsers (removed unshipped `get_mft_timeline` / `get_usnjrnl`).
+- `docs/DEVPOST.md` (new): paste-ready submission writeup.
+- `docs/ACCURACY_REPORT.md` (new): one-page judge-facing accuracy summary.
+
 ### Added — independent-corpus validation: NIST CFReDS Data Leakage (2026-06-13)
 
 - `docs/DATASET_NIST_DATALEAKAGE.md`: Dataset Documentation for the NIST CFReDS Data
