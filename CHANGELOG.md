@@ -4,6 +4,21 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — independent-corpus validation: NIST CFReDS Data Leakage (2026-06-13)
+
+- `docs/DATASET_NIST_DATALEAKAGE.md`: Dataset Documentation for the NIST CFReDS Data
+  Leakage Case (Windows 7 insider-exfil image, NIST-authored answer key) — provenance,
+  verified hashes, OS-dependent family availability, read-only ingestion procedure,
+  results, contamination disclosure.
+- `docs/ACCURACY.md`: new "Independent-corpus validation" section; honest-limit #3
+  ("ground truth is self-generated") resolved. Real-mode parsers run against the
+  SHA-1-verified image (read-only Arsenal mount, backup-mode extraction): ShimCache
+  292 / UserAssist 44 / Prefetch 95 events, 0 errors. 8/8 documented insider
+  applications detected; Eraser, CCleaner, and Google Drive each corroborated across
+  all three Win7-reachable families (FINAL tier); iCloud honestly single-family
+  (uninstalled D-Day per the answer key). Deterministic parser-extraction claim
+  (contamination disclosed). Real evidence not committed — `private/` only.
+
 ### Fixed — AC-8 inline-summary byte cap regression (2026-05-11)
 
 - `server._emit_offloaded_response`: removed 9-line `rows`-inline block that was

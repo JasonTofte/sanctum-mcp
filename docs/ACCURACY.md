@@ -1022,6 +1022,65 @@ which bypass the real-hive binary parsing path entirely.
    present in the SYSTEM hive with 9 real entries (schtasks.exe, explorer.exe,
    powershell.exe, Parallels tools, UWP apps); c2agent simply did not meet
    BAM's recording threshold. The parser is correct — the artifact is absent.
-3. **Ground truth is self-generated.** The attack scenario was designed and
-   executed by the Sanctum author. An independent third party can reproduce it
-   using the documented VM config and the `C:\Temp\c2agent.exe` scenario above.
+3. **Ground truth is self-generated — addressed by independent validation
+   below.** The c2agent scenario above was designed and executed by the
+   Sanctum author. This limit is closed by the **independent-corpus validation
+   against the NIST CFReDS Data Leakage Case** (§ below), whose answer key is
+   NIST-authored, not ours.
+
+### Independent-corpus validation: NIST CFReDS Data Leakage Case
+
+To validate the parser layer against **independent, third-party ground
+truth**, Sanctum's six real-mode parsers were run against the NIST CFReDS
+Data Leakage Case — a Windows 7 insider-exfil disk image with an official,
+NIST-authored answer key (`leakage-answers.pdf`, v1.32). Full provenance,
+hashes, family-availability reasoning, and the read-only ingestion procedure
+are in [`docs/DATASET_NIST_DATALEAKAGE.md`](DATASET_NIST_DATALEAKAGE.md).
+This is parser-layer correctness against third-party truth — distinct from
+the agent-level DFIR-Metric eval above.
+
+**Method (2026-06-13).** Image SHA-1-verified against NIST's published
+per-segment hashes → Arsenal Image Mounter **read-only** mount → backup-mode
+extraction of `SYSTEM` / `NTUSER.DAT` / Prefetch → real-mode parse
+(`regipy==6.2.1`, `windowsprefetch==4.0.3`). Yield, 0 errors: ShimCache 292,
+UserAssist 44, Prefetch 95 events.
+
+**Family availability: 3 of 5.** On this 2015 Windows 7 image, BAM
+(Windows 10 1709+), Sysmon (never deployed), and Amcache (post-Windows 8 —
+the image carries the Win7 predecessor `RecentFileCache.bcf`) are absent.
+This is the documented OS-dependent floor, not a parser failure.
+
+**Result — 8 of 8 documented insider applications detected; case-critical
+tools corroborated across all three reachable families:**
+
+| Documented insider app (NIST answer key) | Sanctum families | Gate tier |
+|---|---|---|
+| Eraser (anti-forensic wipe) | ShimCache + UserAssist + Prefetch | **FINAL** |
+| CCleaner (anti-forensic) | ShimCache + UserAssist + Prefetch | **FINAL** |
+| Google Drive (`googledrivesync.exe`, exfil) | ShimCache + UserAssist + Prefetch | **FINAL** |
+| Apple iCloud (`icloud.exe`) | ShimCache only | DRAFT (single-family) |
+| Outlook | all three | **FINAL** |
+| MS Office (WinWord/Excel/PowerPoint) | 2–3 families | CORROBORATED+ |
+| IE / Chrome | each 2 families | CORROBORATED |
+
+Two findings confirm the result is genuine, not coincidental:
+
+- **iCloud is single-family — correctly.** The answer key records iCloud was
+  uninstalled on D-Day (2015-03-25 11:18), removing its UserAssist/Prefetch
+  traces; only the ShimCache entry persisted. Sanctum reports it as a
+  single-family DRAFT hypothesis, not a corroborated finding — the
+  conservative behavior the gate exists to enforce.
+- **Execution evidence survived the anti-forensic effort.** The suspect ran
+  Eraser, ran CCleaner, and emptied the Recycle Bin to destroy traces (answer
+  key, D-Day 11:13–11:15) — yet all three families still recorded those tools
+  executing. Multi-family triangulation is resilient to single-vector
+  anti-forensics: the architectural thesis, demonstrated on independent
+  evidence.
+
+**Contamination disclosure.** The NIST answer key is public and the case is
+widely written up, so its narrative is likely in LLM training data. This is a
+**deterministic parser-extraction** claim — Sanctum's typed parsers extract
+artifact bytes from the image regardless of any memorized narrative — not an
+uncontaminated LLM-reasoning score (that remains the within-model DFIR-Metric
+eval above). Real evidence is not redistributed in this repository; only
+results and hashes are recorded here.

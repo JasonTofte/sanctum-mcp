@@ -4,6 +4,7 @@
 > C1-serial **99.2%** \[95.7%, 99.9%\] · C2-parallel **100.0%** \[97.1%, 100.0%\] · Bare LLM **16.3%** \[10.9%, 23.6%\] · **+82.9 pp gap** (Wilson 95% CIs)
 > precision@CORROBORATED **97.2%** (C1) / **100.0%** (C2) · false confidence rate **2.8%** (C1) / **0.0%** (C2)
 > Full results: [`docs/ACCURACY.md`](docs/ACCURACY.md)
+> **Independent validation:** NIST CFReDS Data Leakage (Win7, NIST-authored answer key) — 8/8 documented insider apps detected; Eraser / CCleaner / Google-Drive each corroborated across all 3 Win7-reachable families (**FINAL**). [`docs/DATASET_NIST_DATALEAKAGE.md`](docs/DATASET_NIST_DATALEAKAGE.md)
 
 **Status**: 0.3.0 — quickstart runs end-to-end against a synthetic fixture ([`scripts/quickstart.py`](scripts/quickstart.py)); six real-mode parsers shipped (Amcache, ShimCache, BAM, UserAssist, Prefetch, Sysmon-EVTX); two-layer [`claim_finding`](src/sanctum/finding.py) gate live.
 **Target**: SANS `FIND EVIL!` Hackathon, submission deadline 2026-06-15.
