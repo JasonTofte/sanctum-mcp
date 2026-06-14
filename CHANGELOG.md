@@ -4,6 +4,13 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Removed — submission-authoring docs out of the public repo (2026-06-14)
+
+- `docs/DEVPOST.md` and `docs/DEMO.md` removed from the repository. These are
+  submission-authoring materials (the Devpost writeup draft and the screencast script),
+  not product documentation; they belong in `private/` per the repo's content convention.
+  README's reproduction link now points to `scripts/dfir_investigation.py` only.
+
 ### Added — docs/ARCHITECTURE.md (2026-06-14)
 
 - New architecture doc: the trust-boundary flow (tool call and finding), the module map,

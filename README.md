@@ -126,7 +126,7 @@ python3 scripts/quickstart.py
 
 The quickstart starts the MCP server, lists the typed tools (showing there is no shell tool), calls `get_amcache`, then calls `claim_finding` with that one source. The expected result is **DRAFT** — the gate refusing to confirm a single-family claim. It ends in `PASS — gate fired correctly.` if the install is healthy. No LLM needed.
 
-For a full multi-family run that walks DRAFT → CORROBORATED and shows the gate rejecting a fake citation, see [`scripts/dfir_investigation.py`](scripts/dfir_investigation.py) and [`docs/DEMO.md`](docs/DEMO.md).
+For a full multi-family run that walks DRAFT → CORROBORATED and shows the gate rejecting a fake citation, see [`scripts/dfir_investigation.py`](scripts/dfir_investigation.py).
 
 ## Install and develop
 
