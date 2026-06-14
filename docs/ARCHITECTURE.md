@@ -2,6 +2,8 @@
 
 How Sanctum turns attacker-written evidence into a graded finding, and where the trust boundary sits. The README has the short version; this is the depth.
 
+> A rendered version of the two flows below (for slides and the project gallery) lives at [`docs/figures/architecture_flow.png`](figures/architecture_flow.png) — regenerate it from this doc with `python3 scripts/render_arch_diagram.py`.
+
 ## A tool call, end to end
 
 ```
