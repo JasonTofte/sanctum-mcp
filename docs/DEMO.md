@@ -22,7 +22,7 @@ The demo shows a real Claude agent hitting a real gate it cannot talk past.
 ## Setup (before each take)
 
 ```bash
-cd /Users/jasontofte/hackathons/find-evil
+cd /path/to/sanctum-mcp   # your local clone of the repo
 bash scripts/demo_reset.sh   # reset the log and output between takes
 # Open Claude Code — the Sanctum server starts from settings.local.json
 ```
