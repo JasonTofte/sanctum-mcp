@@ -4,6 +4,15 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added — docs/SAMPLE_EXECUTION_LOG.md (2026-06-14)
+
+- New evidence doc: a committed, sanitized sample of one real agent run, provided so a
+  reviewer can verify tool-call timestamps, token usage, and finding-to-tool-call
+  traceability without running the system. Includes a worked trace (a 3-family `FINAL`
+  finding walked back to its `get_amcache`/`get_prefetch`/`get_sysmon_4688` calls via the
+  cited `audit_id`s and the `prev_hash → line_hash` HMAC chain) and the run's token/cost
+  figures. Generated from the synthetic, license-clean corpus; absolute paths redacted.
+
 ### Added — architecture diagram PNG for the project gallery (2026-06-14)
 
 - `docs/figures/architecture_flow.png`: the two ASCII flows in
