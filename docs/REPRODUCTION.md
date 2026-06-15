@@ -19,7 +19,7 @@ Sanctum end-to-end against a real CFReDS case on a clean machine.
 
 - 16 GB RAM minimum (SIFT + evidence mount + MCP + Claude Code)
 - 40 GB free disk (SIFT footprint + one CFReDS case)
-- **Ubuntu 22.04** as the SIFT guest. *SIFT does NOT support 24.04/26.04 as of 2026-04-17.*
+- **Ubuntu 22.04 LTS** as the SIFT guest — the version SANS officially targets. Newer releases (24.04+) are community-tested only and not officially supported; 22.04 is also the validated ARM64 path (Apple Silicon).
 - A virtualization stack that can host Linux on your OS:
   - macOS: UTM (Apple Silicon), VMware Fusion, or Parallels
   - Windows: VMware Workstation, VirtualBox, or Hyper-V
@@ -37,10 +37,9 @@ Sanctum end-to-end against a real CFReDS case on a clean machine.
    bash scripts/bootstrap_vm.sh
    ```
 
-   > The repo is private during development and flips to public ahead of the
-   > 2026-06-15 submission deadline. Judges reproducing after that date will
-   > clone anonymously; contributors before that date need `gh auth login` or
-   > an HTTPS token with repo-scope access.
+   > The repository is public; judges clone anonymously. (During development
+   > it was private — clones before the 2026-06-15 submission deadline needed
+   > `gh auth login` or an HTTPS token with repo-scope access.)
 
    `bootstrap_vm.sh` pins `teamdfir/sift-saltstack` to a specific commit SHA so
    your build matches the one validated in CI. Expected runtime: 30–45 minutes
@@ -108,16 +107,16 @@ claude
 
 ## Step 5 — Smoke test the end-to-end pipeline
 
-Expected behaviour in the week-1 P0 skeleton:
+Expected behaviour (as of 0.4.1):
 
 - Agent invokes `get_amcache(case_id="cfreds-hacking-case")`
 - MCP server resolves the case path, hashes the Amcache.hve file
-- Stub parser returns a placeholder row. The typed parser **layer** + frozen
-  `ExecutionEvent` contract shipped in week 2 (`src/sanctum/parsers/`,
-  `src/sanctum/events.py`); real registry parsing of `.hve` bodies ships in
-  week 3 — until then the layer raises `PartialImplementationError` in
-  production (FastMCP returns `isError: true`) and accepts sidecar fixtures
-  only under `SANCTUM_USE_FIXTURE_SIDECAR=1` for tests.
+- The real-mode parser decodes the `.hve` body and returns `ExecutionEvent`
+  rows. Six parsers ship in real mode (Amcache, ShimCache, BAM, UserAssist,
+  Prefetch, Sysmon); the `ExecutionEvent` contract and family discriminator
+  live in `src/sanctum/events.py` / `src/sanctum/families.py`. Unit tests
+  drive the parsers through `.sanctum-fixture.json` sidecars under
+  `SANCTUM_USE_FIXTURE_SIDECAR=1` so CI runs on macOS without real hives.
 - Sanitization layer emits pre/post SHA-256
 - Audit entry appended to `/var/lib/sanctum/ledger.jsonl`
 - Tool output arrives in the LLM context wrapped in `<evidence-untrusted>`
@@ -163,9 +162,18 @@ In the Claude Code session, attempt:
 
 ## Known limitations
 
-This is a **week-1 P0 skeleton with the week-2 typed-parser layer landed**.
-Parser **bodies** are still stubs — the registry/EVTX/Prefetch decoders ship
-in week 3 — but the data contract (`ExecutionEvent`), family discriminator
-map, and `<artifact>.sanctum-fixture.json` ingestion path are in place. The
-full triangulation gate, Reflexion loop, and bypass test suite ship in
-weeks 4–7 per the roadmap in [`../README.md`](../README.md).
+As of 0.4.1 the quickstart runs end to end: six parsers ship in real mode
+(Amcache, ShimCache, BAM, UserAssist, Prefetch, Sysmon), the
+`claim_finding` family-corroboration gate is live, and the bypass smoke
+tests above pass. Two scope limits remain, stated plainly:
+
+- **Prefetch parsing requires Windows.** `windowsprefetch` decompresses
+  MAM-format `.pf` files via `ctypes.windll`; on a Linux/macOS host the
+  other five parsers run natively and Prefetch is exercised through fixture
+  sidecars. Operator deployment on a Windows triage workstation parses real
+  `.pf` files directly.
+- **Family coverage is OS-version-dependent.** BAM (Windows 10 1709+) and
+  Sysmon (separate install) are absent on older images such as the CFReDS
+  Windows 7 cases — three of the five families are reachable there, which
+  still satisfies the ≥2-family gate. See
+  [`DATASET_NIST_DATALEAKAGE.md`](DATASET_NIST_DATALEAKAGE.md).

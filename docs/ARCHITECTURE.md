@@ -2,7 +2,48 @@
 
 How Sanctum turns attacker-written evidence into a graded finding, and where the trust boundary sits. The README has the short version; this is the depth.
 
-> A rendered version of the two flows below (for slides and the project gallery) lives at [`docs/figures/architecture_flow.png`](figures/architecture_flow.png) — regenerate it from this doc with `python3 scripts/render_arch_diagram.py`.
+> The submission architecture diagram (component topology, pattern label, and guardrail legend) lives at [`docs/figures/architecture_flow.png`](figures/architecture_flow.png) — regenerate it with `python3 scripts/render_arch_diagram.py`. It mirrors the "Component topology" and "Pattern and guardrail taxonomy" sections below.
+
+## Architectural pattern: Custom MCP Server
+
+Sanctum is a **Custom MCP Server** (one of the four patterns the FIND EVIL! brief names — not a Direct Agent Extension, Multi-Agent Framework, or Alternative Agentic IDE). It is built on **FastMCP**, the decorator API that ships inside the official [`mcp` Python SDK](https://github.com/modelcontextprotocol/python-sdk) (FastMCP 1.0 was folded into the SDK in 2024). The agent — Claude Code driving Opus 4.7 — connects over MCP stdio and sees only the typed `get_*` tools and `claim_finding`. There is no shell tool, so the agent's reachable surface is exactly the typed functions Sanctum exposes.
+
+## Component topology
+
+```
+  SIFT Workstation VM (Ubuntu 22.04 LTS · regipy / python-evtx / windowsprefetch)
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  DATA SOURCES                         SANCTUM MCP SERVER (FastMCP) │
+  │  (read-only evidence)   read-only     ┌──────────────────────────┐ │        ┌──────────────┐
+  │  disk image (E01/dd)  ── mount ─────► │ parsers → ExecutionEvent │ │  MCP   │ AGENT        │
+  │  registry hives          [ARCH]       │ sanitize + <evidence-..> │ │ ◄stdio►│ Claude Code  │
+  │  EVTX · Prefetch                      │ claim_finding gate       │ │ (typed │ (Opus 4.7)   │
+  │       │                               │ HMAC append-only ledger  │ │  only) └──────────────┘
+  │  TRUST BOUNDARY ◄ untrusted           └────────────┬─────────────┘ │
+  └────────────────────────────────────────────────────┼──────────────┘
+                                          cite audit_ids │
+                                                         ▼
+                          OUTPUT PIPELINE: graded finding (DRAFT / CORROBORATED / FINAL)
+                                          + signed ledger · optional RFC 3161 stamp
+```
+
+The five brief-named components map directly: **agent** = Claude Code; **SIFT Workstation tools** = the Ubuntu 22.04 host and the `regipy` / `python-evtx` / `windowsprefetch` parser libraries; **MCP server** = Sanctum (`server.py`); **data sources** = the read-only-mounted evidence; **output pipeline** = the graded finding plus the signed ledger.
+
+## Pattern and guardrail taxonomy
+
+The brief asks submissions to distinguish prompt-based from architectural guardrails. Sanctum's primary controls are architectural — enforced by code or the OS, independent of model cognition. Prompt-layer instructions exist only as defence-in-depth.
+
+| Guardrail | Kind | Where it lives |
+|---|---|---|
+| Read-only evidence mount (`ro,noload,norecovery` + `blockdev --setro`, `os.statvfs` check) | **Architectural** | OS mount + `server.py` startup check |
+| Typed tools, no shell passthrough | **Architectural** | `server.py` tool surface |
+| ≥2-family corroboration gate | **Architectural** | `finding.py` typed function |
+| HMAC-chained append-only ledger | **Architectural** | `audit.py` |
+| Hash-locked dependency install (`--require-hashes`) | **Architectural** | `requirements.txt` lockfile |
+| System-prompt role / scope constraint | Prompt-layer (defence-in-depth) | agent system prompt |
+| `<evidence-untrusted>` delimiters around tool output | Prompt-layer (defence-in-depth) | `sanitize.py` wrapper |
+
+The gate's correctness is a property of a typed function, not of the model's reasoning — so defeating the prompt layer does not defeat the gate.
 
 ## A tool call, end to end
 
