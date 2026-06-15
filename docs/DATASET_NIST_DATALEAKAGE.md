@@ -1,10 +1,9 @@
 <!--
-  STATUS: DRAFT — agent-staged 2026-06-13. Results sections marked
-  "PENDING OPERATOR RUN" are filled in only after the read-only ingest +
-  parser run on the Parallels Win11 VM. Do NOT assert results here before
-  the run produces them. This file is the FIND EVIL! "Dataset Documentation"
-  submission component; the filled-in results also feed the Accuracy Report
-  and the docs/ACCURACY.md §"Independent-corpus validation" section.
+  STATUS: COMPLETE — operator run performed 2026-06-13 (read-only ingest +
+  parser run; per-segment SHA-1 verified against NIST hash_values.html).
+  This file is the FIND EVIL! "Dataset Documentation" submission component;
+  the same results feed the Accuracy Report and the docs/ACCURACY.md
+  §"Independent-corpus validation" section.
 -->
 
 # Dataset Documentation — NIST CFReDS Data Leakage Case
@@ -45,8 +44,8 @@ acquired image is part of the documented exercise.
 
 ### Acquired-image hashes (recorded at ingest)
 
-<!-- PENDING OPERATOR RUN — paste the NIST-published hash and the locally
-     recomputed hash side by side. AC-3: a mismatch HALTS the run. -->
+AC-3: a published-vs-recomputed hash mismatch HALTS the run. All four
+segments matched at ingest (2026-06-13).
 
 NIST publishes per-segment SHA-1 only (no MD5/SHA-256) at
 `hash_values.html`. Published values for the E01 set:
@@ -192,14 +191,6 @@ Computer Forensic Reference Data Sets (CFReDS), "Data Leakage Case."
 Real evidence (registry hives, disk image) is **not** redistributed in
 this repository — only the validation *results and hashes* are committed.
 
----
-
-<!-- DRAFT block to be merged into docs/ACCURACY.md once Results land.
-     Kept here (not in ACCURACY.md) so no PENDING placeholder lands in the
-     measurement-protocol doc before it is measured. -->
-
-### [STAGED for ACCURACY.md] Independent-corpus validation: NIST CFReDS Data Leakage
-
-> Filled and moved into `docs/ACCURACY.md` after the operator run. Until
-> then it lives here as a draft to avoid asserting unmeasured results in
-> the measurement-protocol document.
+The judge-facing summary of this validation lives in
+[`docs/ACCURACY.md`](ACCURACY.md) §"Independent-corpus validation: NIST
+CFReDS Data Leakage Case".
