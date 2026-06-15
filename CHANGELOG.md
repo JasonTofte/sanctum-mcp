@@ -4,6 +4,28 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed — submission-artifact completion: arch diagram, accuracy report, reproduction guide (2026-06-15)
+
+- `scripts/render_arch_diagram.py` rewritten to draw the FIND EVIL! submission
+  architecture diagram: a component topology (agent · SIFT Workstation tools · MCP
+  server · data sources · output pipeline), the architectural pattern named
+  explicitly (**Custom MCP Server / FastMCP**), and a guardrail legend that
+  colour-codes *architectural* enforcement (cyan) apart from *prompt-layer*
+  defence-in-depth (amber). Replaces the prior ASCII-flow render. `docs/figures/
+  architecture_flow.png` regenerated.
+- `docs/ARCHITECTURE.md`: added "Architectural pattern", "Component topology", and
+  "Pattern and guardrail taxonomy" sections so the doc mirrors the diagram.
+- `docs/ACCURACY_REPORT.md`: added a findings-accuracy self-assessment (false
+  positives / missed artifacts / hallucinated claims) and an "Evidence integrity &
+  bypass behavior" section documenting the read-only-mount approach and the observed
+  result of each bypass attempt — satisfying the submission's evidence-integrity
+  requirement. Cited symbols (`_resolve_case`, `_validate_evidence_mount`,
+  `_coerce_to_bytes`) verified against source.
+- `docs/REPRODUCTION.md`: refreshed stale "week-1 P0 skeleton / stub parsers"
+  language to the shipped 0.4.1 state (six real-mode parsers, live gate), set the
+  repo-visibility note to present tense, and softened the SIFT version claim to match
+  validated reality (SANS officially targets Ubuntu 22.04 LTS).
+
 ### Added — docs/SAMPLE_EXECUTION_LOG.md (2026-06-14)
 
 - New evidence doc: a committed, sanitized sample of one real agent run, provided so a
