@@ -140,6 +140,8 @@ python -m sanctum.server   # run the MCP server (stdio)
 pytest                     # run the tests
 ```
 
+The server **refuses to start** until `SANCTUM_CASES_ROOT`, `SANCTUM_OUTPUT_ROOT`, `SANCTUM_LEDGER_PATH`, and `SANCTUM_LEDGER_HMAC_KEY` are set (add `SANCTUM_SKIP_MOUNT_CHECK=1` for a non-mounted test dir). `scripts/quickstart.py` sets these for you; for a real MCP client, see [`docs/CLAUDE_SETTINGS_REFERENCE.md`](docs/CLAUDE_SETTINGS_REFERENCE.md) and [`docs/LLM_AGNOSTIC.md`](docs/LLM_AGNOSTIC.md).
+
 Operators install with hash-locked wheels: `pip install -r requirements.txt --require-hashes`. Full setup, including the SIFT VM, is in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
 ## Datasets

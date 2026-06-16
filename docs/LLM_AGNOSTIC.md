@@ -62,9 +62,20 @@ Required environment variables (same for every client):
 
 ```bash
 export SANCTUM_CASES_ROOT=/cases
+export SANCTUM_OUTPUT_ROOT=/var/lib/sanctum/output   # offload dir for tool payloads
 export SANCTUM_LEDGER_PATH=/var/lib/sanctum/ledger.jsonl
 export SANCTUM_LEDGER_HMAC_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
 ```
+
+All four are mandatory — the server **refuses to start** if `SANCTUM_OUTPUT_ROOT`
+or `SANCTUM_LEDGER_HMAC_KEY` is unset (no silent defaults). `SANCTUM_OUTPUT_ROOT`
+must **not** resolve under `SANCTUM_CASES_ROOT` (the cases root is a read-only
+evidence mount; the offload dir is server-writable).
+
+If your evidence directory is **not** a real read-only mount — e.g. you are
+testing against `tests/fixtures/` on a normal filesystem — also set
+`export SANCTUM_SKIP_MOUNT_CHECK=1`. The server emits a WARN on startup so the
+bypass is never silent; never use it in production.
 
 ### Cline (VS Code)
 
@@ -78,6 +89,7 @@ Add to your Cline MCP config (Cline → Settings → MCP Servers):
       "args": ["-m", "sanctum.server"],
       "env": {
         "SANCTUM_CASES_ROOT": "/cases",
+        "SANCTUM_OUTPUT_ROOT": "/var/lib/sanctum/output",
         "SANCTUM_LEDGER_PATH": "/var/lib/sanctum/ledger.jsonl",
         "SANCTUM_LEDGER_HMAC_KEY": "<your-hex-key>"
       }
@@ -97,7 +109,7 @@ Add to your Cline MCP config (Cline → Settings → MCP Servers):
     "sanctum": {
       "command": "python",
       "args": ["-m", "sanctum.server"],
-      "env": { "SANCTUM_CASES_ROOT": "/cases", "SANCTUM_LEDGER_PATH": "/var/lib/sanctum/ledger.jsonl", "SANCTUM_LEDGER_HMAC_KEY": "<your-hex-key>" }
+      "env": { "SANCTUM_CASES_ROOT": "/cases", "SANCTUM_OUTPUT_ROOT": "/var/lib/sanctum/output", "SANCTUM_LEDGER_PATH": "/var/lib/sanctum/ledger.jsonl", "SANCTUM_LEDGER_HMAC_KEY": "<your-hex-key>" }
     }
   }
 }

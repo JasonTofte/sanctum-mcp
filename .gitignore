@@ -4,6 +4,10 @@
 # to a public repo. settings.local.json, skills, hooks, agents all stay local.
 .claude/
 
+# Local MCP server registration — holds the ledger HMAC key and machine-local
+# absolute paths for the demo deployment. Personal, never committed.
+.mcp.json
+
 # Evidence / case data — never ships with source.
 # Root-anchored so tests/fixtures/accuracy_corpus/cases/ is not excluded.
 /cases/
