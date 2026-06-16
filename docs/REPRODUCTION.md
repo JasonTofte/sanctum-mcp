@@ -92,16 +92,25 @@ audit-ledger chain verification, and path-traversal rejection.
 
 ## Step 4 — Wire Sanctum into Claude Code
 
-Create `.claude/settings.json` at the project root (this file is gitignored
-so it does not ship to the public repo). The canonical shape lives at
-[`docs/CLAUDE_SETTINGS_REFERENCE.md`](CLAUDE_SETTINGS_REFERENCE.md).
+Register the `sanctum` MCP server. The canonical config shape lives at
+[`docs/CLAUDE_SETTINGS_REFERENCE.md`](CLAUDE_SETTINGS_REFERENCE.md). Claude Code
+reads MCP server **definitions** from a project `.mcp.json` (or via
+`claude mcp add`) — **not** from `.claude/settings.json`, which only enables
+`.mcp.json` servers. Put the server block in `.mcp.json` at the project root
+(gitignore it — it holds the HMAC key and machine-local paths).
+
+The server **refuses to start** unless all four of `SANCTUM_CASES_ROOT`,
+`SANCTUM_OUTPUT_ROOT`, `SANCTUM_LEDGER_PATH`, and `SANCTUM_LEDGER_HMAC_KEY` are
+set in the server's `env` (add `SANCTUM_SKIP_MOUNT_CHECK=1` when the evidence
+dir is not a real read-only mount). See the reference doc for the full block.
 
 Then:
 
 ```bash
+claude mcp list   # confirms sanctum shows "connected" (run before launching)
 claude
 # Inside Claude Code:
-# > /mcp list      -- verifies sanctum is registered
+# > /mcp           -- inspect the sanctum server and its tools
 # > analyse cfreds-hacking-case: what programs ran?
 ```
 

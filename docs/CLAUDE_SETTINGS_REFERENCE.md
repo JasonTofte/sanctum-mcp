@@ -81,12 +81,29 @@ can reproduce an architecturally-sound configuration.
       "args": ["-m", "sanctum.server"],
       "env": {
         "SANCTUM_CASES_ROOT": "/cases",
-        "SANCTUM_LEDGER_PATH": "/var/lib/sanctum/ledger.jsonl"
+        "SANCTUM_OUTPUT_ROOT": "/var/lib/sanctum/output",
+        "SANCTUM_LEDGER_PATH": "/var/lib/sanctum/ledger.jsonl",
+        "SANCTUM_LEDGER_HMAC_KEY": "<64-hex-char key — generate, see below>"
       }
     }
   }
 }
 ```
+
+### Required `env` keys
+
+The server **refuses to start** if any of these is unset (no silent defaults):
+
+| Key | Purpose | Notes |
+|---|---|---|
+| `SANCTUM_CASES_ROOT` | Read-only evidence mount | Mounted `ro` at the OS level in production. |
+| `SANCTUM_OUTPUT_ROOT` | Server-writable offload dir for tool payloads | Must **not** resolve under `SANCTUM_CASES_ROOT`. |
+| `SANCTUM_LEDGER_PATH` | Append-only HMAC-chained audit ledger | — |
+| `SANCTUM_LEDGER_HMAC_KEY` | Ledger HMAC key | Generate once: `python -c 'import secrets; print(secrets.token_hex(32))'`. Keep it out of any committed file. |
+
+If the evidence directory is not a real read-only mount (e.g. testing against
+`tests/fixtures/`), also add `"SANCTUM_SKIP_MOUNT_CHECK": "1"` — the server logs
+a WARN so the bypass is never silent. Never use it in production.
 
 ## The `evidence_path_guard.sh` hook (not yet in-repo — week 2)
 

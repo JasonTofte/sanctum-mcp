@@ -35,12 +35,16 @@ trap 'rm -rf "$TMP"' EXIT
 
 export SANCTUM_LEDGER_HMAC_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 export SANCTUM_CASES_ROOT="$TMP/cases"
+# SANCTUM_OUTPUT_ROOT is mandatory — the server refuses to start (AC-11) if it
+# is unset, so the smoke test must provide it or the handshake never completes.
+# Kept distinct from the cases root (AC-7) by living in a sibling tempdir.
+export SANCTUM_OUTPUT_ROOT="$TMP/output"
 export SANCTUM_LEDGER_PATH="$TMP/ledger.jsonl"
 # The ro-mount check is a production guarantee; for a protocol smoke test
 # against a tempdir it must be bypassed. The server emits a WARN on this
 # env var so the override is never silent.
 export SANCTUM_SKIP_MOUNT_CHECK=1
-mkdir -p "$SANCTUM_CASES_ROOT"
+mkdir -p "$SANCTUM_CASES_ROOT" "$SANCTUM_OUTPUT_ROOT"
 
 cd "$REPO_ROOT"
 

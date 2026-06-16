@@ -4,6 +4,30 @@ All notable changes to Sanctum are documented here. Format: [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Fixed — MCP setup docs + smoke test were missing the mandatory `SANCTUM_OUTPUT_ROOT` (2026-06-15)
+
+- The server refuses to start (AC-11) unless `SANCTUM_OUTPUT_ROOT` and
+  `SANCTUM_LEDGER_HMAC_KEY` are set, but the operator-facing setup docs and the
+  MCP smoke test omitted `SANCTUM_OUTPUT_ROOT` — so a reviewer following the
+  docs hit a "refusing to start" error on first run, and the smoke test reported
+  a false `FAIL` even on a healthy install.
+- `docs/CLAUDE_SETTINGS_REFERENCE.md`: added `SANCTUM_OUTPUT_ROOT` and
+  `SANCTUM_LEDGER_HMAC_KEY` to the `mcpServers` env block, plus a "Required `env`
+  keys" table documenting all four mandatory vars and the `SANCTUM_SKIP_MOUNT_CHECK`
+  dev bypass.
+- `docs/LLM_AGNOSTIC.md`: added `SANCTUM_OUTPUT_ROOT` to the required-env block and
+  both client JSON examples (Cline, Claude Desktop); documented the start-up refusal
+  and the not-under-cases-root constraint.
+- `docs/REPRODUCTION.md`: clarified that Claude Code reads MCP definitions from
+  `.mcp.json` (not `.claude/settings.json`), listed the four mandatory env vars, and
+  fixed the stale `/mcp list` invocation (`claude mcp list` / `/mcp`).
+- `README.md`: noted the four mandatory env vars next to the raw `python -m
+  sanctum.server` invocation.
+- `scripts/smoke_test_mcp_stdio.sh`: now exports `SANCTUM_OUTPUT_ROOT` to a sibling
+  tempdir so the handshake completes; the test passes on a correct install.
+- `.gitignore`: ignore `.mcp.json` (holds the ledger HMAC key and machine-local
+  paths; must never be committed).
+
 ### Changed — submission-artifact completion: arch diagram, accuracy report, reproduction guide (2026-06-15)
 
 - `scripts/render_arch_diagram.py` rewritten to draw the FIND EVIL! submission
